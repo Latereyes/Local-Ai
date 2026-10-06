@@ -1,0 +1,74 @@
+{
+  "id": "reflex-real",
+  "name": "Reflex + spontaneo (Juggernaut → Krea Real)",
+  "type": "image",
+  "description": "Solo su richiesta esplicita di un look reflex/cinematografico ma meno patinato: Juggernaut costruisce la foto, poi Krea Real la sporca leggermente. Per foto semplicemente «realistiche» usa krea2-real. Circa 30-50 s, niente testo leggibile.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 64
+  },
+  "requires": [
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    },
+    {
+      "folder": "loras",
+      "file": "realism_engine_krea2_v3.1.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "lenovo_krea2.safetensors"
+    },
+    {
+      "folder": "diffusion_models",
+      "file": "krea2Turbo_v10_2951489.safetensors"
+    }
+  ],
+  "params": {
+    "prompt": [
+      {
+        "node": "11",
+        "input": "text"
+      },
+      {
+        "node": "45",
+        "input": "text"
+      }
+    ],
+    "width": [
+      {
+        "node": "13",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "13",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "14",
+        "input": "seed"
+      },
+      {
+        "node": "24",
+        "input": "seed"
+      },
+      {
+        "node": "48",
+        "input": "seed"
+      }
+    ]
+  }
+}

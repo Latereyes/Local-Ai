@@ -1,0 +1,59 @@
+{
+  "id": "minimax-h3-i2v",
+  "name": "MiniMax H3 (image to video)",
+  "type": "video",
+  "mode": "img2video",
+  "description": "Anima un'immagine: il video parte esattamente dall'immagine data, con audio nativo.",
+  "resolution": {
+    "megapixels": 0.4,
+    "multiple": 32
+  },
+  "duration": {
+    "default": 5,
+    "min": 2,
+    "max": 10,
+    "fps": 24,
+    "frameStep": 17,
+    "frameOffset": 5
+  },
+  "params": {
+    "prompt": [
+      {
+        "node": "6",
+        "input": "prompt"
+      }
+    ],
+    "image": [
+      {
+        "node": "16",
+        "input": "image"
+      }
+    ],
+    "frames": [
+      {
+        "node": "6",
+        "input": "length"
+      }
+    ],
+    "seed": [
+      {
+        "node": "7",
+        "input": "noise_seed"
+      }
+    ]
+  },
+  "requires": [
+    {
+      "folder": "loras",
+      "file": "H3_VBVR_Pro_attn_only.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "Minimax_H3_Unlocked_V2.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "MysticXXX_MMH3-V4.safetensors"
+    }
+  ]
+}

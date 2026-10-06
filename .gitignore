@@ -1,0 +1,40 @@
+node_modules/
+
+# Dati dell'app: utenti, sessioni, conversazioni, media generati e caricati
+data/
+_legacy/data/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Log
+*.log
+logs/
+npm-debug.log*
+
+# Segreti
+.env
+.env.*
+users.json
+sessions.json
+*.pem
+*.key
+
+# Pesi dei modelli
+*.safetensors
+*.ckpt
+*.gguf
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Python e impostazioni locali
+__pycache__/
+*.pyc
+.claude/settings.local.json

@@ -1,0 +1,19 @@
+{
+  "name": "localai-chat",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Chat con LLM locale, generazione immagini, ricerca web e gestione file",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "duck-duck-scrape": "^2.2.7",
+    "express": "^5.1.0",
+    "mime-types": "^3.0.1",
+    "pdf-lib": "^1.17.1",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
+  }
+}

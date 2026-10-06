@@ -1,0 +1,42 @@
+{
+  "id": "zimage-i2i",
+  "name": "Z-Image Turbo (image to image)",
+  "type": "image",
+  "mode": "img2img",
+  "base": "zimage-turbo",
+  "description": "Ritocchi e varianti fotorealistiche (luce, atmosfera, stagione) mantenendo la scena.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "params": {
+    "prompt": [
+      {
+        "node": "5",
+        "input": "text"
+      }
+    ],
+    "image": [
+      {
+        "node": "11",
+        "input": "image"
+      }
+    ],
+    "denoise": [
+      {
+        "node": "8",
+        "input": "denoise"
+      }
+    ],
+    "seed": [
+      {
+        "node": "8",
+        "input": "seed"
+      }
+    ]
+  },
+  "denoiseRange": [
+    0.55,
+    0.92
+  ]
+}

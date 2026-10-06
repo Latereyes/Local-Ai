@@ -1,0 +1,60 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Qwen3-VL"
+    },
+    "inputs": {
+      "clip_name": "qwen3-vl-4b-heretic.safetensors",
+      "type": "krea2",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 0.8,
+      "resolution_steps": 1
+    }
+  },
+  "4": {
+    "class_type": "TextGenerate",
+    "_meta": {
+      "title": "Lettura immagine"
+    },
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "image": [
+        "3",
+        0
+      ],
+      "prompt": "",
+      "max_length": 700,
+      "sampling_mode": "off",
+      "thinking": false
+    }
+  },
+  "5": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "4",
+        0
+      ]
+    }
+  }
+}

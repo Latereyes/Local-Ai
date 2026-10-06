@@ -1,0 +1,69 @@
+{
+  "id": "sdxl-face",
+  "name": "Juggernaut XL + volto di riferimento",
+  "type": "image",
+  "mode": "identity",
+  "description": "Crea una nuova foto realistica con il volto della persona nella foto allegata (scena, abiti e posa nuovi).",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 64
+  },
+  "requires": [
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    },
+    {
+      "folder": "clip_vision",
+      "file": "CLIP-ViT-H-14-laion2B.safetensors"
+    },
+    {
+      "folder": "ipadapter",
+      "file": "ip-adapter-plus-face_sdxl_vit-h.safetensors"
+    }
+  ],
+  "params": {
+    "prompt": [
+      {
+        "node": "11",
+        "input": "text"
+      }
+    ],
+    "image": [
+      {
+        "node": "2",
+        "input": "image"
+      }
+    ],
+    "width": [
+      {
+        "node": "13",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "13",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "14",
+        "input": "seed"
+      },
+      {
+        "node": "24",
+        "input": "seed"
+      }
+    ]
+  }
+}

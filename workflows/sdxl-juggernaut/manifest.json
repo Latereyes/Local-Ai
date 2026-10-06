@@ -1,0 +1,54 @@
+{
+  "id": "sdxl-juggernaut",
+  "name": "Juggernaut XL",
+  "type": "image",
+  "description": "Look cinematografico e da fotocamera reflex: ritratti e foto di scena con profondità, contrasto, grana e luce drammatica; reportage, street, sport, notte. Volti rifiniti automaticamente. Non adatto a testo leggibile.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 64
+  },
+  "requires": [
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    }
+  ],
+  "params": {
+    "prompt": [
+      {
+        "node": "11",
+        "input": "text"
+      }
+    ],
+    "width": [
+      {
+        "node": "13",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "13",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "14",
+        "input": "seed"
+      },
+      {
+        "node": "24",
+        "input": "seed"
+      }
+    ]
+  }
+}

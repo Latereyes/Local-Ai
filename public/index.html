@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#faf9f7" media="(prefers-color-scheme: light)">
+  <title>LocalAI</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237c6cf2' d='M12 2c.5 4.8 2.7 7.6 7.5 8.3v1.4C14.7 12.4 12.5 15.2 12 22h-.1c-.5-6.8-2.7-9.6-7.5-10.3v-1.4C9.2 9.6 11.4 6.8 11.9 2z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <button class="icon-btn" id="btn-collapse" title="Chiudi barra laterale" data-icon="panel"></button>
+        <button class="new-chat" id="btn-new"><span data-icon="edit"></span>Nuova chat</button>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="nav-item" id="btn-gallery"><span data-icon="gallery"></span>Galleria</button>
+      </nav>
+      <div class="conv-list" id="conv-list"></div>
+      <div class="sidebar-foot">
+        <div class="svcs">
+          <div class="svc" id="svc-ollama" title="Ollama"><i></i>Ollama</div>
+          <div class="svc" id="svc-comfy" title="ComfyUI"><i></i>ComfyUI</div>
+        </div>
+        <div class="user-box">
+          <button class="user-btn" id="user-btn"><span class="user-avatar" id="user-avatar"></span><span class="user-name" id="user-name"></span><span data-icon="chevron"></span></button>
+          <div class="menu menu-up" id="user-menu" hidden>
+            <button class="menu-item" data-user-act="password"><span data-icon="key"></span>Cambia password</button>
+            <button class="menu-item admin-only" data-user-act="users"><span data-icon="users"></span>Gestione utenti</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" data-user-act="logout"><span data-icon="logout"></span>Esci</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn" id="btn-open" title="Apri barra laterale" data-icon="panel"></button>
+        <div class="model-picker">
+          <button class="model-btn" id="model-btn"><span id="model-name">Gemma</span><span data-icon="chevron"></span></button>
+          <div class="menu" id="model-menu" hidden></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="gpu-pill" id="gpu-pill" title="Stato della GPU"><i></i><span id="gpu-label">GPU</span></button>
+        <div class="menu menu-right" id="gpu-menu" hidden></div>
+      </header>
+
+      <section class="view" id="view-chat">
+        <div class="scroller" id="scroller">
+          <div class="thread" id="thread"></div>
+          <div class="welcome" id="welcome" hidden>
+            <div class="welcome-mark" data-icon="spark"></div>
+            <h1 id="welcome-title">Ciao, come posso aiutarti?</h1>
+            <div class="suggestions" id="suggestions"></div>
+          </div>
+        </div>
+        <button class="to-bottom" id="to-bottom" hidden data-icon="down" title="Vai in fondo"></button>
+
+        <div class="composer-wrap">
+          <form class="composer" id="composer">
+            <div class="attachments" id="attachments" hidden></div>
+            <textarea id="input" rows="1" placeholder="Scrivi un messaggio…" autocomplete="off"></textarea>
+            <div class="composer-bar">
+              <div class="chips">
+                <button type="button" class="icon-chip" id="btn-attach" title="Allega immagini o documenti (PDF, TXT, MD)" data-icon="clip"></button>
+                <button type="button" class="icon-chip camera-only" id="btn-camera" title="Scatta una foto" data-icon="camera"></button>
+                <input type="file" id="file-input" accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown" multiple hidden>
+                <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+                <button type="button" class="chip" data-tool="web" title="Cerca sul web prima di rispondere"><span data-icon="globe"></span><span>Cerca</span></button>
+                <button type="button" class="chip" data-tool="image"><span data-icon="image"></span><span>Immagine</span></button>
+                <button type="button" class="chip" data-tool="video"><span data-icon="video"></span><span>Video</span></button>
+                <button type="button" class="chip" id="chip-think" title="Ragionamento esteso (più lento)"><span data-icon="brain"></span><span>Ragiona</span></button>
+                <div class="opts" id="opts"></div>
+              </div>
+              <button type="submit" class="send" id="send" title="Invia" data-icon="send"></button>
+            </div>
+          </form>
+          <p class="disclaimer">Tutto gira in locale sulla tua GPU. Le risposte possono contenere errori.</p>
+        </div>
+      </section>
+
+      <section class="view" id="view-gallery" hidden>
+        <div class="gallery-head"><h2>Galleria</h2></div>
+        <div class="gallery" id="gallery"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Accesso / cambio password -->
+  <div class="auth" id="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-mark" data-icon="spark"></div>
+      <form id="login-form" hidden>
+        <h1>Accedi a LocalAI</h1>
+        <p class="auth-sub">Ogni utente vede solo le proprie conversazioni e i propri media.</p>
+        <label>Nome utente<input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="auth-error" hidden></p>
+        <button class="btn primary wide" type="submit">Accedi</button>
+      </form>
+      <form id="password-form" hidden>
+        <h1 id="pw-title">Scegli la tua password</h1>
+        <p class="auth-sub" id="pw-sub">Stai usando una password temporanea. Inseriscila e scegline una personale.</p>
+        <label><span id="pw-current-label">Password temporanea</span><input name="current" type="password" autocomplete="current-password" required></label>
+        <label>Nuova password<input name="next" type="password" autocomplete="new-password" minlength="6" required></label>
+        <label>Conferma nuova password<input name="confirm" type="password" autocomplete="new-password" minlength="6" required></label>
+        <p class="auth-hint">Almeno 6 caratteri.</p>
+        <p class="auth-error" hidden></p>
+        <button class="btn primary wide" type="submit">Salva password</button>
+        <button class="btn wide ghost" type="button" id="pw-cancel">Annulla</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Gestione utenti (admin) -->
+  <div class="modal" id="users-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><h2>Gestione utenti</h2><button class="icon-btn" data-close data-icon="close" title="Chiudi"></button></div>
+      <div class="user-list" id="user-list"></div>
+      <div class="wf-box">
+        <div class="wf-head"><h3>Workflow ComfyUI</h3><button type="button" class="btn" id="btn-wf-reload">Ricarica workflow</button></div>
+        <div id="wf-list" class="wf-list"></div>
+      </div>
+      <form class="add-user" id="add-user-form">
+        <h3>Aggiungi utente</h3>
+        <div class="row">
+          <input name="displayName" placeholder="Nome (es. Marco)" required>
+          <input name="username" placeholder="Nome utente (es. marco)" autocapitalize="none" spellcheck="false" required>
+        </div>
+        <div class="row">
+          <input name="password" placeholder="Password temporanea (default 1234)">
+          <select name="role"><option value="user">Utente</option><option value="admin">Amministratore</option></select>
+          <button class="btn primary" type="submit">Aggiungi</button>
+        </div>
+        <p class="auth-hint">Al primo accesso l'utente dovrà scegliere una password personale.</p>
+        <p class="auth-error" hidden></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="icon-btn lb-close" id="lb-close" data-icon="close" title="Chiudi"></button>
+    <div class="lb-body" id="lb-body"></div>
+  </div>
+
+  <script src="/vendor/marked.umd.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/katex/katex.min.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

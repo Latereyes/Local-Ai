@@ -1,0 +1,81 @@
+{
+  "id": "qwen-scene-real",
+  "name": "Stessa persona, nuova scena (Qwen-Edit → Krea Real)",
+  "type": "image",
+  "mode": "scene",
+  "description": "Mette la persona di un'immagine in una scena nuova mantenendone il volto: Qwen-Image-Edit ricrea la scena, poi Krea Real dà il look da foto spontanea lasciando intatto il volto. Circa 50 s.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "requires": [
+    {
+      "folder": "diffusion_models",
+      "file": "qwen_image_edit_2511_int8_convrot.safetensors"
+    },
+    {
+      "folder": "text_encoders",
+      "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
+    },
+    {
+      "folder": "vae",
+      "file": "qwen_image_vae.safetensors"
+    },
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    },
+    {
+      "folder": "loras",
+      "file": "realism_engine_krea2_v3.1.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "lenovo_krea2.safetensors"
+    },
+    {
+      "folder": "diffusion_models",
+      "file": "krea2Turbo_v10_2951489.safetensors"
+    }
+  ],
+  "params": {
+    "prompt": [
+      {
+        "node": "14",
+        "input": "prompt"
+      }
+    ],
+    "image": [
+      {
+        "node": "10",
+        "input": "image"
+      }
+    ],
+    "seed": [
+      {
+        "node": "19",
+        "input": "seed"
+      },
+      {
+        "node": "45",
+        "input": "seed"
+      },
+      {
+        "node": "68",
+        "input": "seed"
+      }
+    ]
+  }
+}

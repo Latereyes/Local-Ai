@@ -1,0 +1,36 @@
+{
+  "id": "krea2-turbo",
+  "name": "Krea 2 Turbo",
+  "type": "image",
+  "description": "Via di mezzo versatile con tendenza artistica e cinematografica: illustrazione, poster, grafica, atmosfere stilizzate e testo/tipografia leggibile nell'immagine.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "params": {
+    "prompt": [
+      {
+        "node": "5",
+        "input": "text"
+      }
+    ],
+    "width": [
+      {
+        "node": "7",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "7",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "8",
+        "input": "seed"
+      }
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "id": "krea2-real",
+  "name": "Krea 2 Real (foto realistiche)",
+  "type": "image",
+  "description": "Scelta per qualsiasi foto «realistica»: realismo analogico e spontaneo (smartphone, scatto rubato, flash, pellicola), persone, selfie, ritratti e primi piani, momenti quotidiani, pelle e texture imperfette, niente look patinato o CGI.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "params": {
+    "prompt": [
+      {
+        "node": "5",
+        "input": "text"
+      }
+    ],
+    "width": [
+      {
+        "node": "7",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "7",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "8",
+        "input": "seed"
+      }
+    ]
+  },
+  "requires": [
+    {
+      "folder": "loras",
+      "file": "realism_engine_krea2_v3.1.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "lenovo_krea2.safetensors"
+    },
+    {
+      "folder": "diffusion_models",
+      "file": "krea2Turbo_v10_2951489.safetensors"
+    }
+  ]
+}

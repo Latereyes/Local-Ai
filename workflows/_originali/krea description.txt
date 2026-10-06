@@ -1,0 +1,95 @@
+fp16 SafeTensor
+
+lenovo_krea2.safetensors
+
+DESCR:
+Actually i tested with different combinations raw and turbo. For best quality i use raw with cfg4, for fast result i use raw, but witth cfg1 and turbo lora (it really gives better quality then kreo2 turbo model). U can use with other loras freely, also works good with nicegirls lora and nsfw loras. recommended weight 0.8 for raw and 1.2-2 for turbo
+
+bf16 SafeTensor
+
+realism_engine_krea2_v3.1.safetensors
+
+DESCR:
+The default settings for the Lora's are 0.8 and 0.3-0.5 for the unconditional.
+If you like a cleaner image you can increase the unconditional value but it might start to look more plastic.
+I recommend .7 for the Lora and .3 for unconditional. Euler look more realistic now so you can get faster realistic generation.
+
+bf16 SafeTensor
+
+Krea2_TextFusion_Refusal_Reduction.safetensors
+
+DESCR:
+IMPORTANT — PLEASE READ BEFORE REPORTING CHARACTER LoRA ISSUES
+The Krea2T Character LoRA — Image Only loader does NOT behave like a normal LoRA loader, and it is not intended to.
+
+Comparing both loaders at 1.00 strength and assuming they should produce identical character likeness is an invalid comparison.
+
+This node intentionally applies the character LoRA only to the image-token rows inside Krea2’s shared DiT blocks. It does not directly apply the character LoRA to the text-token rows.
+
+Text and image still interact normally through Krea2’s native attention; the character LoRA itself is simply prevented from directly modifying the text side.
+
+That behavior is intentional.
+
+Strength Is Not 1:1 With a Normal LoRA Loader
+
+Because the character LoRA is being applied through a more restricted mechanism, 1.00 on this loader is not equivalent to 1.00 on a conventional LoRA loader.
+
+If your character likeness becomes weaker, increase the character LoRA strength above 1.00 until the desired likeness is recovered.
+
+The node allows strengths above 1.00 for exactly this reason.
+
+Why the Loader Works This Way
+
+The refusal-reduction LoRA and the character LoRA have different jobs.
+
+The refusal-reduction LoRA is intended to alter the model behavior responsible for refusal.
+
+The character LoRA should provide the character appearance without unnecessarily becoming part of the prompt-interpretation path that the refusal-reduction LoRA is working against.
+
+The entire point of this loader is therefore to apply the character LoRA as image influence rather than as a whole-entity influence across the full shared path.
+
+Please Keep This in Mind Before Reporting an Issue
+
+- Do not assume equal strength values between this loader and a normal LoRA loader represent equal influence
+
+- Weaker likeness at 1.00 does not mean the loader is broken. Increase the character strength.
+
+- This loader intentionally prevents direct character-LoRA contribution to text-token rows.
+
+- This does not mean the character LoRA is “not working.”
+
+- A difference in likeness does not prove that the likeness is located in the text encoder.
+
+- If you specifically want the character LoRA applied conventionally across the normal model path, **use your normal LoRA loader instead.
+
+Intended Separation
+
+The design is simple:
+
+Refusal-reduction LoRA → deals with refusal behavior
+
+Character LoRA → supplies the visual character information
+
+The goal is to keep the character LoRA from unnecessarily interfering with the interpretation path that the refusal-reduction LoRA is designed to modify.
+
+Please understand what the node is designed to do before concluding that the behavior is a bug.
+
+Now supports LoKr as well.
+
+fp8 SafeTensor
+
+Best match
+krea2_turbo_fp8_scaled.safetensors
+
+DESCR:
+Krea 2 Turbo is the open-weights, distilled checkpoint of Krea 2 - Krea AI's first foundation image model, trained from scratch with a focus on how an image feels rather than just what it contains. Turbo is an 8-step build distilled from Krea 2 RAW and optimized for fast, high-quality inference at high resolution.
+
+Originally released by Krea AI on Hugging Face. All credit for the model goes to the Krea team and the contributors listed below. Civitai is hosting a mirror so creators can generate with it on-site - please head to the original repo for weights, the technical report, and to support the project directly.
+
+Built by
+Krea AI, with Sangwu Lee, Erwann Millon, Le Zhuo, Matthew Newton, Andrei Filatov, Abhinay Devarinti, Dazhi Zhong, Avram Djordjevic, Gabriel Menezes, Will Beddow, Titus Ebbecke, Mihai Petrescu, Owen Fahey, Gian Saß, Felix Gil, and Victor Perez.
+
+8-step distilled for speed
+Turbo bakes guidance into the weights, so it runs without classifier-free guidance - Krea's recommended settings are 8 steps at CFG 0.0 with a constant timestep shift (mu) of 1.15. It generates at 1k to 2k resolution and supports outputs up to 2048x2048, making it the build to reach for when you want Krea 2 aesthetics at a fraction of the compute.
+
+RAW-compatible LoRAs

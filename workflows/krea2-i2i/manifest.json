@@ -1,0 +1,43 @@
+{
+  "id": "krea2-i2i",
+  "name": "Krea 2 Turbo (image to image)",
+  "type": "image",
+  "mode": "img2img",
+  "base": "krea2-turbo",
+  "description": "Cambi di stile (pittura, illustrazione, anime, 3D…) e trasformazioni artistiche mantenendo la composizione. Scelta predefinita.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "params": {
+    "prompt": [
+      {
+        "node": "5",
+        "input": "text"
+      }
+    ],
+    "image": [
+      {
+        "node": "11",
+        "input": "image"
+      }
+    ],
+    "denoise": [
+      {
+        "node": "8",
+        "input": "denoise"
+      }
+    ],
+    "seed": [
+      {
+        "node": "8",
+        "input": "seed"
+      }
+    ]
+  },
+  "default": true,
+  "denoiseRange": [
+    0.4,
+    0.88
+  ]
+}

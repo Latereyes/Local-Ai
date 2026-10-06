@@ -1,0 +1,81 @@
+{
+  "id": "qwen-image-edit",
+  "name": "Qwen-Image-Edit 2511",
+  "type": "image",
+  "mode": "edit",
+  "default": true,
+  "description": "Modifiche precise con istruzioni: aggiungere, togliere o sostituire oggetti, cambiare sfondo, abiti, colori, espressioni, testo nell'immagine, stile; può combinare fino a 3 immagini. I volti vengono poi rifiniti (Juggernaut XL, FaceDetailer) per un aspetto naturale, senza cambiare identità.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 16
+  },
+  "maxImages": 3,
+  "requires": [
+    {
+      "folder": "diffusion_models",
+      "file": "qwen_image_edit_2511_int8_convrot.safetensors"
+    },
+    {
+      "folder": "text_encoders",
+      "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    },
+    {
+      "folder": "loras",
+      "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
+    },
+    {
+      "folder": "vae",
+      "file": "qwen_image_vae.safetensors"
+    },
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    }
+  ],
+  "params": {
+    "prompt": [
+      {
+        "node": "14",
+        "input": "prompt"
+      }
+    ],
+    "image": [
+      {
+        "node": "10",
+        "input": "image"
+      }
+    ],
+    "image2": [
+      {
+        "node": "11",
+        "input": "image",
+        "optional": true
+      }
+    ],
+    "image3": [
+      {
+        "node": "12",
+        "input": "image",
+        "optional": true
+      }
+    ],
+    "seed": [
+      {
+        "node": "19",
+        "input": "seed"
+      },
+      {
+        "node": "45",
+        "input": "seed"
+      }
+    ]
+  }
+}

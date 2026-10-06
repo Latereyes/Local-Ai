@@ -1,0 +1,26 @@
+{
+  "id": "upscale-fedele",
+  "name": "Upscale 2x fedele (UltraMix Restore)",
+  "type": "image",
+  "mode": "upscale",
+  "default": true,
+  "description": "Raddoppia la risoluzione senza ridisegnare nulla: fedele all'originale, adatto a foto vere (anche mosse o compresse). Veloce.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 8
+  },
+  "requires": [
+    {
+      "folder": "upscale_models",
+      "file": "4x-UltraMix_Restore.pth"
+    }
+  ],
+  "params": {
+    "image": [
+      {
+        "node": "1",
+        "input": "image"
+      }
+    ]
+  }
+}

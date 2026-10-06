@@ -1,0 +1,47 @@
+{
+  "id": "sdxl-upscale",
+  "name": "Upscale 2x massima qualità (ridisegno Juggernaut XL)",
+  "type": "image",
+  "mode": "upscale",
+  "description": "Raddoppia la risoluzione ridisegnando il dettaglio fine e rifinendo i volti. Solo per immagini generate, quando si chiede la massima qualità.",
+  "resolution": {
+    "megapixels": 1,
+    "multiple": 8
+  },
+  "requires": [
+    {
+      "folder": "checkpoints",
+      "file": "juggernautXL_ragnarok.safetensors"
+    },
+    {
+      "folder": "ultralytics",
+      "file": "bbox/face_yolov8m.pt"
+    },
+    {
+      "folder": "sams",
+      "file": "sam_vit_b_01ec64.pth"
+    },
+    {
+      "folder": "upscale_models",
+      "file": "4x-UltraSharp.pth"
+    }
+  ],
+  "params": {
+    "image": [
+      {
+        "node": "2",
+        "input": "image"
+      }
+    ],
+    "seed": [
+      {
+        "node": "6",
+        "input": "seed"
+      },
+      {
+        "node": "14",
+        "input": "seed"
+      }
+    ]
+  }
+}
