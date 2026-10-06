@@ -11,7 +11,7 @@ npm start
 
 Oppure doppio clic su `start.bat`. L'interfaccia è su `http://localhost:3000` ed è raggiungibile anche dal telefono, sulla stessa rete, all'indirizzo IP che il server stampa all'avvio.
 
-Requisiti: Node.js 22+, Ollama e ComfyUI sullo stesso PC (porte predefinite). Se girano su un altro PC basta impostare `OLLAMA_URL` e `COMFY_URL`.
+Requisiti: Node.js 22+, Ollama e ComfyUI sullo stesso PC (`127.0.0.1`, porte predefinite); per usarli da un altro PC imposta `OLLAMA_URL` e `COMFY_URL`.
 
 ## Utenti e accesso
 
@@ -40,7 +40,7 @@ Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole s
 
   Con **Qwen-Image-Edit 2511** installato (workflow `qwen-image-edit`), `edit_image` diventa editing a istruzioni: aggiunge, toglie o sostituisce oggetti, cambia sfondo, abiti o testo e mantiene tutto il resto. Può combinare fino a 3 immagini allegate («metti gli occhiali della foto 2 sulla persona della foto 1»). Senza Qwen-Edit si usa la rielaborazione Krea/Z-Image, che non fa modifiche chirurgiche.
 
-  **Installare Qwen-Image-Edit**: il Manager di ComfyUI blocca i download richiesti da un altro PC, per la sua policy di sicurezza. Copia `tools/scarica-qwen-image-edit.ps1` sul PC di ComfyUI e lancialo da PowerShell:
+  **Installare Qwen-Image-Edit**: il Manager di ComfyUI blocca i download richiesti da LocalAI, per la sua policy di sicurezza. Lancia `tools/scarica-qwen-image-edit.ps1` da PowerShell:
 
   `powershell -ExecutionPolicy Bypass -File scarica-qwen-image-edit.ps1`
 
@@ -80,7 +80,7 @@ Variabili d'ambiente utili:
 
 | Variabile | Effetto |
 |---|---|
-| `SEARXNG_URL` | usa un'istanza SearXNG (es. `http://192.168.1.12:8080`) al posto di DuckDuckGo |
+| `SEARXNG_URL` | usa un'istanza SearXNG (es. `http://127.0.0.1:8080`) al posto di DuckDuckGo |
 | `BRAVE_API_KEY` | usa Brave Search API (2000 query/mese gratuite) |
 | `SEARCH_AUTO_READ` | pagine lette automaticamente dopo la ricerca (default `3`, `0` = solo snippet) |
 | `SEARCH_MAX_ROUNDS` | passaggi massimi di ricerca/lettura per risposta (default `6`) |
