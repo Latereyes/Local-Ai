@@ -1,5 +1,5 @@
 # Scarica i modelli di Qwen-Image-Edit 2511 nella cartella di ComfyUI.
-# Da eseguire SUL PC DI COMFYUI (192.168.1.12), in PowerShell:
+# Da eseguire sul PC di ComfyUI (questo PC), in PowerShell:
 #   powershell -ExecutionPolicy Bypass -File scarica-qwen-image-edit.ps1
 # Se ComfyUI è installato altrove:  -ComfyDir "D:\percorso\ComfyUI"
 # Il download riprende da dove si era interrotto se lo rilanci.

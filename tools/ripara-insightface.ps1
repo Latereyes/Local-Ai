@@ -1,5 +1,5 @@
 ﻿# Ripara insightface (serve a IPAdapter FaceID) e scarica la LoRA FaceID Plus v2 SDXL.
-# Da eseguire SUL PC DI COMFYUI (192.168.1.12), in PowerShell, CON COMFYUI FERMO:
+# Da eseguire sul PC di ComfyUI (questo PC), in PowerShell, CON COMFYUI FERMO:
 #   powershell -ExecutionPolicy Bypass -File ripara-insightface.ps1
 # Se ComfyUI è installato altrove:  -ComfyDir "D:\percorso\ComfyUI"
 # Se il Python di ComfyUI non è in <ComfyDir>\venv:  -Python "D:\percorso\python.exe"
