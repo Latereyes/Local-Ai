@@ -6,4 +6,5 @@ if not exist node_modules (
   call npm install
 )
 node server.js
-pause
+rem Avviato dall'agent del PC (remote-app-controller): niente pausa, la finestra non c'è
+if not defined CONTROL_TOKEN pause

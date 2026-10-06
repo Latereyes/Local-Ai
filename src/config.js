@@ -13,7 +13,7 @@ export default {
   assistantName: env.ASSISTANT_NAME || 'Gemma',
 
   ollama: {
-    url: env.OLLAMA_URL || 'http://192.168.1.12:11434',
+    url: env.OLLAMA_URL || 'http://127.0.0.1:11434',
     model: env.OLLAMA_MODEL || 'gemma4-12b-uncensored:latest',
     numCtx: Number(env.OLLAMA_CTX || 24576),
     // Tempo per cui Ollama tiene il modello in VRAM tra un messaggio e l'altro
@@ -21,7 +21,7 @@ export default {
   },
 
   comfy: {
-    url: env.COMFY_URL || 'http://192.168.1.12:8188',
+    url: env.COMFY_URL || 'http://127.0.0.1:8188',
   },
 
   search: {
