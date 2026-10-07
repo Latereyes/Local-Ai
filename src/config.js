@@ -24,6 +24,15 @@ export default {
     url: env.COMFY_URL || 'http://127.0.0.1:8188',
   },
 
+  // Arbitro della GPU condiviso con ChatBz: sta nell'agent del PC (remote-app-controller, porta 7070).
+  // Se l'agent è spento si usa l'arbitro interno come prima. GPU_ARBITER=0 lo ignora del tutto.
+  agent: {
+    enabled: (env.GPU_ARBITER ?? '1') !== '0',
+    url: env.AGENT_URL || 'http://127.0.0.1:7070',
+    token: env.AGENT_TOKEN || '',   // serve solo se l'agent gira su un altro PC
+    app: 'localai',
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',

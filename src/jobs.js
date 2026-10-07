@@ -70,7 +70,7 @@ export function enqueue(conv, msg, media) {
     media.file = name;
     media.status = 'done';
     media.finishedAt = Date.now();
-  }).catch((e) => {
+  }, { priority: 'normal' }).catch((e) => {
     media.status = e.aborted || ac.signal.aborted ? 'cancelled' : 'error';
     media.error = media.status === 'cancelled' ? null : e.message;
     if (media.status === 'error') console.error(`[job ${media.id}]`, e.message);
