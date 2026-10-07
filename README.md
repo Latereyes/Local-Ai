@@ -75,11 +75,11 @@ Per scrivere e correggere codice puoi passare a **Qwen Coder** (Qwen3.8 27B, GGU
 `powershell -ExecutionPolicy Bypass -File installa-qwen-coder.ps1`
 
 Lo script:
-- scarica il GGUF da Hugging Face (`hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL`) e crea il modello Ollama `qwen3.8-coder` da `tools/qwen-coder.Modelfile`;
+- scarica il GGUF da Hugging Face (`hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL`) e crea il modello Ollama `qwen3.8-coder` da `tools/qwen-coder.Modelfile`, poi toglie la copia `hf.co/…` (i file restano), così nel menu c'è un solo Qwen;
 - imposta tutti i layer in GPU (`num_gpu 999`) e 16k di contesto (`num_ctx 16384`);
-- attiva per Ollama `OLLAMA_FLASH_ATTENTION=1` e `OLLAMA_KV_CACHE_TYPE=q8_0`, che dimezzano la memoria del contesto. Sono impostazioni del server Ollama, quindi valgono anche per Gemma. Dopo il primo avvio dello script va riavviato Ollama.
+- attiva per Ollama `OLLAMA_FLASH_ATTENTION=1` e `OLLAMA_KV_CACHE_TYPE=q8_0`, che dimezzano la memoria del contesto. Sono impostazioni del server Ollama, quindi valgono anche per Gemma. Dopo il primo avvio dello script va riavviato Ollama (o l'agent del PC, se è lui ad avviarlo).
 
-Con la KV cache in q8_0, 13 GB di pesi e 16k di contesto dovrebbero stare nei 16 GB della 4070 Ti Super (è una stima). Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 12288 o 8192 e rilancia lo script.
+Misurato sulla 4070 Ti Super (ottobre 2026): 100% in GPU con 16k di contesto, ~39 token/s in scrittura e ~1.500 token/s in lettura del prompt; con un prompt di ~12.900 token la VRAM arriva a 15,7 GB su 16, quindi il margine è stretto. Dal primo messaggio a freddo servono ~6 s di caricamento, e ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM). Le variabili della KV cache valgono solo per un Ollama avviato dopo lo script: se Ollama lo lancia l'agent del PC, riavvia l'agent. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 12288 o 8192 e rilancia lo script.
 
 LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e taglia la cronologia di conseguenza: con 16k i documenti lunghi e le conversazioni molto lunghe hanno meno spazio che con Gemma. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala.
 
