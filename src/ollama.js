@@ -18,15 +18,28 @@ export async function isUp() {
 }
 
 const healthy = new Map(); // digest -> bool (file del modello leggibile)
-const caps = new Map();    // nome modello -> capacità (tools, vision, thinking…)
+const shown = new Map();   // nome modello -> /api/show (capacità, parametri del Modelfile…)
+
+async function show(model) {
+  if (!shown.has(model)) {
+    try { shown.set(model, await api('/api/show', { model })); }
+    catch { return {}; }
+  }
+  return shown.get(model);
+}
 
 /** Capacità dichiarate dal modello (es. 'vision' se può ricevere immagini). */
 export async function capabilities(model) {
-  if (!caps.has(model)) {
-    try { caps.set(model, (await api('/api/show', { model })).capabilities || []); }
-    catch { return []; }
-  }
-  return caps.get(model);
+  return (await show(model || config.ollama.model)).capabilities || [];
+}
+
+/**
+ * Contesto (token) da usare con il modello: quello del suo Modelfile se lo fissa
+ * (es. Qwen Coder a 16k, perché con 24k non starebbe tutto nei 16 GB), altrimenti OLLAMA_CTX.
+ */
+export async function contextSize(model) {
+  const m = /^num_ctx\s+(\d+)/m.exec((await show(model || config.ollama.model)).parameters || '');
+  return m ? Number(m[1]) : config.ollama.numCtx;
 }
 
 async function isHealthy(m) {
@@ -36,8 +49,10 @@ async function isHealthy(m) {
   return healthy.get(m.digest);
 }
 
-/** Nome breve da mostrare: la famiglia del modello (es. "gemma4" → "Gemma4"), altrimenti il nome senza tag. */
-function displayName(m) {
+/** Nome breve da mostrare: quello in config.ollama.labels, altrimenti la famiglia del modello (es. "gemma4" → "Gemma4"). */
+export function displayName(m) {
+  const label = config.ollama.labels[m.name.replace(/:latest$/, '')];
+  if (label) return label;
   const fam = m.details?.family || m.name.split(/[:_-]/)[0];
   return fam.charAt(0).toUpperCase() + fam.slice(1);
 }
@@ -92,7 +107,7 @@ export async function chat({ model, messages, tools, think = false, options = {}
       think,
       stream: true,
       keep_alive: config.ollama.keepAlive,
-      options: { num_ctx: config.ollama.numCtx, ...options },
+      options: { num_ctx: await contextSize(model), ...options },
     }),
   });
   if (!res.ok) throw new Error(`Ollama: ${(await res.text().catch(() => '')) || res.status}`);
@@ -128,7 +143,7 @@ export async function complete({ model, messages, options = {}, format, timeout 
     stream: false,
     think: false,
     keep_alive: config.ollama.keepAlive,
-    options: { num_ctx: config.ollama.numCtx, ...options },
+    options: { num_ctx: await contextSize(model), ...options },
   }, { timeout });
   return j.message?.content || '';
 }
