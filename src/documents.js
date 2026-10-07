@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import config from './config.js';
 import * as ollama from './ollama.js';
+import { charsFor } from './context.js';
 
 /**
  * Documenti allegati (PDF, TXT, MD).
@@ -13,7 +14,7 @@ import * as ollama from './ollama.js';
 
 export const INLINE_LIMIT = 40000;   // caratteri: sotto questa soglia il documento va intero nel contesto
 const CHUNK_CHARS = 16000;           // blocchi per il riassunto
-const DOC_BUDGET = 38000;            // caratteri massimi di documenti per turno
+export const DOC_BUDGET = 38000;     // caratteri massimi di documenti per turno (meno se il contesto del modello è piccolo)
 
 let pdfjs;
 async function loadPdfjs() {
@@ -64,7 +65,7 @@ export function guessLanguage(text) {
   return en > it ? 'inglese' : 'italiano';
 }
 
-function bm25(passages, query) {
+export function bm25(passages, query) {
   const q = [...new Set(tokens(query))];
   if (!q.length) return passages.map(() => 0);
   const docs = passages.map((p) => tokens(p));
@@ -119,9 +120,10 @@ export async function digest(doc, { model, signal, onProgress = () => {} }) {
     sections.push({ from: part.from, to: part.to, summary: summary.trim() });
   }
   onProgress(parts.length, parts.length + 1);
-  // riduzione (a più livelli se i riassunti parziali sono troppi)
+  // riduzione (a più livelli se i riassunti parziali sono troppi): la sintesi finale deve stare nel contesto del modello
+  const maxNotes = Math.min(45000, Math.floor(charsFor(await ollama.contextSize(model) - 2600, model) * 0.9));
   let notes = sections.map((s) => `[pp. ${s.from}-${s.to}] ${s.summary}`);
-  while (notes.join('\n').length > 45000) {
+  while (notes.join('\n').length > maxNotes && notes.length > 1) {
     const merged = [];
     for (let i = 0; i < notes.length; i += 12) {
       merged.push(await ollama.complete({ model, timeout: 180000, options: { temperature: 0.2, num_predict: 900 }, messages: [
@@ -145,10 +147,10 @@ export async function digest(doc, { model, signal, onProgress = () => {} }) {
 /**
  * Testo da dare a Gemma per i documenti della conversazione, entro il budget.
  * keywords: parole chiave aggiuntive (es. tradotte nella lingua del documento) per il recupero dei passaggi.
+ * budget: caratteri disponibili (dipende dalla finestra di contesto del modello).
  * Restituisce { text, used: [{ docId, name, pages: [...] }] }
  */
-export async function buildContext(docs, question, keywords = '') {
-  let budget = DOC_BUDGET;
+export async function buildContext(docs, question, keywords = '', budget = DOC_BUDGET) {
   const blocks = [];
   const used = [];
   for (const d of docs) {

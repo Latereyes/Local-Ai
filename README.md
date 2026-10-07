@@ -58,7 +58,7 @@ Esempi: allega una foto e chiedi «cosa c'è scritto?», «trasformala in acquer
 
 Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
 
-- **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda.
+- **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda. Il limite scende con i modelli a contesto più piccolo (con Qwen Coder a 16k circa 13.000 caratteri): oltre, il documento viene trattato come lungo.
 - **Documenti lunghi** (libri, manuali): alla prima domanda si crea un riassunto a blocchi. Ogni sezione da circa 16.000 caratteri viene riassunta, poi tutto viene unito in una sintesi generale. Per un libro di 189 pagine servono circa 4 minuti; il riassunto resta salvato. A ogni domanda vengono recuperati la sintesi, i riassunti delle sezioni pertinenti e le pagine originali più rilevanti (ricerca BM25). Se il documento è in un'altra lingua, Gemma genera prima le parole chiave in quella lingua, così le domande in italiano funzionano anche su libri in inglese.
 - Il riquadro «Documento consultato» mostra cosa è stato letto e quali pagine sono state usate. Gemma cita le pagine (p. N).
 - **Verifica sul web**: chiedi «verifica su internet…». La ricerca usa solo termini generici: le regole del prompt impediscono di mettere nelle query nomi, codici o dati sanitari presenti nei documenti.
@@ -81,14 +81,14 @@ Lo script:
 
 Misurato sulla 4070 Ti Super (ottobre 2026): 100% in GPU con 16k di contesto, ~39 token/s in scrittura e ~1.500 token/s in lettura del prompt; con un prompt di ~12.900 token la VRAM arriva a 15,7 GB su 16, quindi il margine è stretto. Dal primo messaggio a freddo servono ~6 s di caricamento, e ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM). Le variabili della KV cache valgono solo per un Ollama avviato dopo lo script: se Ollama lo lancia l'agent del PC, riavvia l'agent. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 12288 o 8192 e rilancia lo script.
 
-LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e taglia la cronologia di conseguenza: con 16k i documenti lunghi e le conversazioni molto lunghe hanno meno spazio che con Gemma. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala.
+LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e dimensiona tutto su quello (vedi *Finestra di contesto* più sotto): con 16k documenti, pagine web e cronologia hanno meno spazio che con Gemma, ma la richiesta non supera mai la finestra. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala.
 
 ## Ricerca sul web
 
 Gemma può cercare su internet per rispondere con informazioni aggiornate.
 
 1. **Decisione**: prima di ogni risposta, una chiamata breve a Gemma (~0,3–0,7 s) decide se serve una ricerca e scrive la query. Cerca per notizie, prezzi, meteo, versioni, eventi e simili; non cerca per conversazione, codice, scrittura o concetti stabili.
-2. **Ricerca + lettura**: se serve, il sistema esegue la ricerca e legge subito le prime 3 pagine (domini diversi, in parallelo). Gemma può poi fare altre ricerche o leggere altre pagine da sé, fino a 6 passaggi.
+2. **Ricerca + lettura**: se serve, il sistema esegue la ricerca e legge subito le prime 3 pagine (domini diversi, in parallelo). Gemma può poi fare altre ricerche o leggere altre pagine da sé, fino a 6 passaggi, finché c'è spazio nella finestra di contesto. Di ogni pagina entra solo quanto ci sta (da ~1.000 a 6.000 caratteri, secondo il modello e lo spazio rimasto): se è più lunga si tengono l'inizio e i paragrafi più pertinenti alla domanda (BM25), non solo l'inizio.
 3. **Risposta**: in cima alla risposta c'è un riquadro con le ricerche e le pagine lette. In fondo compaiono le **fonti** consultate davvero: sono prese dai passaggi eseguiti, non dal testo del modello.
 
 Il pulsante **Cerca** nel composer forza la ricerca. Il motore predefinito è DuckDuckGo, che non richiede configurazione. Per sicurezza le pagine della rete locale (Ollama, ComfyUI, router…) non possono essere lette, e il contenuto delle pagine viene trattato come dato, mai come istruzione.
@@ -135,6 +135,7 @@ Messaggio ─► Gemma (Ollama) ──► risposta in streaming
 
 - **Alternanza VRAM** (`src/gpu.js`): ogni lavoro passa da un'unica coda. Quando serve ComfyUI, i modelli Ollama vengono scaricati (`keep_alive: 0`). Quando serve di nuovo Gemma, ComfyUI viene svuotato (`/free`) e il server attende che la VRAM risulti libera. Il passaggio avviene solo quando serve: generazioni consecutive non ricaricano i modelli. La pillola in alto a destra mostra chi occupa la GPU e cosa c'è in coda, e permette di liberare la VRAM a mano.
 - **Arbitro condiviso con ChatBz** (`src/gpu-agent.js`): se l'agent del PC (remote-app-controller, porta 7070) è acceso, ogni lavoro chiede anche a lui il permesso di usare la GPU. L'agent fa lavorare una sola app alla volta (prima la chat, poi le generazioni, poi i lavori in sottofondo di ChatBz) e fa lui lo scambio Ollama ⇄ ComfyUI; la pillola mostra «In attesa della GPU (ChatBz: …)». Senza agent tutto funziona come prima.
+- **Finestra di contesto** (`src/context.js`): prima di ogni chiamata al modello si stimano i token di prompt di sistema, strumenti, cronologia, documenti e pagine lette (~3 caratteri per token, corretti con i conteggi reali che Ollama restituisce) e si lascia libero lo spazio per la risposta: il 15% della finestra, almeno 2.048 token, oppure il 30%, almeno 4.096, con il ragionamento attivo. Se non ci sta tutto si accorciano, nell'ordine, le pagine lette nei passaggi precedenti, i turni più vecchi (gli ultimi due scambi restano), tutti i risultati web, il resto della cronologia. Quando resta poco spazio non si offrono altre ricerche e il modello risponde con ciò che ha raccolto. Se Ollama segnala comunque un contesto superato, la stima si corregge e il passaggio si ripete; se il ragionamento riempie la finestra prima della risposta, il passaggio si ripete senza ragionamento. Sotto ogni risposta, accanto ai token/s, compare il contesto usato (es. «contesto 12,5k/16k»). Le sezioni del prompt di sistema su documenti e immagini allegate entrano solo nelle chat che li contengono.
 - **Prompt**: il prompt di sistema di Gemma è in `src/prompts.js`. La riscrittura specializzata per ogni modello è in `workflows/<id>/guide.md`.
 - **Rigenera / modifica prompt**: dalle schede dei media puoi rigenerare con un nuovo seed, oppure modificare il prompt a mano e rilanciarlo, senza passare da Gemma.
 - **Dati**: le conversazioni sono salvate in `data/conversations/*.json`, i media generati in `data/media/<id utente>/`.
@@ -198,6 +199,7 @@ src/
   ollama.js          client Ollama (streaming, tool, scaricamento modelli)
   comfy.js           client ComfyUI (coda, WebSocket, anteprime, /free)
   chat.js            orchestrazione di un turno (ricerca → LLM → tool → prompt → coda)
+  context.js         stima dei token e budget della finestra di contesto
   jobs.js            generazioni su ComfyUI + bus eventi
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
