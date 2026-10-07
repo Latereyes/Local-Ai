@@ -84,6 +84,12 @@ Misurato sulla 4070 Ti Super (ottobre 2026), con la KV cache ancora in f16: 100%
 
 LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e dimensiona tutto su quello (vedi *Finestra di contesto* più sotto): con 16k documenti, pagine web e cronologia hanno meno spazio che con Gemma, ma la richiesta non supera mai la finestra. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala. Questo Qwen ha anche la capacità `vision`: con Qwen Coder selezionato le immagini allegate vanno direttamente a lui, senza passare da Qwen3-VL su ComfyUI.
 
+### Secondo Qwen: Qwen Aggressive
+
+Nel menu c'è anche **Qwen Aggressive** (`qwen3.8-aggressive`): Qwen3.8 27B Uncensored Aggressive di HauhauCS, quantizzazione `Q3_K_P` (~13,4 GB). Si installa con `tools/installa-qwen-aggressive.ps1`, che scarica il GGUF da Hugging Face, ne controlla lo SHA256 con il file `SHA256SUMS` del repo, crea il modello da `tools/qwen-aggressive.Modelfile` e poi cancella il file scaricato. `ollama pull hf.co/…:Q3_K_P` non funziona: `K_P` è una quantizzazione personalizzata e Hugging Face non la offre come tag per Ollama.
+
+Misurato sulla 4070 Ti Super (ottobre 2026): 100% in GPU con 16k di contesto, 14,9 GB su 16,4, ~37 token/s. Tool e ragionamento sì, visione no (il file `mmproj` non è incluso). Nei test di codice è andato peggio di Qwen Coder: su un parser di date Python ha passato 8 test su 12 contro 11 su 11; JavaScript ed Express erano corretti. Per il codice resta consigliato Qwen Coder.
+
 ## Ricerca sul web
 
 Gemma può cercare su internet per rispondere con informazioni aggiornate.

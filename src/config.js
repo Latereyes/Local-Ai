@@ -21,6 +21,7 @@ export default {
     // Nomi da mostrare nel menu dei modelli (e con cui l'assistente si presenta), per nome Ollama senza ":latest"
     labels: {
       'qwen3.8-coder': 'Qwen Coder',
+      'qwen3.8-aggressive': 'Qwen Aggressive',
     },
   },
 
