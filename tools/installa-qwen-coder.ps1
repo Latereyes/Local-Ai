@@ -37,7 +37,7 @@ Write-Host "`n>> Scarico $source" -ForegroundColor Cyan
 ollama pull $source
 if ($LASTEXITCODE -ne 0) { Write-Error "Download fallito"; exit 1 }
 
-# 4. Modello con i parametri per la 4070 Ti Super (tutto in GPU, contesto 12k)
+# 4. Modello con i parametri per la 4070 Ti Super (tutto in GPU, contesto 16k)
 Write-Host "`n>> Creo $name" -ForegroundColor Cyan
 ollama create $name -f "$modelfile"
 if ($LASTEXITCODE -ne 0) { Write-Error "Creazione del modello fallita"; exit 1 }
