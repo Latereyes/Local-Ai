@@ -1,11 +1,13 @@
-# Installa Qwen3.8 27B (UD-Q3_K_XL, ~13 GB) in Ollama come modello per il codice ("qwen3.8-coder").
+# Installa Qwen3.8 27B Uncensored (orcarouter, IQ3_M, ~14 GB) in Ollama come modello per il codice ("qwen3.8-coder").
 # Da eseguire sul PC di Ollama (questo PC), in PowerShell:
 #   powershell -ExecutionPolicy Bypass -File installa-qwen-coder.ps1
 # Se il download si interrompe, rilancialo: Ollama riprende da dove era arrivato.
 
 $ErrorActionPreference = "Stop"
 $name = "qwen3.8-coder"
-$source = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL"
+$source = "orcarouter/Qwen3.8-27B-Uncensored:iq3_m"
+# Versioni precedenti, da togliere (la Unsloth installata fino a ottobre 2026)
+$old = @("hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL")
 $modelfile = Join-Path $PSScriptRoot "qwen-coder.Modelfile"
 
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) { Write-Error "Ollama non trovato nel PATH"; exit 1 }
@@ -21,16 +23,25 @@ foreach ($v in @(@{ K = "OLLAMA_FLASH_ATTENTION"; V = "1" }, @{ K = "OLLAMA_KV_C
   }
 }
 
-# 2. Download del GGUF da Hugging Face (~13 GB)
+# 2. Via il Qwen precedente: libera spazio su disco prima di scaricare il nuovo
+$installed = (ollama list | Out-String)
+foreach ($m in @($name) + $old) {
+  if ($installed -match [regex]::Escape($m)) {
+    Write-Host ">> Tolgo $m" -ForegroundColor Cyan
+    ollama rm $m | Out-Null
+  }
+}
+
+# 3. Download dalla libreria di Ollama (~14 GB)
 Write-Host "`n>> Scarico $source" -ForegroundColor Cyan
 ollama pull $source
 if ($LASTEXITCODE -ne 0) { Write-Error "Download fallito"; exit 1 }
 
-# 3. Modello con i parametri per la 4070 Ti Super (tutto in GPU, contesto 16k)
+# 4. Modello con i parametri per la 4070 Ti Super (tutto in GPU, contesto 12k)
 Write-Host "`n>> Creo $name" -ForegroundColor Cyan
 ollama create $name -f "$modelfile"
 if ($LASTEXITCODE -ne 0) { Write-Error "Creazione del modello fallita"; exit 1 }
-# Il modello scaricato da Hugging Face non serve piu': senza, nel menu di LocalAI c'e' un solo Qwen.
+# Il modello scaricato non serve piu': senza, nel menu di LocalAI c'e' un solo Qwen.
 # I file del GGUF restano, perche' li usa $name.
 ollama rm $source | Out-Null
 
