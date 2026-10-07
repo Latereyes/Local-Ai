@@ -5,10 +5,11 @@ FROM orcarouter/Qwen3.8-27B-Uncensored:iq3_m
 
 # Tutti i layer in GPU (RTX 4070 Ti Super 16 GB): niente offload sulla CPU
 PARAMETER num_gpu 999
-# 12k di contesto: con 14 GB di pesi è quanto sta nei 16 GB insieme alla KV cache in q8_0.
+# 16k di contesto: misurato sulla 4070 Ti Super, 15,2 GB su 16,4 e 100% in GPU anche senza KV cache q8_0
+# (questo modello ha pochi strati di attenzione piena: da 12k a 16k servono solo ~140 MB in più).
 # LocalAI legge questo valore e lo usa al posto di OLLAMA_CTX per questo modello.
-# Se "ollama ps" mostra una parte su CPU, scendi a 8192 e ricrea il modello.
-PARAMETER num_ctx 12288
+# Se "ollama ps" mostra una parte su CPU, scendi a 12288 e ricrea il modello.
+PARAMETER num_ctx 16384
 
 # Campionamento consigliato da Qwen per il codice
 PARAMETER temperature 0.6
