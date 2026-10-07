@@ -98,6 +98,8 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `OLLAMA_CTX` | `24576` |
 | `OLLAMA_KEEP_ALIVE` | `30m` |
 | `COMFY_URL` | `http://127.0.0.1:8188` |
+| `AGENT_URL` | `http://127.0.0.1:7070` (agent del PC, arbitro della GPU condiviso con ChatBz) |
+| `GPU_ARBITER` | `1` (`0` = solo l'arbitro interno) |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` |
 | `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni) |
 | `ASSISTANT_NAME` | `Gemma` |
@@ -115,6 +117,7 @@ Messaggio ─► Gemma (Ollama) ──► risposta in streaming
 ```
 
 - **Alternanza VRAM** (`src/gpu.js`): ogni lavoro passa da un'unica coda. Quando serve ComfyUI, i modelli Ollama vengono scaricati (`keep_alive: 0`). Quando serve di nuovo Gemma, ComfyUI viene svuotato (`/free`) e il server attende che la VRAM risulti libera. Il passaggio avviene solo quando serve: generazioni consecutive non ricaricano i modelli. La pillola in alto a destra mostra chi occupa la GPU e cosa c'è in coda, e permette di liberare la VRAM a mano.
+- **Arbitro condiviso con ChatBz** (`src/gpu-agent.js`): se l'agent del PC (remote-app-controller, porta 7070) è acceso, ogni lavoro chiede anche a lui il permesso di usare la GPU. L'agent fa lavorare una sola app alla volta (prima la chat, poi le generazioni, poi i lavori in sottofondo di ChatBz) e fa lui lo scambio Ollama ⇄ ComfyUI; la pillola mostra «In attesa della GPU (ChatBz: …)». Senza agent tutto funziona come prima.
 - **Prompt**: il prompt di sistema di Gemma è in `src/prompts.js`. La riscrittura specializzata per ogni modello è in `workflows/<id>/guide.md`.
 - **Rigenera / modifica prompt**: dalle schede dei media puoi rigenerare con un nuovo seed, oppure modificare il prompt a mano e rilanciarlo, senza passare da Gemma.
 - **Dati**: le conversazioni sono salvate in `data/conversations/*.json`, i media generati in `data/media/<id utente>/`.
