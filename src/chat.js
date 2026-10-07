@@ -145,14 +145,14 @@ function history(conv, opts) {
 
   // Taglio dei messaggi più vecchi se si supera il budget (~3 caratteri per token)
   // riserva ~26k caratteri per prompt di sistema, risultati di ricerca e pagine lette
-  const budget = config.ollama.numCtx * 3 - 26000 - (opts.reserveChars || 0);
+  const budget = (opts.numCtx || config.ollama.numCtx) * 3 - 26000 - (opts.reserveChars || 0);
   let size = msgs.reduce((n, m) => n + (m.content?.length || 0), 0);
   while (size > budget && msgs.length > 2) {
     const removed = msgs.shift();
     size -= removed.content?.length || 0;
     while (msgs[0] && msgs[0].role !== 'user') size -= msgs.shift().content?.length || 0;
   }
-  return [{ role: 'system', content: systemPrompt() }, ...msgs];
+  return [{ role: 'system', content: systemPrompt(opts.assistantName) }, ...msgs];
 }
 
 /** Trasforma una chiamata a strumento in uno o più media da generare. */
@@ -401,7 +401,10 @@ export async function send(conv, opts) {
   const text = rawText || (images.length ? 'Descrivi questa immagine.' : 'Riassumi e analizza questo documento.');
   const model = opts.model || config.ollama.model;
   const vision = (await ollama.capabilities(model)).includes('vision');
-  opts = { ...opts, vision, hasNewAttachment: images.length > 0 };
+  const numCtx = await ollama.contextSize(model);
+  // Il modello predefinito si presenta come ASSISTANT_NAME, gli altri con il proprio nome (es. Qwen Coder)
+  const assistantName = model === config.ollama.model ? config.assistantName : ollama.displayName({ name: model });
+  opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0 };
 
   const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, createdAt: Date.now() };
   const msg = { id: store.newId(), role: 'assistant', content: '', thinking: '', steps: [], media: [], model, status: 'pending', createdAt: Date.now() };

@@ -3,8 +3,7 @@ import { workflows, ASPECTS } from './workflows.js';
 
 const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-export function systemPrompt() {
-  const name = config.assistantName;
+export function systemPrompt(name = config.assistantName) {
   return `Sei ${name}, un assistente AI che gira interamente in locale sul computer dell'utente. Oggi è ${today()}.
 
 # Come rispondi
