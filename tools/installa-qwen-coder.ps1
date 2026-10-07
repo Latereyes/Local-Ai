@@ -30,6 +30,9 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Download fallito"; exit 1 }
 Write-Host "`n>> Creo $name" -ForegroundColor Cyan
 ollama create $name -f "$modelfile"
 if ($LASTEXITCODE -ne 0) { Write-Error "Creazione del modello fallita"; exit 1 }
+# Il modello scaricato da Hugging Face non serve piu': senza, nel menu di LocalAI c'e' un solo Qwen.
+# I file del GGUF restano, perche' li usa $name.
+ollama rm $source | Out-Null
 
 # LocalAI mostra nel menu solo i modelli che supportano i tool
 $info = ollama show $name | Out-String
