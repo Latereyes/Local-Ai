@@ -20,6 +20,10 @@ export default {
     keepAlive: env.OLLAMA_KEEP_ALIVE || '30m',
     // Nomi da mostrare nel menu dei modelli (e con cui l'assistente si presenta), per nome Ollama senza ":latest"
     labels: {
+      'gemma4-12b-uncensored': 'Gemma 4 12B',
+      'Gemma4_26B': 'Gemma 4 26B',
+      'gemma-heretic': 'Gemma Heretic',
+      'mythomax-13b': 'MythoMax 13B',
       'qwen3.8-coder': 'Qwen Coder',
       'qwen3.8-aggressive': 'Qwen Aggressive',
     },
