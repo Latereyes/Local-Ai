@@ -128,7 +128,10 @@ export async function chat({ model, messages, tools, think = false, options = {}
       if (msg.thinking) { out.thinking += msg.thinking; onChunk({ thinking: msg.thinking }); }
       if (msg.content) { out.content += msg.content; onChunk({ content: msg.content }); }
       if (msg.tool_calls?.length) { out.tool_calls.push(...msg.tool_calls); onChunk({ tool_calls: msg.tool_calls }); }
-      if (j.done) out.stats = { evalCount: j.eval_count, evalMs: j.eval_duration / 1e6, loadMs: j.load_duration / 1e6 };
+      if (j.done) {
+        out.doneReason = j.done_reason;
+        out.stats = { evalCount: j.eval_count, evalMs: j.eval_duration / 1e6, loadMs: j.load_duration / 1e6, promptCount: j.prompt_eval_count };
+      }
     }
   }
   return out;

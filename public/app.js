@@ -350,8 +350,13 @@ function renderMessage(m) {
   const tools = $('.msg-tools', node);
   tools.hidden = live || !m.content;
   if (!tools.hidden && !tools.childElementCount) {
-    const tps = m.stats?.evalCount && m.stats?.evalMs ? `${(m.stats.evalCount / (m.stats.evalMs / 1000)).toFixed(0)} tok/s` : '';
-    tools.innerHTML = `<button data-copy-msg title="Copia">${icon('copy', 16)}</button>${tps ? `<span class="stats">${tps}</span>` : ''}`;
+    // in "k" da 1024 token, come si indica la finestra (16k = 16384)
+    const k = (n) => `${(n / 1024).toFixed(1).replace(/\.0$/, '').replace('.', ',')}k`;
+    const stats = [
+      m.stats?.evalCount && m.stats?.evalMs ? `${(m.stats.evalCount / (m.stats.evalMs / 1000)).toFixed(0)} tok/s` : '',
+      m.stats?.ctxUsed && m.stats?.numCtx ? `contesto ${k(m.stats.ctxUsed)}/${k(m.stats.numCtx)}` : '',
+    ].filter(Boolean).join(' · ');
+    tools.innerHTML = `<button data-copy-msg title="Copia">${icon('copy', 16)}</button>${stats ? `<span class="stats" title="Velocità di scrittura e token usati della finestra di contesto (stima)">${stats}</span>` : ''}`;
   }
   if (m.status === 'stopped' && !m.content && !(m.media || []).length) md.innerHTML = '<p style="color:var(--faint)">Interrotto.</p>';
 }

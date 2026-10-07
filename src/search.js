@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import * as cheerio from 'cheerio';
 import config from './config.js';
+import { bm25 } from './documents.js';
 
 /**
  * Ricerca web e lettura di pagine.
@@ -133,8 +134,49 @@ function extractText(html, url) {
   return { title, url, published, text };
 }
 
-export async function readPage(rawUrl, { maxChars = 5000 } = {}) {
-  return cached(`p:${rawUrl}:${maxChars}`, async () => {
+const PAGE_MAX = 60000; // caratteri estratti e tenuti in cache per pagina
+
+/**
+ * Se la pagina supera il budget tiene l'inizio (titolo, attacco) e i blocchi più pertinenti alla domanda (BM25),
+ * nell'ordine originale. Senza corrispondenze resta semplicemente l'inizio della pagina.
+ */
+function focus(text, query, maxChars) {
+  if (text.length <= maxChars) return text;
+  const blocks = [];
+  let cur = '';
+  for (const line of text.split('\n').flatMap((l) => (l.length > 900 ? l.match(/[\s\S]{1,700}/g) : [l]))) {
+    // un titolo apre sempre un blocco nuovo, così resta attaccato al suo paragrafo
+    if (cur.trim() && (cur.length + line.length > 700 || line.startsWith('## '))) { blocks.push(cur); cur = ''; }
+    cur += (cur ? '\n' : '') + line;
+  }
+  if (cur) blocks.push(cur);
+  const scores = query ? bm25(blocks, query) : blocks.map(() => 0);
+  const keep = new Set([0]);
+  let size = Math.min(blocks[0].length, maxChars);
+  const add = (i) => {
+    if (size + blocks[i].length + 4 > maxChars) return false;
+    keep.add(i);
+    size += blocks[i].length + 4;
+    return true;
+  };
+  // prima i blocchi pertinenti, poi lo spazio che resta allunga l'inizio della pagina
+  for (const i of blocks.map((_, i) => i).filter((i) => i > 0 && scores[i] > 0).sort((a, b) => scores[b] - scores[a])) add(i);
+  for (let i = 1; i < blocks.length && (keep.has(i) || add(i)); i++);
+  let out = '';
+  let prev = -1;
+  for (const i of [...keep].sort((a, b) => a - b)) {
+    out += (prev < 0 ? '' : i === prev + 1 ? '\n' : '\n[…]\n') + blocks[i];
+    prev = i;
+  }
+  return out.slice(0, maxChars) + (keep.size < blocks.length ? '\n[…testo omesso…]' : '');
+}
+
+/**
+ * Legge una pagina. maxChars è il budget di testo da restituire (dipende dalla finestra di contesto del modello);
+ * query (la domanda) sceglie quali parti tenere quando la pagina è più lunga del budget.
+ */
+export async function readPage(rawUrl, { maxChars = 5000, query = '' } = {}) {
+  const page = await cached(`p:${rawUrl}`, async () => {
     let url = (await assertPublicUrl(rawUrl)).toString();
     let res;
     for (let hop = 0; hop < 5; hop++) {
@@ -156,7 +198,7 @@ export async function readPage(rawUrl, { maxChars = 5000 } = {}) {
     if (len > 5_000_000) throw new Error('Pagina troppo grande');
     const body = await res.text();
     const page = type.includes('html') ? extractText(body.slice(0, 3_000_000), url) : { title: url, url, text: body };
-    const truncated = page.text.length > maxChars;
-    return { ...page, text: page.text.slice(0, maxChars) + (truncated ? '\n[…testo troncato…]' : '') };
+    return { ...page, text: page.text.slice(0, PAGE_MAX) };
   });
+  return { ...page, text: focus(page.text, query, maxChars) };
 }
