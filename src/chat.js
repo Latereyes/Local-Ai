@@ -134,7 +134,7 @@ function history(conv, opts) {
       msgs.push({ role: 'tool', tool_name: md.toolName, content: JSON.stringify({
         status: md.status === 'done' ? 'generated and shown to the user' : md.status,
         model: md.workflowName,
-        // In modalità Computer il contesto serve ai file (Qwen Coder ha 16k): basta una descrizione breve
+        // In modalità Computer il contesto serve ai file (con Qwen Coder resta la finestra per scrivere): basta una descrizione breve
         description_used: opts.computer ? String(md.description || '').slice(0, 240) : md.description,
         ...(opts.computer ? {} : { final_prompt: md.prompt }),
         aspect_ratio: md.aspect,
@@ -478,7 +478,7 @@ async function prepareDocuments(conv, msg, question, model, signal, budget = doc
   const docs = conv.messages.filter((m) => m.role === 'user').flatMap((m) => (m.attachments || []).filter((a) => a.kind === 'document' && !a.scanned)).reverse();
   if (!docs.length) return '';
   const emitStep = (step) => emit(conv.id, { type: 'step', messageId: msg.id, step });
-  // Con un contesto piccolo (es. Qwen Coder a 16k) anche un documento medio va riassunto invece che dato intero
+  // Con un contesto piccolo (es. un modello a 16k) anche un documento medio va riassunto invece che dato intero
   const inline = Math.min(documents.INLINE_LIMIT, budget - 500);
   for (const d of docs) {
     if (d.chars <= inline || d.summary) continue;
@@ -633,7 +633,7 @@ export async function send(conv, opts) {
         const mediaCalls = [];
 
         // Budget della finestra di contesto: si lascia spazio alla risposta (e al ragionamento, se attivo).
-        // Senza questo, con Qwen Coder (16k) ricerca + pagine lette + cronologia superavano il contesto.
+        // Senza questo, con un modello a 16k ricerca + pagine lette + cronologia superavano il contesto.
         let think = !!opts.think;
         let limit = numCtx - ctx.outputReserve(numCtx, think);
         const convo = history(conv, opts);
