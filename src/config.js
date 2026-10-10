@@ -23,6 +23,12 @@ export default {
     labels: {
       'qwen3.8-coder': 'Qwen Coder',
       'qwen3.8-aggressive': 'Qwen Aggressive',
+      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 'Gemma 26B',
+    },
+    // Contesto per modello quando il Modelfile non lo fissa (misurato sul PC)
+    ctx: {
+      // Gemma 26B non sta mai tutta in GPU (~11% su CPU): 64k ha la stessa velocità di 16k, oltre rallenta
+      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 65536,
     },
   },
 
@@ -50,6 +56,23 @@ export default {
     confirmTimeoutMs: Number(env.WORKSPACE_CONFIRM_SECONDS || 300) * 1000,
   },
 
+  // Progetti con coda di task: un task alla volta (un solo modello sta nei 16 GB di VRAM)
+  projects: {
+    // Modello per tipo di task (dal benchmark in C:\AI\benchmark-delega). Se non è installato o non supporta
+    // gli strumenti si usa il modello predefinito.
+    models: {
+      code: env.TASK_MODEL_CODE || 'qwen3.8-coder:latest',
+      page: env.TASK_MODEL_PAGE || 'qwen3.8-coder:latest',
+      read: env.TASK_MODEL_READ || 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
+      chat: env.TASK_MODEL_CHAT || '',   // vuoto = modello predefinito (OLLAMA_MODEL)
+    },
+    // Tentativi per task: dopo un test fallito il modello riceve l'errore e corregge, fino a questo numero di giri
+    maxAttempts: Number(env.TASK_MAX_ATTEMPTS || 3),
+    testTimeoutMs: Number(env.TASK_TEST_SECONDS || 120) * 1000,
+    // Modello che giudica gli screenshot delle pagine; vuoto = il primo che ha passato la verifica visiva
+    visionModel: env.VISION_MODEL || '',
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',
@@ -68,6 +91,7 @@ export default {
     users: path.join(dataDir, 'users.json'),
     sessions: path.join(dataDir, 'sessions.json'),
     public: path.join(root, 'public'),
+    projects: path.join(dataDir, 'projects'),
     workspace: env.WORKSPACE_DIR ? path.resolve(env.WORKSPACE_DIR) : path.join(root, 'workspace'),
   },
 };

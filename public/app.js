@@ -271,6 +271,7 @@ function route() {
   const m = location.pathname.match(/^\/c\/([\w-]+)/);
   if (m) openConv(m[1], false);
   else if (location.pathname.startsWith('/galleria')) openGallery(false);
+  else if (location.pathname.startsWith('/progetti/')) openProject(decodeURIComponent(location.pathname.slice(10)), false);
   else if (location.pathname.startsWith('/progetti')) openProjects(false);
   else newChat(false);
 }
@@ -437,6 +438,8 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
   const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
   return bare ? links : `<span class="ws-links">${links}</span>`;
 }
+/** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
+const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
 const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo' };
 
 function renderComputer(node, m) {
@@ -453,10 +456,10 @@ function renderComputer(node, m) {
     const spin = s.status === 'running' ? '<span class="spin"></span>' : '';
     const err = s.status === 'error' ? `<div class="step-err">${esc(s.error || 'non riuscito')}</div>` : '';
     if (s.type === 'file') {
-      if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(s.path)}</div></div>`;
+      if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
       const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
-      const links = s.status === 'done' && ['write', 'word', 'pdf'].includes(s.action) ? wsLinks(s.path) : '';
+      const links = s.status === 'done' && ['write', 'word', 'pdf'].includes(s.action) ? wsLinks(stepPath(s)) : '';
       return `<div class="ws-act"><div class="ws-act-head">${icon(s.action === 'word' || s.action === 'pdf' ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
     }
     const where = s.cwd ? ` <span class="faint">in ${esc(s.cwd)}</span>` : '';
@@ -679,6 +682,10 @@ function connectEvents() {
 
 function onEvent(evt) {
   if (evt.type === 'gpu') return renderGpu(evt.state);
+  if (evt.type === 'project') {
+    if (state.view === 'projects' && (!state.project || state.project.id === evt.project.id)) refreshProject();
+    return;
+  }
   if (evt.type === 'title') {
     const c = state.convs.find((x) => x.id === evt.conversationId);
     if (c) { c.title = evt.title; renderConvList(); }
@@ -1068,36 +1075,220 @@ el.gallery.addEventListener('click', (e) => {
 el.gallery.addEventListener('mouseover', (e) => { const v = e.target.closest('.tile video'); if (v) v.play().catch(() => {}); });
 el.gallery.addEventListener('mouseout', (e) => { const v = e.target.closest('.tile video'); if (v) v.pause(); });
 
-// ---------- Progetti (cartella di lavoro) ----------
+// ---------- Progetti: piano, coda di task e verifica automatica ----------
+const when = (t) => new Date(t).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const TASK_STATUS = { queued: 'In coda', running: 'In corso', testing: 'Verifica', done: 'Fatto', failed: 'Non riuscito', error: 'Errore', cancelled: 'Fermato' };
+const TYPE_ICON = { code: 'code', page: 'page', read: 'search', chat: 'text' };
+const modelLabel = (name) => (state.config?.models || []).find((m) => m.name === name)?.label || String(name || '').replace(/:latest$/, '');
+
 async function openProjects(push = true) {
   showView('projects');
   state.conv = null;
+  state.project = null;
   renderConvList();
   if (push) history.pushState(null, '', '/progetti');
   document.title = 'Progetti · LocalAI';
-  const { files = [] } = await api('/api/workspace').catch(() => ({}));
-  const groups = new Map();
-  for (const f of files) {
-    const [top, ...rest] = f.path.split('/');
-    if (!rest.length && f.dir) { if (!groups.has(top)) groups.set(top, []); continue; }
-    const key = rest.length ? top : '';
-    if (!groups.has(key)) groups.set(key, []);
-    if (!f.dir) groups.get(key).push({ ...f, name: rest.length ? rest.join('/') : top });
-  }
-  const when = (t) => new Date(t).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  el.projects.innerHTML = groups.size ? [...groups].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0])).map(([name, list]) => {
-    const hasIndex = list.some((f) => f.name === 'index.html');
-    return `<div class="project"><h3>${icon('folder', 16)}${esc(name || 'File sciolti')}${name ? `<span class="ws-links">${hasIndex ? wsLinks(name, { dir: true, bare: true }) : ''}<button class="del" data-ws-del="${esc(name)}" title="Elimina il progetto">${icon('trash', 13)}</button></span>` : ''}</h3>
-      ${list.length ? list.map((f) => `<div class="project-file"><span class="name">${esc(f.name)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(f.path)}<button class="del" data-ws-del="${esc(f.path)}" title="Elimina">${icon('trash', 13)}</button></div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
-    </div>`;
-  }).join('') : '<div class="empty">Ancora nessun progetto. In una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>';
+  const list = await api('/api/projects').catch(() => []);
+  el.projects.innerHTML = `<div class="pj-head"><h2>Progetti</h2></div>
+    <p class="faint-note" style="margin:0">Ogni progetto ha la sua cartella sul PC, un piano e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici. Le cartelle create in chat con <b>Computer</b> compaiono qui.</p>
+    <div class="pj-new"><input id="pj-name" placeholder="Nome del nuovo progetto (es. Tetris, Sito ristorante)" maxlength="80"><button class="btn primary" id="pj-create">Crea progetto</button></div>
+    ${list.length ? list.map((p) => `<button class="project pj-row" data-open="${esc(p.id)}">
+      <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}</h3>
+      <div class="faint-note" style="margin:0">${p.total ? `${p.done} di ${p.total} task fatti${p.queued ? ` · ${p.queued} in coda` : ''}${p.failed ? ` · ${p.failed} non riusciti` : ''}` : 'Nessun task'}${p.running ? ` · ora: ${esc(p.running)}` : ''} · ${when(p.updatedAt)}</div>
+    </button>`).join('') : '<div class="empty">Ancora nessun progetto. Creane uno qui sopra, oppure in una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>'}`;
+  const create = async () => {
+    const name = $('#pj-name').value.trim();
+    if (!name) return $('#pj-name').focus();
+    try { const p = await api('/api/projects', { body: { name } }); openProject(p.id); }
+    catch (err) { alert(err.message); }
+  };
+  $('#pj-create').onclick = create;
+  $('#pj-name').onkeydown = (e) => { if (e.key === 'Enter') create(); };
 }
+
+async function openProject(id, push = true) {
+  showView('projects');
+  state.conv = null;
+  renderConvList();
+  if (push) history.pushState(null, '', `/progetti/${encodeURIComponent(id)}`);
+  let p;
+  try { p = await api(`/api/projects/${encodeURIComponent(id)}`); }
+  catch (err) { alert(err.message); return openProjects(); }
+  state.project = p;
+  document.title = `${p.name} · LocalAI`;
+  renderProject();
+}
+
+/** Ricarica il progetto aperto quando il server segnala un cambiamento (senza perdere il piano che si sta scrivendo). */
+let pjTimer = null;
+function refreshProject() {
+  clearTimeout(pjTimer);
+  pjTimer = setTimeout(async () => {
+    if (state.view !== 'projects') return;
+    if (!state.project) return openProjects(false);
+    try { state.project = await api(`/api/projects/${encodeURIComponent(state.project.id)}`); renderProject(); } catch {}
+  }, 300);
+}
+
+function renderCheck(c) {
+  const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot' }[c.kind] || c.kind;
+  return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
+    <div>${esc(c.summary || '')}</div>
+    ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
+    ${c.output && c.kind !== 'vision' ? `<details><summary>Dettagli</summary><pre>${esc(c.output)}</pre></details>` : ''}</div>`;
+}
+
+function renderTask(t, i, p) {
+  const busy = t.status === 'running' || t.status === 'testing';
+  const open = state.openTasks?.has(t.id);
+  const btn = (act, ic, title) => `<button data-task="${t.id}" data-act="${act}" title="${title}">${icon(ic, 14)}</button>`;
+  return `<div class="pj-task ${t.status}" data-id="${t.id}">
+    <div class="pj-task-head">
+      <span class="pj-num">${i + 1}</span>
+      <select data-task-type="${t.id}" ${busy ? 'disabled' : ''} title="Tipo: decide il modello">${Object.entries(p.types).map(([k, v]) => `<option value="${k}" ${k === t.type ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <button class="pj-title" data-toggle="${t.id}">${esc(t.title)}</button>
+      <span class="pj-status">${busy ? '<span class="spin"></span>' : ''}${TASK_STATUS[t.status] || t.status}${t.attempts > 1 || (t.attempts && t.status !== 'done') ? ` · ${t.attempts} tent.` : ''}</span>
+      <span class="pj-acts">${busy ? btn('stop', 'stop', 'Ferma') : `${btn('up', 'chevron', 'Su')}${['done', 'queued'].includes(t.status) ? '' : btn('retry', 'refresh', 'Rimetti in coda')}${t.status === 'done' ? btn('retry', 'refresh', 'Rifai') : ''}${btn('delete', 'trash', 'Elimina')}`}</span>
+    </div>
+    ${open ? `<div class="pj-task-body">
+      <div class="pj-text">${esc(t.text)}</div>
+      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}</div>
+      ${t.error ? `<div class="step-err">${esc(t.error)}</div>` : ''}
+      ${t.summary ? `<div class="pj-summary">${esc(t.summary)}</div>` : ''}
+      ${(t.checks || []).map(renderCheck).join('')}
+    </div>` : ''}
+  </div>`;
+}
+
+function renderProject() {
+  const p = state.project;
+  if (!p) return;
+  const keepPlan = $('#pj-plan');
+  const draft = keepPlan && keepPlan.dataset.dirty === '1' ? keepPlan.value : null;
+  const admin = state.user?.role === 'admin';
+  const hasIndex = p.files.some((f) => f.path === 'index.html');
+  const queued = p.tasks.filter((t) => t.status === 'queued').length;
+  const files = p.files.filter((f) => !f.dir);
+  el.projects.innerHTML = `
+    <div class="pj-head">
+      <button class="btn ghost" data-back>${icon('right', 14)}Progetti</button>
+      <h2>${esc(p.name)}</h2>
+      ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}
+      <span class="spacer"></span>
+      ${hasIndex ? `<a class="btn" href="${esc(wsUrl(`${p.folder}/index.html`))}" target="_blank" rel="noopener">${icon('play', 14)}Apri</a>` : ''}
+      ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}
+      <button class="btn ghost" data-pj="delete" title="Elimina progetto e cartella">${icon('trash', 14)}</button>
+    </div>
+    <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge.</p>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Piano</h3><span class="faint">${esc(p.folder)}/PIANO.md · ogni punto «- …» diventa un task; tipo forzabile con [codice], [pagina], [lettura], [testo]</span></div>
+      <textarea id="pj-plan" rows="8" placeholder="# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
+      <div class="pj-row-btns"><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Task</h3><span class="faint">${p.done} di ${p.total} fatti</span></div>
+      ${p.tasks.length ? p.tasks.map((t, i) => renderTask(t, i, p)).join('') : '<div class="faint-note" style="margin:0">Nessun task: crealo dal piano o aggiungilo qui sotto.</div>'}
+      <div class="pj-add">
+        <textarea id="pj-task-text" rows="2" placeholder="Nuovo task, es. «Aggiungi i livelli di difficoltà al gioco»"></textarea>
+        <select id="pj-task-type"><option value="">Tipo automatico</option>${Object.entries(p.types).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+        <button class="btn" data-pj="add-task">Aggiungi</button>
+      </div>
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Verifica</h3></div>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
+      ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
+      <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>File</h3><span class="faint">${files.length}</span></div>
+      ${files.length ? files.map((f) => `<div class="project-file"><span class="name">${esc(f.path)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(`${p.folder}/${f.path}`)}</div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Cronologia</h3></div>
+      <div class="pj-log">${p.log.slice().reverse().map((l) => `<div><span class="faint">${when(l.at)}</span> ${esc(l.text)}</div>`).join('') || '<div class="faint">—</div>'}</div>
+    </section>`;
+  const plan = $('#pj-plan');
+  if (draft !== null) plan.dataset.dirty = '1';
+  plan.oninput = () => { plan.dataset.dirty = '1'; };
+  renderVision();
+}
+
+async function renderVision(force) {
+  const box = $('#pj-vision');
+  if (!box) return;
+  const admin = state.user?.role === 'admin';
+  let v = state.vision;
+  if (!v || force) v = state.vision = await api('/api/vision').catch(() => ({}));
+  const rows = (v.results || []).map((r) => `<li>${r.ok ? '✅' : '❌'} ${esc(r.label || r.model)}${r.declared === false ? ' — non dichiara la lettura di immagini' : r.error ? ` — ${esc(r.error)}` : ` — ha letto «${esc((r.answer || '').slice(0, 60))}»${r.ms ? ` in ${Math.round(r.ms / 1000)} s` : ''}`}</li>`).join('');
+  box.innerHTML = `<b>Modello che giudica gli screenshot:</b> ${v.at ? (v.chosen ? esc(modelLabel(v.chosen === 'comfy:qwen3-vl' ? 'Qwen3-VL (ComfyUI)' : v.chosen)) : 'nessuno ha letto l\'immagine di prova') : 'non ancora verificato (si verifica al primo task di tipo pagina)'}
+    ${v.at ? `<span class="faint"> · verifica del ${when(v.at)}, testo atteso «${esc(v.expected)}»</span><ul class="pj-vis">${rows}</ul>` : ''}
+    ${admin ? `<button class="btn" data-pj="vision">${v.at ? 'Ripeti la verifica' : 'Verifica ora quali modelli leggono le immagini'}</button>` : ''}`;
+}
+
 el.projects.addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-ws-del]');
+  const open = e.target.closest('[data-open]');
+  if (open) return openProject(open.dataset.open);
+  if (e.target.closest('[data-back]')) return openProjects();
+  const conv = e.target.closest('[data-conv]');
+  if (conv) { e.preventDefault(); return openConv(conv.dataset.conv); }
+  const tog = e.target.closest('[data-toggle]');
+  if (tog) {
+    state.openTasks = state.openTasks || new Set();
+    const id = tog.dataset.toggle;
+    if (state.openTasks.has(id)) state.openTasks.delete(id); else state.openTasks.add(id);
+    return renderProject();
+  }
+  const p = state.project;
+  if (!p) return;
+  const base = `/api/projects/${encodeURIComponent(p.id)}`;
+  const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } } catch (err) { alert(err.message); } };
+  const tb = e.target.closest('[data-task]');
+  if (tb) {
+    if (tb.dataset.act === 'delete' && !confirm('Eliminare questo task?')) return;
+    return run(() => api(`${base}/tasks/${tb.dataset.task}`, { body: { action: tb.dataset.act } }));
+  }
+  const b = e.target.closest('[data-pj]');
   if (!b) return;
-  if (!confirm(`Eliminare «${b.dataset.wsDel}»?`)) return;
-  try { await api(`/api/workspace?path=${encodeURIComponent(b.dataset.wsDel)}`, { method: 'DELETE' }); openProjects(false); }
-  catch (err) { alert(err.message); }
+  switch (b.dataset.pj) {
+    case 'start': return run(() => api(`${base}/start`, { method: 'POST' }));
+    case 'pause': return run(() => api(`${base}/pause`, { method: 'POST' }));
+    case 'stop': return run(() => api(`${base}/pause`, { body: { stop: true } }));
+    case 'save-plan': case 'plan-tasks': {
+      const plan = $('#pj-plan');
+      await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }));
+      if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
+      return;
+    }
+    case 'add-task': {
+      const text = $('#pj-task-text').value.trim();
+      if (!text) return $('#pj-task-text').focus();
+      return run(() => api(`${base}/tasks`, { body: { text, type: $('#pj-task-type').value || undefined } }));
+    }
+    case 'save-test': return run(() => api(base, { method: 'PATCH', body: { testCommand: $('#pj-testcmd').value } }));
+    case 'vision':
+      b.disabled = true;
+      b.textContent = 'Verifica in corso (carica ogni modello, qualche minuto)…';
+      try { state.vision = await api('/api/vision/check', { method: 'POST' }); } catch (err) { alert(err.message); }
+      return renderVision();
+    case 'delete':
+      if (!confirm(`Eliminare il progetto «${p.name}» e tutta la sua cartella?`)) return;
+      try { await api(base, { method: 'DELETE' }); openProjects(); } catch (err) { alert(err.message); }
+  }
+});
+el.projects.addEventListener('change', (e) => {
+  const p = state.project;
+  if (!p) return;
+  const base = `/api/projects/${encodeURIComponent(p.id)}`;
+  const sel = e.target.closest('[data-task-type]');
+  if (sel) api(`${base}/tasks/${sel.dataset.taskType}`, { body: { action: 'type', type: sel.value } }).then((out) => { state.project = out; renderProject(); }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-autotest') api(base, { method: 'PATCH', body: { autoTest: e.target.checked } }).catch((err) => alert(err.message));
 });
 
 // ---------- Lightbox ----------
