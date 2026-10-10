@@ -15,7 +15,8 @@ export default {
   ollama: {
     url: env.OLLAMA_URL || 'http://127.0.0.1:11434',
     model: env.OLLAMA_MODEL || 'gemma4-12b-uncensored:latest',
-    numCtx: Number(env.OLLAMA_CTX || 24576),
+    // 128k: misurato su gemma4-12b (10,4 GB, 100% GPU, stessa velocità che a 24k; Gemma usa per lo più attenzione a finestra)
+    numCtx: Number(env.OLLAMA_CTX || 131072),
     // Tempo per cui Ollama tiene il modello in VRAM tra un messaggio e l'altro
     keepAlive: env.OLLAMA_KEEP_ALIVE || '30m',
     // Nomi da mostrare nel menu dei modelli (e con cui l'assistente si presenta), per nome Ollama senza ":latest"

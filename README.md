@@ -138,7 +138,7 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 |---|---|
 | `OLLAMA_URL` | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | `gemma4-12b-uncensored:latest` |
-| `OLLAMA_CTX` | `24576` (i modelli con `num_ctx` nel Modelfile, come Qwen Coder, usano il proprio) |
+| `OLLAMA_CTX` | `131072` (misurato su gemma4-12b: 10,4 GB, 100% GPU, ~64 tok/s come a 24k; i modelli con `num_ctx` nel Modelfile, come Qwen Coder, usano il proprio) |
 | `OLLAMA_KEEP_ALIVE` | `30m` |
 | `COMFY_URL` | `http://127.0.0.1:8188` |
 | `AGENT_URL` | `http://127.0.0.1:7070` (agent del PC, arbitro della GPU condiviso con ChatBz) |
