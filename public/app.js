@@ -437,12 +437,16 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
   const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
   return bare ? links : `<span class="ws-links">${links}</span>`;
 }
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
   // le letture e gli elenchi sono dettagli: si mostrano solo mentre sono in corso o se falliscono
-  const steps = (m.steps || []).filter((s) => WS_STEP.has(s.type) && !((s.action === 'read' || s.action === 'list') && s.status === 'done'));
+  // i blocchi aggiunti a un file (append) si mostrano come dimensione aggiornata del file scritto
+  const grown = new Map();
+  for (const s of m.steps || []) if (s.action === 'append' && s.status === 'done') grown.set(s.path, s.size);
+  const steps = (m.steps || []).filter((s) => WS_STEP.has(s.type) && !(['read', 'list', 'append'].includes(s.action) && s.status === 'done'))
+    .map((s) => (s.action === 'write' && grown.has(s.path) ? { ...s, size: grown.get(s.path) } : s));
   box.hidden = !steps.length;
   if (!steps.length) { box.innerHTML = ''; return; }
   box.innerHTML = steps.map((s) => {

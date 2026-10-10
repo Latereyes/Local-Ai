@@ -203,6 +203,10 @@ export function computerTools({ canRun = false, images = [] } = {}) {
       path: p('Percorso relativo: ogni progetto nella sua cartella, es. tetris/index.html, script/rinomina.py'),
       content: p('Contenuto completo del file.'),
     }, ['path', 'content']),
+    fn('append_file', 'Aggiunge testo in fondo a un file già creato con write_file. Serve per scrivere i file lunghi a blocchi.', {
+      path: p('Percorso relativo del file.'),
+      content: p('Testo da aggiungere in fondo (continua esattamente da dove finisce il file).'),
+    }, ['path', 'content']),
     fn('delete_file', 'Elimina un file o una cartella della cartella di lavoro. Solo se l\'utente lo chiede.', { path: p('Percorso relativo.') }, ['path']),
     fn('html_to_word', 'Converte una pagina HTML della cartella di lavoro in documento Word (.docx).', {
       html_path: p('File .html da convertire.'),
@@ -230,7 +234,8 @@ export function computerPrompt({ files, canRun, os = 'Windows' }) {
 # Modalità Computer: cartella di lavoro
 L'utente ha attivato la modalità Computer: hai una cartella di lavoro sul suo PC (${os}) dove creare e sviluppare progetti, e gli strumenti per gestirla. In questa modalità puoi accedere ai file della cartella di lavoro (solo a quelli).
 - Ogni progetto va nella sua sottocartella con un nome breve (es. tetris/, sito-ristorante/, script-backup/). Usa percorsi relativi: non puoi scrivere fuori dalla cartella.
-- Per creare qualcosa usa write_file con il contenuto COMPLETO e funzionante del file: niente segnaposto, niente "resto del codice qui". Per modificare un file esistente leggilo prima con read_file, poi riscrivilo intero.
+- Per creare qualcosa usa write_file con il contenuto COMPLETO e funzionante del file: niente segnaposto, niente "resto del codice qui".
+- La tua finestra di contesto è limitata: ogni chiamata deve restare sotto le 150 righe circa. Per un file più lungo (pagine ricche, documenti con molte sezioni, giochi) scrivi con write_file la prima parte e aggiungi il resto con append_file, un blocco per chiamata, finché il file è completo. CSS sobrio e breve. Per modificare un file esistente leggilo prima con read_file, poi riscrivilo intero.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.

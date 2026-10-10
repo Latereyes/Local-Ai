@@ -24,7 +24,7 @@ export function stop(conversationId) {
 const TOOL_TYPE = { generate_image: 'image', generate_video: 'video', edit_image: 'image', animate_image: 'video', photo_with_face: 'image', upscale_image: 'image' };
 const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', edit_image: 'img2img', animate_image: 'img2video', photo_with_face: 'identity', upscale_image: 'upscale' };
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'run_command']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'run_command']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -134,8 +134,9 @@ function history(conv, opts) {
       msgs.push({ role: 'tool', tool_name: md.toolName, content: JSON.stringify({
         status: md.status === 'done' ? 'generated and shown to the user' : md.status,
         model: md.workflowName,
-        description_used: md.description,
-        final_prompt: md.prompt,
+        // In modalità Computer il contesto serve ai file (Qwen Coder ha 16k): basta una descrizione breve
+        description_used: opts.computer ? String(md.description || '').slice(0, 240) : md.description,
+        ...(opts.computer ? {} : { final_prompt: md.prompt }),
         aspect_ratio: md.aspect,
         ...(md.seconds ? { duration_seconds: md.seconds } : {}),
         ...(md.error ? { error: md.error } : {}),
@@ -153,7 +154,7 @@ function history(conv, opts) {
 
   const sections = {
     documents: conv.messages.some((m) => m.attachments?.some((a) => a.kind === 'document')),
-    images: recentImages(conv, 1).length > 0,
+    images: !opts.auto && recentImages(conv, 1).length > 0,
   };
   const system = systemPrompt(opts.assistantName, sections) + (opts.computer ? computerPrompt(opts.computer) : '');
   return [{ role: 'system', content: system }, ...msgs];
@@ -168,7 +169,7 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -198,7 +199,7 @@ function waitConfirmation(convId, stepId, signal) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -226,6 +227,12 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.writeFile(user, step.path, args.content);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
         output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, created: r.created });
+        break;
+      }
+      case 'append_file': {
+        const r = await workspace.appendFile(user, step.path, args.content);
+        Object.assign(step, { path: r.path, size: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size });
         break;
       }
       case 'delete_file': {
@@ -298,7 +305,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
 /** Argomenti della chiamata da tenere nella cronologia del turno: il contenuto dei file scritti è già su disco. */
 function compactCall(c) {
   const a = { ...parseArgs(c.function.arguments) };
-  if (c.function.name === 'write_file' && typeof a.content === 'string' && a.content.length > 400) {
+  if ((c.function.name === 'write_file' || c.function.name === 'append_file') && typeof a.content === 'string' && a.content.length > 400) {
     a.content = `[${a.content.length} caratteri scritti nel file: usa read_file per rileggerlo]`;
   }
   return { function: { name: c.function.name, arguments: a } };
@@ -617,7 +624,8 @@ export async function send(conv, opts) {
         emit(conv.id, { type: 'status', messageId: msg.id, status: 'streaming' });
 
         const allTools = [
-          ...tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) }),
+          // nella ripresa automatica servono solo i file: niente strumenti per immagini e web (risparmia contesto)
+          ...(opts.auto ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })),
           ...(computer ? computerTools({ canRun, images: recentImages(conv, 12) }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));

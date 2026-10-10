@@ -114,6 +114,17 @@ export async function writeFile(user, rel, content) {
   return { path: r, size: Buffer.byteLength(text), created: !existed };
 }
 
+/** Aggiunge testo in fondo a un file esistente (per scrivere i file lunghi a blocchi). */
+export async function appendFile(user, rel, content) {
+  const { abs, rel: r } = resolve(user, rel);
+  const st = await fsp.stat(abs).catch(() => null);
+  if (!st?.isFile()) throw new WorkspaceError(`Il file «${r}» non esiste: crealo prima con write_file`);
+  const text = String(content ?? '');
+  if (st.size + Buffer.byteLength(text) > MAX_FILE) throw new WorkspaceError('File troppo grande (max 2 MB)');
+  await fsp.appendFile(abs, text, 'utf8');
+  return { path: r, size: st.size + Buffer.byteLength(text) };
+}
+
 /** Copia nella cartella un file dell'app (es. un'immagine generata in chat); aggiunge l'estensione se manca. */
 export async function copyIn(user, srcAbs, rel, ext = '') {
   let { abs, rel: r } = resolve(user, rel);
