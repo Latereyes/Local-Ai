@@ -58,7 +58,7 @@ Esempi: allega una foto e chiedi «cosa c'è scritto?», «trasformala in acquer
 
 Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
 
-- **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda. Il limite scende con i modelli a contesto più piccolo (con Qwen Coder a 16k circa 13.000 caratteri): oltre, il documento viene trattato come lungo.
+- **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda. Con i modelli a contesto più piccolo il limite scende: oltre, il documento viene trattato come lungo.
 - **Documenti lunghi** (libri, manuali): alla prima domanda si crea un riassunto a blocchi. Ogni sezione da circa 16.000 caratteri viene riassunta, poi tutto viene unito in una sintesi generale. Per un libro di 189 pagine servono circa 4 minuti; il riassunto resta salvato. A ogni domanda vengono recuperati la sintesi, i riassunti delle sezioni pertinenti e le pagine originali più rilevanti (ricerca BM25). Se il documento è in un'altra lingua, Gemma genera prima le parole chiave in quella lingua, così le domande in italiano funzionano anche su libri in inglese.
 - Il riquadro «Documento consultato» mostra cosa è stato letto e quali pagine sono state usate. Gemma cita le pagine (p. N).
 - **Verifica sul web**: chiedi «verifica su internet…». La ricerca usa solo termini generici: le regole del prompt impediscono di mettere nelle query nomi, codici o dati sanitari presenti nei documenti.
@@ -77,12 +77,12 @@ Per scrivere e correggere codice puoi passare a **Qwen Coder** (Qwen3.8 27B Unce
 Lo script:
 - toglie il Qwen installato in precedenza (anche la vecchia Unsloth `UD-Q3_K_XL`);
 - scarica `orcarouter/Qwen3.8-27B-Uncensored:iq3_m` dalla libreria di Ollama e crea il modello `qwen3.8-coder` da `tools/qwen-coder.Modelfile`, poi toglie il nome scaricato (i file restano), così nel menu c'è un solo Qwen;
-- imposta tutti i layer in GPU (`num_gpu 999`) e 16k di contesto (`num_ctx 16384`);
+- imposta tutti i layer in GPU (`num_gpu 999`) e 40k di contesto (`num_ctx 40960`);
 - attiva per Ollama `OLLAMA_FLASH_ATTENTION=1` e `OLLAMA_KV_CACHE_TYPE=q8_0`, che dimezzano la memoria del contesto. Sono impostazioni del server Ollama, quindi valgono anche per Gemma, e valgono solo per un Ollama avviato dopo lo script: riavvia Ollama, o l'agent del PC se è lui ad avviarlo.
 
-Misurato sulla 4070 Ti Super (ottobre 2026), con la KV cache ancora in f16: 100% in GPU, ~40 token/s in scrittura e ~1.500 token/s in lettura del prompt, ~6 s di caricamento a freddo. Con un prompt di 13.000 token a 16k la VRAM arriva a 15,2 GB su 16,4. Questo modello ha pochi strati di attenzione piena, quindi il contesto costa poco: da 12k a 16k servono solo ~140 MB in più. Il `q3_K_L` (~15 GB) lascerebbe invece troppo poco margine, per questo si usa `iq3_m`. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 12288 e rilancia lo script. Ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM).
+Misurato sulla 4070 Ti Super (ottobre 2026), con la KV cache ancora in f16: 100% in GPU, ~40 token/s in scrittura e ~1.500 token/s in lettura del prompt, ~6 s di caricamento a freddo. Con un prompt di 13.000 token a 16k la VRAM arriva a 15,2 GB su 16,4. Questo modello ha pochi strati di attenzione piena, quindi il contesto costa poco: da 12k a 16k servono solo ~140 MB in più. Il `q3_K_L` (~15 GB) lascerebbe invece troppo poco margine, per questo si usa `iq3_m`. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 32768 e rilancia lo script. Con flash attention e KV cache q8_0 (10 ottobre 2026), sempre 100% in GPU e ~41 token/s: 24k 15,0 GB, 32k 15,3 GB, 40k 15,6 GB su 16,0, con ~1,4 GB occupati dal desktop. Restano ~390 MB liberi, quindi se altri programmi usano più VRAM conviene scendere a 32k. Ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM).
 
-LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e dimensiona tutto su quello (vedi *Finestra di contesto* più sotto): con 16k documenti, pagine web e cronologia hanno meno spazio che con Gemma, ma la richiesta non supera mai la finestra. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala. Questo Qwen ha anche la capacità `vision`: con Qwen Coder selezionato le immagini allegate vanno direttamente a lui, senza passare da Qwen3-VL su ComfyUI.
+LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e dimensiona tutto su quello (vedi *Finestra di contesto* più sotto): documenti, pagine web e cronologia hanno lo spazio di quella finestra, e la richiesta non supera mai la finestra. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala. Questo Qwen ha anche la capacità `vision`: con Qwen Coder selezionato le immagini allegate vanno direttamente a lui, senza passare da Qwen3-VL su ComfyUI.
 
 ### Secondo Qwen: Qwen Aggressive
 
@@ -111,6 +111,25 @@ Variabili d'ambiente utili:
 
 Se il motore configurato non risponde, si ripiega su DuckDuckGo.
 
+## Modalità Computer: progetti e comandi sul PC
+
+Con il tasto **Computer** nel composer l'assistente lavora in una cartella del PC: crea pagine web, piccoli giochi per il browser (per esempio un Tetris), script, documenti PDF e Word, e può eseguire comandi. La modalità resta attiva per tutta la conversazione e funziona anche da telefono, in casa o da fuori con Tailscale, come il resto dell'app.
+
+- **Cartella di lavoro**: `workspace\<utente>\` dentro LocalAI, con una sottocartella per progetto (`tetris\`, `sito\`…). Il modello scrive, legge ed elimina file solo lì: i percorsi con `..`, quelli assoluti e i collegamenti che puntano fuori vengono rifiutati.
+- **Aprire i file**: sotto la risposta compaiono i file creati con i link **Apri** e **Scarica**. La voce **Progetti** nella barra laterale elenca tutto il contenuto della cartella. Pagine e giochi vengono serviti dalla porta `3001`, un'origine diversa dall'app: girano liberamente (anche con `localStorage`) ma non possono leggere chat o dati di LocalAI. Il link contiene un codice personale dell'utente, quindi si apre anche da un altro dispositivo senza fare l'accesso.
+- **PDF e Word**: l'assistente scrive una pagina HTML e la converte. Il PDF si crea stampando la pagina con Edge (o Chrome) in modalità headless. Il Word usa Microsoft Word se è installato, altrimenti un convertitore interno che gestisce titoli, paragrafi, grassetto e corsivo, elenchi e tabelle.
+- **Comandi** (solo per gli amministratori): partono da `cmd.exe` nella cartella di lavoro, con un limite di 2 minuti. I comandi di sola lettura (`dir`, `type`, `tasklist`, `systeminfo`, `ipconfig`, `ping`, `nvidia-smi`, `node -v`, `git status`…) senza percorsi esterni partono subito. Tutti gli altri, compreso l'avvio degli script creati, si fermano su una scheda **Esegui / Annulla** nella chat. Senza risposta entro 5 minuti il comando viene annullato. Mentre aspetta la conferma, la chat tiene occupata la GPU.
+- **Modello**: in modalità Computer, se nel menu è selezionato il modello predefinito, si usa **Qwen Coder** (`qwen3.8-coder`), che nel benchmark scrive il codice migliore. Se scegli a mano un altro modello, si usa quello.
+
+| Variabile | Default |
+|---|---|
+| `WORKSPACE_DIR` | `./workspace` |
+| `WORKSPACE_PORT` | `3001` (server dei file creati) |
+| `WORKSPACE_MODEL` | `qwen3.8-coder:latest` (vuoto = usa sempre il modello scelto nel menu) |
+| `WORKSPACE_MAX_ROUNDS` | `16` (azioni massime per risposta) |
+| `WORKSPACE_CONFIRM_SECONDS` | `300` |
+| `PDF_BROWSER` | percorso di Edge/Chrome, se non è nella posizione standard |
+
 ## Configurazione
 
 Si fa con variabili d'ambiente (i default sono in `src/config.js`):
@@ -119,7 +138,7 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 |---|---|
 | `OLLAMA_URL` | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | `gemma4-12b-uncensored:latest` |
-| `OLLAMA_CTX` | `24576` (i modelli con `num_ctx` nel Modelfile, come Qwen Coder, usano il proprio) |
+| `OLLAMA_CTX` | `131072` (misurato su gemma4-12b: 10,4 GB, 100% GPU, ~64 tok/s come a 24k; i modelli con `num_ctx` nel Modelfile, come Qwen Coder, usano il proprio) |
 | `OLLAMA_KEEP_ALIVE` | `30m` |
 | `COMFY_URL` | `http://127.0.0.1:8188` |
 | `AGENT_URL` | `http://127.0.0.1:7070` (agent del PC, arbitro della GPU condiviso con ChatBz) |
@@ -213,6 +232,8 @@ src/
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
+  workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
+  docx.js            conversione HTML → .docx senza dipendenze
 public/              interfaccia (HTML/CSS/JS, senza build)
 workflows/           workflow ComfyUI (API) + manifest + guide
 _legacy/             vecchia versione del progetto (si può eliminare)

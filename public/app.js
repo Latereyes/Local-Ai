@@ -40,6 +40,9 @@ const P = {
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  terminal: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><path d="M12 15h5"/>',
+  play: '<path d="M7 4v16l13-8z"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
 const icon = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[n] || ''}</svg>`;
@@ -54,6 +57,7 @@ const state = {
   convs: [],
   conv: null,
   tool: null,
+  computer: false,
   think: !!prefs.think,
   gpu: null,
   view: 'chat',
@@ -139,6 +143,7 @@ const el = {
   convList: $('#conv-list'), modelName: $('#model-name'), modelMenu: $('#model-menu'),
   gpuPill: $('#gpu-pill'), gpuLabel: $('#gpu-label'), gpuMenu: $('#gpu-menu'),
   toBottom: $('#to-bottom'), gallery: $('#gallery'), lightbox: $('#lightbox'), lbBody: $('#lb-body'),
+  projects: $('#projects'),
 };
 
 // ---------- Sidebar ----------
@@ -153,6 +158,7 @@ $('#btn-open').onclick = () => setSidebar(true);
 $('#scrim').onclick = () => setSidebar(false);
 $('#btn-new').onclick = () => { newChat(); if (isMobile()) setSidebar(false); };
 $('#btn-gallery').onclick = () => { openGallery(); if (isMobile()) setSidebar(false); };
+$('#btn-projects').onclick = () => { openProjects(); if (isMobile()) setSidebar(false); };
 
 function groupLabel(ts) {
   const d = new Date(ts), now = new Date();
@@ -223,11 +229,15 @@ function showView(v) {
   state.view = v;
   $('#view-chat').hidden = v !== 'chat';
   $('#view-gallery').hidden = v !== 'gallery';
+  $('#view-projects').hidden = v !== 'projects';
   $('#btn-gallery').classList.toggle('active', v === 'gallery');
+  $('#btn-projects').classList.toggle('active', v === 'projects');
 }
 
 function newChat(push = true) {
   state.conv = null;
+  state.computer = false;
+  renderOpts();
   showView('chat');
   el.thread.innerHTML = '';
   el.welcome.hidden = false;
@@ -244,6 +254,8 @@ async function openConv(id, push = true) {
   try { c = await api(`/api/conversations/${id}`); }
   catch { return newChat(); }
   state.conv = c;
+  state.computer = !!c.computer;
+  renderOpts();
   el.welcome.hidden = true;
   el.thread.innerHTML = '';
   for (const m of c.messages) renderMessage(m);
@@ -259,6 +271,7 @@ function route() {
   const m = location.pathname.match(/^\/c\/([\w-]+)/);
   if (m) openConv(m[1], false);
   else if (location.pathname.startsWith('/galleria')) openGallery(false);
+  else if (location.pathname.startsWith('/progetti')) openProjects(false);
   else newChat(false);
 }
 
@@ -288,6 +301,10 @@ function renderMessage(m) {
   let node = document.getElementById(`m-${m.id}`);
   if (m.role === 'user') {
     if (node) return;
+    if (m.auto) {
+      el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
+      return;
+    }
     const TOOL_LABEL = { image: ['image', 'Immagine'], video: ['video', 'Video'], web: ['globe', 'Ricerca web'] };
     const tl = TOOL_LABEL[m.tool];
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
@@ -303,6 +320,7 @@ function renderMessage(m) {
       <div class="ai-body">
         <details class="thinking" hidden><summary>${icon('right', 14)}<span></span></summary><div class="thinking-text"></div></details>
         <details class="steps" hidden><summary>${icon('globe', 14)}<span class="steps-title"></span>${icon('right', 13)}</summary><div class="steps-list"></div></details>
+        <div class="ws-actions" hidden></div>
         <div class="status-line" hidden></div>
         <div class="md"></div>
         <div class="media-grid"></div>
@@ -324,10 +342,11 @@ function renderMessage(m) {
   }
 
   renderSteps(node, m, live);
+  renderComputer(node, m);
 
   // Stato (attesa GPU / caricamento)
   const st = $('.status-line', node);
-  const showStatus = live && !m.content && !m.thinking && !(m.media || []).length && !(m.steps || []).length;
+  const showStatus = live && !m.content && !m.thinking && !(m.media || []).length && !(m.steps || []).some((s) => !WS_STEP.has(s.type) || s.status === 'running');
   st.hidden = !showStatus;
   if (showStatus) {
     const txt = m.status === 'waiting' ? `In attesa della GPU (${esc(m.waitReason || 'occupata')})…` : '';
@@ -366,7 +385,7 @@ const domain = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); 
 
 function renderSteps(node, m, live) {
   const box = $('.steps', node);
-  const steps = m.steps || [];
+  const steps = (m.steps || []).filter((s) => !WS_STEP.has(s.type));
   box.hidden = !steps.length;
   if (!steps.length) return;
   const running = steps.find((s) => s.status === 'running');
@@ -400,6 +419,64 @@ function renderSteps(node, m, live) {
     return `<div class="step">${icon('page', 14)}<div class="step-body"><div>Lettura: <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || domain(s.url))}</a> <span class="faint">${esc(domain(s.url))}</span> ${state}</div></div></div>`;
   }).join('');
 }
+
+// ---------- Modalità Computer: file creati e comandi ----------
+const WS_STEP = new Set(['file', 'command']);
+const fmtSize = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1).replace('.', ',')} KB` : `${(n / 1048576).toFixed(1).replace('.', ',')} MB`);
+/** URL di un file della cartella di lavoro (porta separata, stesso indirizzo da cui si usa l'app: funziona anche da telefono). */
+function wsUrl(p, download = false) {
+  const ws = state.config?.workspace;
+  if (!ws) return '#';
+  const enc = String(p).split('/').map(encodeURIComponent).join('/');
+  return `${location.protocol}//${location.hostname}:${ws.port}/${ws.token}/${enc}${download ? '?download' : ''}`;
+}
+function wsLinks(p, { dir = false, bare = false } = {}) {
+  if (!p) return '';
+  const viewable = dir || /\.(html?|txt|md|json|css|js|py|ps1|bat|csv|svg|png|jpe?g|gif|webp|pdf)$/i.test(p);
+  const web = dir || /\.html?$/i.test(p);
+  const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
+  return bare ? links : `<span class="ws-links">${links}</span>`;
+}
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo' };
+
+function renderComputer(node, m) {
+  const box = $('.ws-actions', node);
+  // le letture e gli elenchi sono dettagli: si mostrano solo mentre sono in corso o se falliscono
+  // i blocchi aggiunti a un file (append) si mostrano come dimensione aggiornata del file scritto
+  const grown = new Map();
+  for (const s of m.steps || []) if (s.action === 'append' && s.status === 'done') grown.set(s.path, s.size);
+  const steps = (m.steps || []).filter((s) => WS_STEP.has(s.type) && !(['read', 'list', 'append'].includes(s.action) && s.status === 'done'))
+    .map((s) => (s.action === 'write' && grown.has(s.path) ? { ...s, size: grown.get(s.path) } : s));
+  box.hidden = !steps.length;
+  if (!steps.length) { box.innerHTML = ''; return; }
+  box.innerHTML = steps.map((s) => {
+    const spin = s.status === 'running' ? '<span class="spin"></span>' : '';
+    const err = s.status === 'error' ? `<div class="step-err">${esc(s.error || 'non riuscito')}</div>` : '';
+    if (s.type === 'file') {
+      if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(s.path)}</div></div>`;
+      const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
+      const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
+      const links = s.status === 'done' && ['write', 'word', 'pdf'].includes(s.action) ? wsLinks(s.path) : '';
+      return `<div class="ws-act"><div class="ws-act-head">${icon(s.action === 'word' || s.action === 'pdf' ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
+    }
+    const where = s.cwd ? ` <span class="faint">in ${esc(s.cwd)}</span>` : '';
+    const res = s.status === 'done'
+      ? `<span class="${s.exitCode === 0 ? 'ws-ok' : 'step-err'}">${s.timedOut ? 'interrotto (tempo scaduto)' : `uscita ${s.exitCode}`}</span>`
+      : s.status === 'declined' ? '<span class="faint">non eseguito</span>' : '';
+    const confirm = s.status === 'confirm' ? `<div class="ws-confirm">Vuoi eseguire questo comando sul PC?
+        <button class="btn primary" data-cmd="${s.id}" data-approve="1">Esegui</button><button class="btn" data-cmd="${s.id}" data-approve="0">Annulla</button></div>` : '';
+    const out = s.output ? `<pre>${esc(s.output)}</pre>` : '';
+    return `<div class="ws-act${s.status === 'confirm' ? ' confirm' : ''}"><div class="ws-act-head">${icon('terminal', 14)}<code>${esc(s.command)}</code>${where}${spin}${res}</div>${confirm}${out}${err}</div>`;
+  }).join('');
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-cmd]');
+  if (!b || !state.conv) return;
+  b.parentElement.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+  try { await api(`/api/conversations/${state.conv.id}/commands/${b.dataset.cmd}`, { body: { approve: b.dataset.approve === '1' } }); }
+  catch (err) { alert(err.message); b.parentElement.querySelectorAll('button').forEach((x) => { x.disabled = false; }); }
+});
 
 /** Fonti consultate (dai passaggi reali, mai dal testo del modello): pagine lette, altrimenti i primi risultati. */
 function renderSources(node, m, live) {
@@ -614,6 +691,8 @@ function onEvent(evt) {
   switch (evt.type) {
     case 'message': {
       const m = upsertMsg(evt.message);
+      // risposta partita dal server (ripresa automatica in modalità Computer): il tasto diventa «Ferma»
+      if (m.role === 'assistant' && m.status === 'pending' && state.conv) { state.conv.running = true; updateSend(); }
       renderMessage(m);
       scrollToBottom(m.role === 'user');
       break;
@@ -866,6 +945,7 @@ dropZone.addEventListener('drop', (e) => {
 function renderOpts() {
   $$('.chip[data-tool]').forEach((c) => c.classList.toggle('on', c.dataset.tool === state.tool));
   $('#chip-think').classList.toggle('on', state.think);
+  $('#chip-computer').classList.toggle('on', state.computer);
   const wf = state.config?.workflows || [];
   const sel = (key, options, title) => `<label class="select-chip" title="${title}"><select data-pref="${key}">${options.map(([v, l]) => `<option value="${v}" ${String(prefs[key] ?? 'auto') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
   let html = '';
@@ -890,6 +970,13 @@ el.opts.addEventListener('change', (e) => {
 $$('.chip[data-tool]').forEach((c) => {
   c.onclick = () => { state.tool = state.tool === c.dataset.tool ? null : c.dataset.tool; renderOpts(); el.input.focus(); };
 });
+$('#chip-computer').onclick = () => {
+  state.computer = !state.computer;
+  renderOpts();
+  if (state.conv) api(`/api/conversations/${state.conv.id}`, { method: 'PATCH', body: { computer: state.computer } }).catch(() => {});
+  el.input.placeholder = state.computer ? 'Cosa creo o faccio sul PC? (es. un gioco tipo Tetris, una pagina web, un documento Word…)' : 'Scrivi un messaggio…';
+  el.input.focus();
+};
 $('#chip-think').onclick = () => { state.think = !state.think; prefs.think = state.think; savePrefs(); renderOpts(); };
 
 el.composer.addEventListener('submit', async (e) => {
@@ -922,7 +1009,7 @@ async function sendMessage(text, tool) {
     updateSend();
     state.stick = true;
     const body = {
-      text, tool, model: currentModel(), think: state.think,
+      text, tool, model: currentModel(), think: state.think, computer: state.computer,
       imageModel: prefs.imageModel || 'auto',
       aspect: tool === 'video' ? (prefs.vaspect || 'auto') : tool === 'image' ? (prefs.aspect || 'auto') : 'auto',
       duration: tool === 'video' ? (prefs.duration || 'auto') : 'auto',
@@ -980,6 +1067,38 @@ el.gallery.addEventListener('click', (e) => {
 });
 el.gallery.addEventListener('mouseover', (e) => { const v = e.target.closest('.tile video'); if (v) v.play().catch(() => {}); });
 el.gallery.addEventListener('mouseout', (e) => { const v = e.target.closest('.tile video'); if (v) v.pause(); });
+
+// ---------- Progetti (cartella di lavoro) ----------
+async function openProjects(push = true) {
+  showView('projects');
+  state.conv = null;
+  renderConvList();
+  if (push) history.pushState(null, '', '/progetti');
+  document.title = 'Progetti · LocalAI';
+  const { files = [] } = await api('/api/workspace').catch(() => ({}));
+  const groups = new Map();
+  for (const f of files) {
+    const [top, ...rest] = f.path.split('/');
+    if (!rest.length && f.dir) { if (!groups.has(top)) groups.set(top, []); continue; }
+    const key = rest.length ? top : '';
+    if (!groups.has(key)) groups.set(key, []);
+    if (!f.dir) groups.get(key).push({ ...f, name: rest.length ? rest.join('/') : top });
+  }
+  const when = (t) => new Date(t).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  el.projects.innerHTML = groups.size ? [...groups].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0])).map(([name, list]) => {
+    const hasIndex = list.some((f) => f.name === 'index.html');
+    return `<div class="project"><h3>${icon('folder', 16)}${esc(name || 'File sciolti')}${name ? `<span class="ws-links">${hasIndex ? wsLinks(name, { dir: true, bare: true }) : ''}<button class="del" data-ws-del="${esc(name)}" title="Elimina il progetto">${icon('trash', 13)}</button></span>` : ''}</h3>
+      ${list.length ? list.map((f) => `<div class="project-file"><span class="name">${esc(f.name)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(f.path)}<button class="del" data-ws-del="${esc(f.path)}" title="Elimina">${icon('trash', 13)}</button></div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
+    </div>`;
+  }).join('') : '<div class="empty">Ancora nessun progetto. In una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>';
+}
+el.projects.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ws-del]');
+  if (!b) return;
+  if (!confirm(`Eliminare «${b.dataset.wsDel}»?`)) return;
+  try { await api(`/api/workspace?path=${encodeURIComponent(b.dataset.wsDel)}`, { method: 'DELETE' }); openProjects(false); }
+  catch (err) { alert(err.message); }
+});
 
 // ---------- Lightbox ----------
 function openLightbox(md, fromGallery = false) {

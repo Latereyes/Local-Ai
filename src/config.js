@@ -15,7 +15,8 @@ export default {
   ollama: {
     url: env.OLLAMA_URL || 'http://127.0.0.1:11434',
     model: env.OLLAMA_MODEL || 'gemma4-12b-uncensored:latest',
-    numCtx: Number(env.OLLAMA_CTX || 24576),
+    // 128k: misurato su gemma4-12b (10,4 GB, 100% GPU, stessa velocità che a 24k; Gemma usa per lo più attenzione a finestra)
+    numCtx: Number(env.OLLAMA_CTX || 131072),
     // Tempo per cui Ollama tiene il modello in VRAM tra un messaggio e l'altro
     keepAlive: env.OLLAMA_KEEP_ALIVE || '30m',
     // Nomi da mostrare nel menu dei modelli (e con cui l'assistente si presenta), per nome Ollama senza ":latest"
@@ -38,6 +39,17 @@ export default {
     app: 'localai',
   },
 
+  // Cartella di lavoro (modalità «Computer»): progetti, file e comandi dell'assistente.
+  // I file si aprono nel browser da una porta separata, così pagine e giochi creati non toccano l'app.
+  workspace: {
+    port: Number(env.WORKSPACE_PORT || 3001),
+    // Modello usato in modalità Computer quando è selezionato quello predefinito (se installato)
+    model: env.WORKSPACE_MODEL ?? 'qwen3.8-coder:latest',
+    maxRounds: Number(env.WORKSPACE_MAX_ROUNDS || 16),
+    // Tempo massimo per confermare un comando dall'interfaccia, poi viene annullato
+    confirmTimeoutMs: Number(env.WORKSPACE_CONFIRM_SECONDS || 300) * 1000,
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',
@@ -56,5 +68,6 @@ export default {
     users: path.join(dataDir, 'users.json'),
     sessions: path.join(dataDir, 'sessions.json'),
     public: path.join(root, 'public'),
+    workspace: env.WORKSPACE_DIR ? path.resolve(env.WORKSPACE_DIR) : path.join(root, 'workspace'),
   },
 };
