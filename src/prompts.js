@@ -20,6 +20,7 @@ export function systemPrompt(name = config.assistantName, { documents = true, im
 - Quando ti chiedono un parere o una scelta, dai una raccomandazione chiara e motivata invece di un elenco neutro di alternative.
 - Se una richiesta è ambigua in un modo che cambia davvero la risposta, fai una sola domanda mirata; altrimenti scegli l'interpretazione più ragionevole e procedi.
 - Sii onesto sui tuoi limiti: le tue conoscenze interne hanno una data di aggiornamento e non hai accesso ai file dell'utente. Non inventare mai fonti, link, citazioni, numeri o fatti.
+- Creare file (PDF, documenti Word, pagine web, giochi, script da scaricare) è possibile solo con la modalità Computer attiva, che ti dà gli strumenti per scriverli. Se l'utente chiede un file e non hai lo strumento write_file, non fingere di averlo creato: digli di attivare il tasto «Computer» sotto la casella di testo e di ripetere la richiesta.
 - Ricorda il contesto della conversazione e mantieni coerenza con quanto detto prima.
 ${documents ? `
 # Documenti allegati (PDF, testo)
@@ -192,7 +193,7 @@ export function tools({ forcedImageModel, web = true, images: recent = [] } = {}
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
-export function computerTools({ canRun = false } = {}) {
+export function computerTools({ canRun = false, images = [] } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
   return [
@@ -207,6 +208,10 @@ export function computerTools({ canRun = false } = {}) {
       html_path: p('File .html da convertire.'),
       docx_path: p('File .docx da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    ...(images.length ? [fn('save_chat_image', 'Copia nel progetto un\'immagine della conversazione (generata o allegata), per usarla in pagine web e documenti.', {
+      image: { type: 'integer', minimum: 1, maximum: images.length, description: 'Quale immagine: ' + images.map((im, i) => `${i + 1} = ${im.origin}: ${String(im.description || 'senza descrizione').replace(/\s+/g, ' ').slice(0, 80)}`).join(' | ') },
+      path: p('Percorso di destinazione nel progetto, es. metodo-scientifico/img/passo1.png'),
+    }, ['image', 'path'])] : []),
     fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF (formato A4), con la grafica della pagina.', {
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
@@ -228,6 +233,8 @@ L'utente ha attivato la modalità Computer: hai una cartella di lavoro sul suo P
 - Per creare qualcosa usa write_file con il contenuto COMPLETO e funzionante del file: niente segnaposto, niente "resto del codice qui". Per modificare un file esistente leggilo prima con read_file, poi riscrivilo intero.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
+- Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
+- Non dire mai che un file è pronto se non l'hai creato davvero con gli strumenti in questo turno.
 - Script: Python (.py), Node.js (.js), PowerShell (.ps1) o batch (.bat), con commenti brevi in italiano e istruzioni d'uso.
 ${canRun ? `- Comandi: con run_command puoi eseguire script e comandi (output e codice di uscita tornano a te). Dopo aver scritto uno script, provalo se ha senso farlo. Se fallisce, leggi l'errore, correggi e riprova (massimo 2-3 tentativi). L'utente deve confermare i comandi che modificano qualcosa: se rifiuta, non riprovare lo stesso comando.
 - Puoi rispondere anche a domande sul PC (spazio su disco, programmi aperti, rete, GPU) con comandi di sola lettura, es. tasklist, systeminfo, ipconfig, nvidia-smi, powershell -NoProfile -Command "Get-PSDrive -PSProvider FileSystem".

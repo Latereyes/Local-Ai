@@ -301,6 +301,10 @@ function renderMessage(m) {
   let node = document.getElementById(`m-${m.id}`);
   if (m.role === 'user') {
     if (node) return;
+    if (m.auto) {
+      el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
+      return;
+    }
     const TOOL_LABEL = { image: ['image', 'Immagine'], video: ['video', 'Video'], web: ['globe', 'Ricerca web'] };
     const tl = TOOL_LABEL[m.tool];
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
@@ -433,7 +437,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
   const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
   return bare ? links : `<span class="ws-links">${links}</span>`;
 }
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -445,6 +449,7 @@ function renderComputer(node, m) {
     const spin = s.status === 'running' ? '<span class="spin"></span>' : '';
     const err = s.status === 'error' ? `<div class="step-err">${esc(s.error || 'non riuscito')}</div>` : '';
     if (s.type === 'file') {
+      if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(s.path)}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
       const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
       const links = s.status === 'done' && ['write', 'word', 'pdf'].includes(s.action) ? wsLinks(s.path) : '';
@@ -682,6 +687,8 @@ function onEvent(evt) {
   switch (evt.type) {
     case 'message': {
       const m = upsertMsg(evt.message);
+      // risposta partita dal server (ripresa automatica in modalità Computer): il tasto diventa «Ferma»
+      if (m.role === 'assistant' && m.status === 'pending' && state.conv) { state.conv.running = true; updateSend(); }
       renderMessage(m);
       scrollToBottom(m.role === 'user');
       break;

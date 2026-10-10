@@ -24,7 +24,7 @@ export function stop(conversationId) {
 const TOOL_TYPE = { generate_image: 'image', generate_video: 'video', edit_image: 'image', animate_image: 'video', photo_with_face: 'image', upscale_image: 'image' };
 const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', edit_image: 'img2img', animate_image: 'img2video', photo_with_face: 'identity', upscale_image: 'upscale' };
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'run_command']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'run_command']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -168,7 +168,7 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -198,7 +198,7 @@ function waitConfirmation(convId, stepId, signal) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -240,6 +240,14 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         step.path = r.path;
         step.method = r.method;
         output = JSON.stringify({ ok: true, docx: r.path, method: r.method });
+        break;
+      }
+      case 'save_chat_image': {
+        const img = recentImages(conv, 12)[Math.max(1, Math.floor(Number(args.image)) || 1) - 1];
+        if (!img) throw new workspace.WorkspaceError('Immagine non trovata nella conversazione');
+        const r = await workspace.copyIn(user, path.join(config.paths.media, img.file), step.path, path.extname(img.file));
+        Object.assign(step, { path: r.path, size: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, width: img.width || undefined, height: img.height || undefined });
         break;
       }
       case 'html_to_pdf': {
@@ -565,7 +573,7 @@ export async function send(conv, opts) {
   const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
-  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, createdAt: Date.now() };
+  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true } : {}), createdAt: Date.now() };
   const msg = { id: store.newId(), role: 'assistant', content: '', thinking: '', steps: [], media: [], model, status: 'pending', createdAt: Date.now() };
   conv.messages.push(userMsg, msg);
   await store.save(conv);
@@ -610,7 +618,7 @@ export async function send(conv, opts) {
 
         const allTools = [
           ...tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) }),
-          ...(computer ? computerTools({ canRun }) : []),
+          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12) }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
         const maxRounds = computer ? Math.max(config.workspace.maxRounds, config.search.maxRounds) : config.search.maxRounds;
@@ -797,7 +805,17 @@ export async function send(conv, opts) {
       emit(conv.id, { type: 'done', messageId: msg.id, status: msg.status, error: msg.error, stats: msg.stats });
     }
 
-    for (const md of msg.media) if (md.status === 'engineering') enqueue(conv, msg, md);
+    const jobs = msg.media.filter((md) => md.status === 'engineering').map((md) => enqueue(conv, msg, md));
+    // Modalità Computer: quando le immagini richieste sono pronte, il lavoro riprende da solo
+    // (per esempio per metterle nel PDF o nella pagina). Una sola ripresa per richiesta dell'utente.
+    if (computer && jobs.length && msg.status === 'done' && !opts.auto) {
+      Promise.all(jobs).then(() => {
+        const ready = msg.media.filter((md) => md.status === 'done').length;
+        if (!ready || !conv.computer || running.has(conv.id)) return;
+        const text = `[Messaggio automatico] Le ${ready} immagini generate sono pronte${ready < msg.media.length ? ` (${msg.media.length - ready} non riuscite)` : ''}. Se servono per il lavoro richiesto, copiale nel progetto con save_chat_image e completalo; altrimenti rispondi in una riga.`;
+        return send(conv, { text, model: opts.model, computer: true, auto: true });
+      }).catch((e) => console.error('[chat] ripresa automatica', e.message));
+    }
   })();
 
   return { userMessage: userMsg, message: msg };

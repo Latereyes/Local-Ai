@@ -114,6 +114,16 @@ export async function writeFile(user, rel, content) {
   return { path: r, size: Buffer.byteLength(text), created: !existed };
 }
 
+/** Copia nella cartella un file dell'app (es. un'immagine generata in chat); aggiunge l'estensione se manca. */
+export async function copyIn(user, srcAbs, rel, ext = '') {
+  let { abs, rel: r } = resolve(user, rel);
+  if (!r || r.endsWith('/')) throw new WorkspaceError('Serve il nome del file');
+  if (ext && !path.extname(r)) ({ abs, rel: r } = resolve(user, r + ext));
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  await fsp.copyFile(srcAbs, abs);
+  return { path: r, size: (await fsp.stat(abs)).size };
+}
+
 export async function deleteFile(user, rel) {
   const { abs, rel: r } = resolve(user, rel);
   if (!r) throw new WorkspaceError('Non si può eliminare la cartella di lavoro');
