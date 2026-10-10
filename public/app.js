@@ -1184,8 +1184,8 @@ function renderProject() {
 
     <section class="pj-card">
       <div class="pj-card-head"><h3>Piano</h3><span class="faint">${esc(p.folder)}/PIANO.md · ogni punto «- …» diventa un task; tipo forzabile con [codice], [pagina], [lettura], [testo]</span></div>
-      <textarea id="pj-plan" rows="8" placeholder="# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
-      <div class="pj-row-btns"><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
+      <textarea id="pj-plan" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
+      <div class="pj-row-btns"><button class="btn" data-pj="draft-plan" title="Un modello locale scrive il piano partendo da quello che c'è nel riquadro (anche solo l'obiettivo)">Scrivi il piano con l'AI</button><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
     </section>
 
     <section class="pj-card">
@@ -1260,6 +1260,19 @@ el.projects.addEventListener('click', async (e) => {
     case 'start': return run(() => api(`${base}/start`, { method: 'POST' }));
     case 'pause': return run(() => api(`${base}/pause`, { method: 'POST' }));
     case 'stop': return run(() => api(`${base}/pause`, { body: { stop: true } }));
+    case 'draft-plan': {
+      const goal = $('#pj-plan').value.trim();
+      if (!goal) { alert('Scrivi prima nel riquadro l\'obiettivo del progetto'); return $('#pj-plan').focus(); }
+      if (/^\s*(?:[-*+]|\d+[.)])\s+/m.test(goal) && !confirm('Il riquadro contiene già un piano: riscriverlo da capo con l\'AI?')) return;
+      b.disabled = true;
+      b.textContent = 'Il modello sta scrivendo il piano…';
+      const plan = $('#pj-plan');
+      plan.dataset.dirty = '';
+      await run(() => api(`${base}/plan/draft`, { body: { goal } }));
+      b.disabled = false;
+      b.textContent = 'Scrivi il piano con l\'AI';
+      return;
+    }
     case 'save-plan': case 'plan-tasks': {
       const plan = $('#pj-plan');
       await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }));

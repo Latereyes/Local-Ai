@@ -203,11 +203,29 @@ export function newTask(text, type) {
   };
 }
 
+/** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo. */
+export function planPrompt(goal, files) {
+  return [
+    { role: 'system', content: `Scrivi il piano di lavoro di un progetto software che verrà eseguito da modelli AI locali, un task alla volta, in una cartella del PC (Windows). Ogni task deve essere piccolo, autonomo e verificabile: chi lo esegue vede solo il piano, i task già fatti e i file della cartella.
+Formato (Markdown, in italiano, niente altro):
+# Obiettivo
+una o due frasi
+
+- [tipo] cosa fare, con nomi di file concreti
+  eventuali dettagli rientrati di due spazi
+
+Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi, niente librerie esterne); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README e testi.
+Da 3 a 8 task, in ordine di esecuzione. Il primo crea qualcosa che funziona già; i successivi aggiungono una cosa alla volta.` },
+    { role: 'user', content: `Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
+  ];
+}
+
 /** Aggiunge i task del piano che non ci sono già (stesso testo). */
 export async function tasksFromPlan(user, p) {
   const plan = await readPlan(user, p);
   const items = parsePlan(plan);
-  if (!items.length) throw new ProjectError(`Nel piano non ci sono punti di elenco da trasformare in task (righe che iniziano con «-» o «1.»)`);
+  if (!plan.trim()) throw new ProjectError('Il piano è vuoto (il testo in grigio è solo un esempio): scrivilo, oppure scrivi l\'obiettivo e premi «Scrivi il piano con l\'AI»');
+  if (!items.length) throw new ProjectError('Nel piano non ci sono punti di elenco da trasformare in task (righe che iniziano con «-» o «1.»)');
   const have = new Set(p.tasks.map((t) => t.text));
   const added = items.map((it) => newTask(it.text)).filter((t) => !have.has(t.text));
   p.tasks.push(...added);

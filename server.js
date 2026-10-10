@@ -230,6 +230,22 @@ app.put('/api/projects/:id/plan', projectErr(async (req, res) => {
   await projects.writePlan(req.user, p, req.body?.text);
   res.json(await fullProject(req, p));
 }));
+// Bozza del piano scritta da un modello locale (quello per la lettura: segue bene il formato) a partire dall'obiettivo
+app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const goal = String(req.body?.goal || '').trim();
+  if (!goal) throw httpError(400, 'Scrivi l\'obiettivo del progetto nel riquadro del piano');
+  const model = await projects.modelFor('read');
+  const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
+  const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
+    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 2000 },
+  }));
+  const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
+  if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
+  await projects.writePlan(req.user, p, plan);
+  res.json(await fullProject(req, p));
+}));
+
 // Crea i task dai punti del piano (PIANO.md, scritto dall'utente o da Claude Code)
 app.post('/api/projects/:id/plan/tasks', projectErr(async (req, res) => {
   const p = ownProject(req);
