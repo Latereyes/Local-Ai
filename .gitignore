@@ -38,3 +38,6 @@ sessions.json
 __pycache__/
 *.pyc
 .claude/settings.local.json
+
+# Cartella di lavoro dell'assistente (progetti creati in modalità Computer)
+workspace/

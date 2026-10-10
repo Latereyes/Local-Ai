@@ -111,6 +111,25 @@ Variabili d'ambiente utili:
 
 Se il motore configurato non risponde, si ripiega su DuckDuckGo.
 
+## Modalità Computer: progetti e comandi sul PC
+
+Con il tasto **Computer** nel composer l'assistente lavora in una cartella del PC: crea pagine web, piccoli giochi per il browser (per esempio un Tetris), script, documenti PDF e Word, e può eseguire comandi. La modalità resta attiva per tutta la conversazione e funziona anche da telefono, in casa o da fuori con Tailscale, come il resto dell'app.
+
+- **Cartella di lavoro**: `workspace\<utente>\` dentro LocalAI, con una sottocartella per progetto (`tetris\`, `sito\`…). Il modello scrive, legge ed elimina file solo lì: i percorsi con `..`, quelli assoluti e i collegamenti che puntano fuori vengono rifiutati.
+- **Aprire i file**: sotto la risposta compaiono i file creati con i link **Apri** e **Scarica**. La voce **Progetti** nella barra laterale elenca tutto il contenuto della cartella. Pagine e giochi vengono serviti dalla porta `3001`, un'origine diversa dall'app: girano liberamente (anche con `localStorage`) ma non possono leggere chat o dati di LocalAI. Il link contiene un codice personale dell'utente, quindi si apre anche da un altro dispositivo senza fare l'accesso.
+- **PDF e Word**: l'assistente scrive una pagina HTML e la converte. Il PDF si crea stampando la pagina con Edge (o Chrome) in modalità headless. Il Word usa Microsoft Word se è installato, altrimenti un convertitore interno che gestisce titoli, paragrafi, grassetto e corsivo, elenchi e tabelle.
+- **Comandi** (solo per gli amministratori): partono da `cmd.exe` nella cartella di lavoro, con un limite di 2 minuti. I comandi di sola lettura (`dir`, `type`, `tasklist`, `systeminfo`, `ipconfig`, `ping`, `nvidia-smi`, `node -v`, `git status`…) senza percorsi esterni partono subito. Tutti gli altri, compreso l'avvio degli script creati, si fermano su una scheda **Esegui / Annulla** nella chat. Senza risposta entro 5 minuti il comando viene annullato. Mentre aspetta la conferma, la chat tiene occupata la GPU.
+- **Modello**: in modalità Computer, se nel menu è selezionato il modello predefinito, si usa **Qwen Coder** (`qwen3.8-coder`), che nel benchmark scrive il codice migliore. Se scegli a mano un altro modello, si usa quello.
+
+| Variabile | Default |
+|---|---|
+| `WORKSPACE_DIR` | `./workspace` |
+| `WORKSPACE_PORT` | `3001` (server dei file creati) |
+| `WORKSPACE_MODEL` | `qwen3.8-coder:latest` (vuoto = usa sempre il modello scelto nel menu) |
+| `WORKSPACE_MAX_ROUNDS` | `16` (azioni massime per risposta) |
+| `WORKSPACE_CONFIRM_SECONDS` | `300` |
+| `PDF_BROWSER` | percorso di Edge/Chrome, se non è nella posizione standard |
+
 ## Configurazione
 
 Si fa con variabili d'ambiente (i default sono in `src/config.js`):
@@ -213,6 +232,8 @@ src/
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
+  workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
+  docx.js            conversione HTML → .docx senza dipendenze
 public/              interfaccia (HTML/CSS/JS, senza build)
 workflows/           workflow ComfyUI (API) + manifest + guide
 _legacy/             vecchia versione del progetto (si può eliminare)

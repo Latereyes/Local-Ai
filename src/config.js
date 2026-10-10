@@ -38,6 +38,17 @@ export default {
     app: 'localai',
   },
 
+  // Cartella di lavoro (modalità «Computer»): progetti, file e comandi dell'assistente.
+  // I file si aprono nel browser da una porta separata, così pagine e giochi creati non toccano l'app.
+  workspace: {
+    port: Number(env.WORKSPACE_PORT || 3001),
+    // Modello usato in modalità Computer quando è selezionato quello predefinito (se installato)
+    model: env.WORKSPACE_MODEL ?? 'qwen3.8-coder:latest',
+    maxRounds: Number(env.WORKSPACE_MAX_ROUNDS || 16),
+    // Tempo massimo per confermare un comando dall'interfaccia, poi viene annullato
+    confirmTimeoutMs: Number(env.WORKSPACE_CONFIRM_SECONDS || 300) * 1000,
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',
@@ -56,5 +67,6 @@ export default {
     users: path.join(dataDir, 'users.json'),
     sessions: path.join(dataDir, 'sessions.json'),
     public: path.join(root, 'public'),
+    workspace: env.WORKSPACE_DIR ? path.resolve(env.WORKSPACE_DIR) : path.join(root, 'workspace'),
   },
 };
