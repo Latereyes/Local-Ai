@@ -203,6 +203,8 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
+  // In un progetto i percorsi sono relativi alla sua cartella: base serve all'interfaccia per i link
+  if (user.project) step.base = user.project;
   msg.steps.push(step);
   const emitStep = () => emit(conv.id, { type: 'step', messageId: msg.id, step });
   emitStep();
@@ -562,9 +564,11 @@ export async function send(conv, opts) {
   const text = rawText || (images.length ? 'Descrivi questa immagine.' : 'Riassumi e analizza questo documento.');
   // Modalità Computer: cartella di lavoro + comandi (solo amministratori). Resta attiva per la conversazione.
   if (typeof opts.computer === 'boolean') conv.computer = opts.computer;
-  const user = getUser(conv.ownerId);
+  const owner = getUser(conv.ownerId);
+  // Chat di un task di progetto: la cartella di lavoro è quella del progetto e i comandi li lancia la coda (test)
+  const user = owner && conv.project ? { ...owner, project: conv.project.folder } : owner;
   const computerOn = !!(conv.computer && user);
-  const canRun = computerOn && user.role === 'admin';
+  const canRun = computerOn && user.role === 'admin' && !conv.project;
   let model = opts.model || config.ollama.model;
   // Con il modello predefinito, in modalità Computer si usa quello per il codice (se installato)
   if (computerOn && model === config.ollama.model && config.workspace.model) {
@@ -577,7 +581,7 @@ export async function send(conv, opts) {
   const numCtx = await ollama.contextSize(model);
   // Il modello predefinito si presenta come ASSISTANT_NAME, gli altri con il proprio nome (es. Qwen Coder)
   const assistantName = model === config.ollama.model ? config.assistantName : ollama.displayName({ name: model });
-  const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform } : null;
+  const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
   const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true } : {}), createdAt: Date.now() };
@@ -590,6 +594,8 @@ export async function send(conv, opts) {
   const ac = new AbortController();
   running.set(conv.id, ac);
   const isFirst = conv.messages.filter((m) => m.role === 'user').length === 1;
+  let finish;
+  const finished = new Promise((r) => { finish = r; });
 
   (async () => {
     try {
@@ -624,9 +630,10 @@ export async function send(conv, opts) {
         emit(conv.id, { type: 'status', messageId: msg.id, status: 'streaming' });
 
         const allTools = [
-          // nella ripresa automatica servono solo i file: niente strumenti per immagini e web (risparmia contesto)
-          ...(opts.auto ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })),
-          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12) }) : []),
+          // nella ripresa automatica servono solo i file: niente strumenti per immagini e web (risparmia contesto);
+          // nei task dei progetti, solo i file (i test li fa la coda)
+          ...(opts.auto || conv.project ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })),
+          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
         const maxRounds = computer ? Math.max(config.workspace.maxRounds, config.search.maxRounds) : config.search.maxRounds;
@@ -773,7 +780,7 @@ export async function send(conv, opts) {
         calls.forEach((call, i) => msg.media.push(...mediaFromCall(call, i, opts, conv)));
         for (const md of msg.media) emitMedia(conv, msg, md);
 
-        if (isFirst) {
+        if (isFirst && !conv.project) {
           try {
             const t = (await ollama.complete({ model, messages: titlePrompt(text), options: { num_predict: 24, temperature: 0.3 } }))
               .replace(/["«»*#]/g, '').split('\n')[0].trim().slice(0, 60);
@@ -789,7 +796,7 @@ export async function send(conv, opts) {
           md.prompt = byCall.get(md.callIndex);
           emitMedia(conv, msg, md);
         }
-      }, { onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+      }, { priority: opts.priority || 'high', onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
 
       msg.status = 'done';
     } catch (e) {
@@ -811,12 +818,13 @@ export async function send(conv, opts) {
       }
       await store.save(conv);
       emit(conv.id, { type: 'done', messageId: msg.id, status: msg.status, error: msg.error, stats: msg.stats });
+      finish(msg);
     }
 
     const jobs = msg.media.filter((md) => md.status === 'engineering').map((md) => enqueue(conv, msg, md));
     // Modalità Computer: quando le immagini richieste sono pronte, il lavoro riprende da solo
     // (per esempio per metterle nel PDF o nella pagina). Una sola ripresa per richiesta dell'utente.
-    if (computer && jobs.length && msg.status === 'done' && !opts.auto) {
+    if (computer && jobs.length && msg.status === 'done' && !opts.auto && !conv.project) {
       Promise.all(jobs).then(() => {
         const ready = msg.media.filter((md) => md.status === 'done').length;
         if (!ready || !conv.computer || running.has(conv.id)) return;
@@ -826,7 +834,8 @@ export async function send(conv, opts) {
     }
   })();
 
-  return { userMessage: userMsg, message: msg };
+  // finished: si risolve con il messaggio a fine turno (lo usa la coda dei progetti); non va nel JSON della risposta
+  return Object.defineProperty({ userMessage: userMsg, message: msg }, 'finished', { value: finished });
 }
 
 /** Rigenera un media: stessa impostazione, nuovo seed (o prompt modificato). Nessun passaggio da Gemma. */

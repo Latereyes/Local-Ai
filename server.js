@@ -14,6 +14,9 @@ import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
 import * as workspace from './src/workspace.js';
+import * as projects from './src/projects.js';
+import * as runner from './src/runner.js';
+import * as vision from './src/vision.js';
 
 const app = express();
 app.set('trust proxy', false);
@@ -114,11 +117,13 @@ app.get('/api/events', (req, res) => {
   const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
   const onEvent = (evt) => { if (store.get(evt.conversationId)?.ownerId === userId) send(evt); };
   const onGpu = (state) => send({ type: 'gpu', state });
+  const onProject = (evt) => { if (evt.ownerId === userId) send({ type: 'project', project: evt.project }); };
   send({ type: 'gpu', state: gpu.state() });
   bus.on('event', onEvent);
   gpu.on('state', onGpu);
+  projects.bus.on('project', onProject);
   const ping = setInterval(() => res.write(': ping\n\n'), 20000);
-  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); });
+  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); projects.bus.off('project', onProject); });
 });
 
 // ---- Conversazioni ----
@@ -172,6 +177,141 @@ app.delete('/api/workspace', wrap(async (req, res) => {
   try { res.json(await workspace.deleteFile(req.user, String(req.query.path || ''))); }
   catch (e) { throw httpError(e instanceof workspace.WorkspaceError ? 400 : 500, e.message); }
 }));
+
+// ---- Progetti con piano e coda di task ----
+function ownProject(req) {
+  const p = projects.get(req.user, String(req.params.id || ''));
+  if (!p) throw httpError(404, 'Progetto non trovato');
+  return p;
+}
+const projectErr = (fn) => wrap(async (req, res) => {
+  try { await fn(req, res); }
+  catch (e) { throw e.status ? e : httpError(e instanceof workspace.WorkspaceError ? 400 : 500, e.message); }
+});
+const ownTask = (p, id) => {
+  const t = p.tasks.find((x) => x.id === id);
+  if (!t) throw httpError(404, 'Task non trovato');
+  return t;
+};
+const fullProject = async (req, p) => ({
+  ...projects.summary(p),
+  autoTest: p.autoTest, testCommand: p.testCommand, log: p.log.slice(-60),
+  tasks: p.tasks.map((t) => ({ ...t, checks: t.checks.map((c) => ({ ...c, screenshotUrl: mediaUrl(c.screenshot) })) })),
+  plan: await projects.readPlan(req.user, p),
+  files: await workspace.listFiles(projects.scoped(req.user, p), '', { limit: 400 }).catch(() => []),
+  current: runner.state(),
+  types: projects.TYPES,
+  models: Object.fromEntries(await Promise.all(Object.keys(projects.TYPES).map(async (k) => [k, await projects.modelFor(k)]))),
+});
+
+app.get('/api/projects', projectErr(async (req, res) => res.json(await projects.list(req.user))));
+app.post('/api/projects', projectErr(async (req, res) => res.json(projects.summary(await projects.create(req.user, req.body?.name)))));
+app.get('/api/projects/:id', projectErr(async (req, res) => res.json(await fullProject(req, ownProject(req)))));
+app.patch('/api/projects/:id', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const b = req.body || {};
+  if (typeof b.name === 'string' && b.name.trim()) p.name = b.name.trim().slice(0, 80);
+  if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
+  if (typeof b.testCommand === 'string') {
+    if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
+    p.testCommand = b.testCommand.trim().slice(0, 300);
+  }
+  await projects.save(p);
+  res.json(await fullProject(req, p));
+}));
+app.delete('/api/projects/:id', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  runner.stopProject(p);
+  await projects.remove(req.user, p);
+  res.json({ ok: true });
+}));
+app.put('/api/projects/:id/plan', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  await projects.writePlan(req.user, p, req.body?.text);
+  res.json(await fullProject(req, p));
+}));
+// Bozza del piano scritta da un modello locale (quello per la lettura: segue bene il formato) a partire dall'obiettivo
+app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const goal = String(req.body?.goal || '').trim();
+  if (!goal) throw httpError(400, 'Scrivi l\'obiettivo del progetto nel riquadro del piano');
+  const model = await projects.modelFor('read');
+  const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
+  const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
+    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 2000 },
+  }));
+  const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
+  if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
+  await projects.writePlan(req.user, p, plan);
+  res.json(await fullProject(req, p));
+}));
+
+// Crea i task dai punti del piano (PIANO.md, scritto dall'utente o da Claude Code)
+app.post('/api/projects/:id/plan/tasks', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const added = await projects.tasksFromPlan(req.user, p);
+  if (req.body?.start && added.length) runner.setActive(p, true);
+  res.json(await fullProject(req, p));
+}));
+app.post('/api/projects/:id/tasks', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const text = String(req.body?.text || '').trim().slice(0, 4000);
+  if (!text) throw httpError(400, 'Scrivi il task');
+  const t = projects.newTask(text, req.body?.type);
+  p.tasks.push(t);
+  projects.addLog(p, `Task aggiunto: «${t.title}»`);
+  await projects.save(p);
+  if (p.active) runner.kick();
+  res.json(await fullProject(req, p));
+}));
+app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  const t = ownTask(p, req.params.taskId);
+  const busy = t.status === 'running' || t.status === 'testing';
+  switch (req.body?.action) {
+    case 'retry':
+      if (busy) throw httpError(409, 'Il task è in corso');
+      Object.assign(t, { status: 'queued', attempts: 0, error: null });
+      projects.addLog(p, `«${t.title}» di nuovo in coda`);
+      break;
+    case 'skip':
+      if (busy) throw httpError(409, 'Il task è in corso');
+      t.status = 'done'; t.skipped = true;
+      projects.addLog(p, `«${t.title}» segnato come fatto a mano`);
+      break;
+    case 'stop':
+      runner.cancelTask(p, t);
+      break;
+    case 'delete':
+      if (busy) throw httpError(409, 'Ferma prima il task');
+      p.tasks.splice(p.tasks.indexOf(t), 1);
+      break;
+    case 'type':
+      if (!projects.TYPES[req.body.type]) throw httpError(400, 'Tipo non valido');
+      if (busy) throw httpError(409, 'Il task è in corso');
+      t.type = req.body.type;
+      break;
+    case 'up': case 'down': {
+      const i = p.tasks.indexOf(t), j = i + (req.body.action === 'up' ? -1 : 1);
+      if (j >= 0 && j < p.tasks.length) [p.tasks[i], p.tasks[j]] = [p.tasks[j], p.tasks[i]];
+      break;
+    }
+    default: throw httpError(400, 'Azione sconosciuta');
+  }
+  await projects.save(p);
+  res.json(await fullProject(req, p));
+}));
+app.post('/api/projects/:id/start', projectErr(async (req, res) => { const p = ownProject(req); runner.setActive(p, true); res.json(await fullProject(req, p)); }));
+app.post('/api/projects/:id/pause', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  runner.setActive(p, false);
+  if (req.body?.stop) runner.stopProject(p);
+  res.json(await fullProject(req, p));
+}));
+
+// ---- Verifica dei modelli che leggono le immagini (giudizio degli screenshot) ----
+app.get('/api/vision', (req, res) => res.json(vision.lastCheck() || {}));
+app.post('/api/vision/check', auth.requireAdmin, wrap(async (req, res) => res.json(await vision.runCheck(req.user.id))));
 
 app.post('/api/conversations/:id/stop', wrap(async (req, res) => { chat.stop(ownConv(req).id); res.json({ ok: true }); }));
 
@@ -243,6 +383,7 @@ app.get('/{*path}', (req, res) => res.sendFile(path.join(config.paths.public, 'i
 const adopted = store.adoptOwnerless(auth.adminUser().id);
 if (adopted) console.log(`  ${adopted} conversazioni esistenti assegnate all'utente ${auth.adminUser().displayName}`);
 recoverInterrupted();
+projects.recoverInterrupted();
 // File della cartella di lavoro su una porta a parte (origine diversa dall'app): pagine e giochi creati
 // dall'assistente girano liberi (anche localStorage) ma non possono leggere chat o dati dell'app.
 // L'accesso è con il codice dell'utente nell'URL, non con i cookie.
