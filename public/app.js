@@ -1340,7 +1340,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
@@ -1420,6 +1420,7 @@ function renderProject() {
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
+      <label class="pj-check-opt">Tentativi per task prima di fermarsi (o di chiamare il coordinatore): <select id="pj-attempts">${[['', `predefinito (${p.defaultAttempts})`], ...[1, 2, 3, 4, 5].map((n) => [n, n])].map(([v, l]) => `<option value="${v}" ${String(p.maxAttempts || '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
       <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
@@ -1550,6 +1551,7 @@ el.projects.addEventListener('change', (e) => {
   const sel = e.target.closest('[data-task-type]');
   if (sel) api(`${base}/tasks/${sel.dataset.taskType}`, { body: { action: 'type', type: sel.value } }).then((out) => { state.project = out; renderProject(); }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autotest') api(base, { method: 'PATCH', body: { autoTest: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-attempts') api(base, { method: 'PATCH', body: { maxAttempts: e.target.value || 0 } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
 });

@@ -4,6 +4,7 @@
 // Da lanciare sul PC di LocalAI, con LocalAI acceso, dalla cartella di LocalAI:
 //   node tools/prova-coordinatore.mjs --utente andrea --password LA_TUA_PASSWORD
 // Opzioni: --url http://localhost:3000   --solo test-sbagliato,pagina-rotta   --minuti 90
+//          --tentativi 1 (tentativi per task prima del coordinatore: con 1 interviene alla prima verifica fallita)
 // Serve un utente amministratore (i test girano solo per gli amministratori).
 // I progetti si chiamano «prova-coord-…»: rilanciando, quelli vecchi vengono cancellati e ricreati.
 // Il resoconto finisce in prova-coordinatore-<data>.md, nella cartella da cui lanci lo script.
@@ -77,7 +78,7 @@ const SCENARIOS = [
   {
     id: 'libreria-inesistente',
     what: 'Il task chiede una libreria Python che non esiste: non si può fare così com\'è.',
-    expect: 'Il coordinatore NON segna il task come fatto: lo riscrive senza la libreria (con un\'alternativa reale) o lascia la coda in pausa e spiega all\'utente cosa serve.',
+    expect: 'La verifica delle librerie boccia il codice (la libreria non esiste su PyPI); il modello o il coordinatore lo riscrivono senza (con un\'alternativa reale) oppure il coordinatore lascia la coda in pausa e spiega all\'utente.',
     files: {},
     tasks: ['[codice] Scrivi meteo.py che usa la libreria Python meteo_super_pro_xyz (da installare con pip) per stampare il meteo di Roma, con i test in tests/test_meteo.py.'],
     check: (dir) => {
@@ -131,7 +132,8 @@ for (const s of SCENARIOS) {
     fs.mkdirSync(path.dirname(path.join(s.dir, f)), { recursive: true });
     fs.writeFileSync(path.join(s.dir, f), text);
   }
-  await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { coordinator: true, autoTest: true } });
+  // un solo tentativo per task: alla prima verifica fallita interviene il coordinatore (è lui che si vuole provare)
+  await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { coordinator: true, autoTest: true, maxAttempts: Number(arg('tentativi', 1)) } });
   for (const t of s.tasks) await api(`/api/projects/${p.id}/tasks`, { body: { text: t } });
   await api(`/api/projects/${p.id}/start`, { method: 'POST' });
   if (s === SCENARIOS[0]) console.log(`Modelli dei task: codice e pagine → ${p.models?.code || '?'}, lettura → ${p.models?.read || '?'}`);

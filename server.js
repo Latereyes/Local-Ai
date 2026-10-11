@@ -200,6 +200,7 @@ const ownTask = (p, id) => {
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
   autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume,
+  maxAttempts: p.maxAttempts || null, defaultAttempts: config.projects.maxAttempts,
   history: await snapshots.history(projects.dirOf(req.user, p), 15),
   git: await snapshots.hasGit(), log: p.log.slice(-60),
   tasks: p.tasks.map((t) => ({ ...t, checks: t.checks.map((c) => ({ ...c, screenshotUrl: mediaUrl(c.screenshot) })) })),
@@ -224,6 +225,7 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
   if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
   if (typeof b.autoResume === 'boolean') p.autoResume = b.autoResume;
+  if (b.maxAttempts !== undefined) p.maxAttempts = Math.min(5, Math.max(0, Math.floor(Number(b.maxAttempts)) || 0)) || null;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
     p.testCommand = b.testCommand.trim().slice(0, 300);

@@ -18,6 +18,7 @@ import { checkMelody } from './melody.js';
 import * as projects from './projects.js';
 import { checkPage } from './browser.js';
 import * as snapshots from './snapshots.js';
+import * as deps from './deps.js';
 import { judgeScreenshot } from './vision.js';
 import { randomUUID } from 'node:crypto';
 
@@ -447,6 +448,20 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         } else {
           report.push(owner.role !== 'admin' ? 'Test non eseguiti: solo l\'amministratore può far girare il codice.' : !p.autoTest ? 'Test disattivati nelle impostazioni del progetto.' : 'Nessun test automatico trovato nel progetto.');
         }
+        // 1b. librerie importate: installate o almeno esistenti (come nella verifica della coda)
+        const d = await deps.checkDependencies(projects.dirOf(owner, p)).catch(() => null);
+        if (d?.missing.length) {
+          const fake = d.missing.filter((m) => m.exists === false);
+          const install = deps.installCommand(d.missing);
+          if (fake.length) {
+            checks.push({ kind: 'deps', ok: false, summary: `Librerie che non esistono: ${fake.map((m) => m.name).join(', ')}` });
+            report.push(`Librerie importate che NON esistono (né installate né su PyPI/npm): ${fake.map((m) => m.name).join(', ')}. Non usare librerie inventate e non simularle nei test: usa la libreria standard o una reale.`);
+          }
+          if (install) {
+            checks.push({ kind: 'deps', ok: null, summary: `Da installare: ${install}` });
+            report.push(`Librerie esistenti ma non installate sul PC: per usarle serve ${install}${canRun ? ' (puoi proporre all\'utente di eseguirlo)' : ' (dillo all\'utente)'}.`);
+          }
+        } else if (d?.checked) report.push('Librerie importate: tutte disponibili.');
         // 2. pagina nel browser: errori JavaScript
         const page = String(args.page || '').trim() || 'index.html';
         let pageExists = false;
