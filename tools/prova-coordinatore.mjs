@@ -82,10 +82,14 @@ const SCENARIOS = [
     expect: 'La verifica delle librerie boccia il codice (la libreria non esiste su PyPI); il modello o il coordinatore lo riscrivono senza (con un\'alternativa reale) oppure il coordinatore lascia la coda in pausa e spiega all\'utente.',
     files: {},
     tasks: ['[codice] Scrivi meteo.py che usa la libreria Python meteo_super_pro_xyz (da installare con pip) per stampare il meteo di Roma, con i test in tests/test_meteo.py.'],
-    check: (dir) => {
+    check: (dir, p) => {
       const src = read(dir, 'meteo.py');
-      const fake = /meteo_super_pro_xyz/.test(src);
-      return { ok: !fake, note: !src ? 'meteo.py non creato (va bene se ha chiesto all\'utente)' : fake ? 'meteo.py usa ancora la libreria inesistente' : 'meteo.py senza la libreria inesistente' };
+      const fake = /^\s*(import|from)\s+meteo_super_pro_xyz/m.test(src);
+      const done = p.tasks.length && p.tasks.every((t) => t.status === 'done');
+      if (fake) return { ok: false, note: 'meteo.py importa ancora la libreria inesistente' };
+      if (src) return { ok: true, note: 'meteo.py riscritto senza la libreria inesistente' };
+      // nessun meteo.py: va bene solo se il task NON risulta fatto (coda in pausa, decisione all'utente)
+      return done ? { ok: false, note: 'task segnato come fatto ma meteo.py non esiste' } : { ok: true, note: 'meteo.py non creato e coda in pausa: decisione lasciata all\'utente' };
     },
   },
 ].filter((s) => !ONLY || ONLY.includes(s.id));
@@ -176,7 +180,7 @@ const SERVICE = /fetch failed|ECONNREFUSED|ECONNRESET|socket hang up|Ollama non 
 for (const s of SCENARIOS) {
   const p = state.get(s.id) || await api(`/api/projects/${s.project}`);
   const interventions = p.log.filter((l) => /^Coordinatore: analizzo/.test(l.text)).length;
-  const result = s.check(s.dir);
+  const result = s.check(s.dir, p);
   if (p.waiting || p.tasks.some((t) => SERVICE.test(t.error || '')) || p.log.some((l) => SERVICE.test(l.text))) {
     result.ok = null;
     result.note = `NON VALUTABILE: Ollama non ha risposto durante la prova (${result.note})`;
