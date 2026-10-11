@@ -92,6 +92,8 @@ test('riavvio: la coda resta attiva solo nei progetti con «riprendi dopo un ria
   await projects.save(a);
   await projects.save(b);
   projects.recoverInterrupted();
+  // i salvataggi di recoverInterrupted sono in coda: si aspettano prima che la pulizia cancelli la cartella
+  await Promise.all([projects.save(a, { touch: false }), projects.save(b, { touch: false })]);
   assert.equal(a.active, true);
   assert.equal(b.active, false);
   assert.equal(a.tasks[0].status, 'queued');
