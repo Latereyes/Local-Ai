@@ -105,7 +105,7 @@
         0
       ],
       "scheduler": "simple",
-      "steps": 8,
+      "steps": 6,
       "denoise": 1
     }
   },
@@ -221,7 +221,7 @@
         0
       ],
       "upscale_method": "lanczos",
-      "megapixels": 0.4,
+      "megapixels": 0.7,
       "resolution_steps": 32
     }
   },

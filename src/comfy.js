@@ -177,7 +177,13 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
     cleanup?.();
   }
 
-  const hist = await api(`/history/${promptId}`);
+  // ComfyUI manda «execution_success» prima di scrivere la history: si aspetta che ci sia.
+  // Prova sul PC 2026-10-10 (ChatBz): un pezzo di video finiva con «nessun file» anche se ComfyUI l'aveva salvato.
+  let hist = await api(`/history/${promptId}`);
+  for (let i = 0; i < 40 && !hist[promptId]?.status?.completed; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    hist = await api(`/history/${promptId}`);
+  }
   const outputs = hist[promptId]?.outputs || {};
   const files = [];
   const texts = [];
