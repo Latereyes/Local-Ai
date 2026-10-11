@@ -197,6 +197,8 @@ async function verify(p, task, conv, owner) {
     } else if (r?.missing.length) {
       const unknown = r.missing.filter((m) => m.exists === null);
       add({ kind: 'deps', ok: null, summary: [install ? `Da installare sul PC: ${install}` : '', unknown.length ? `Non verificate (rete): ${list(unknown)}` : ''].filter(Boolean).join(' · ') });
+    } else if (r && !r.pythonAvailable) {
+      add({ kind: 'deps', ok: null, summary: 'Python non trovato sul PC: librerie Python non verificate (installalo da python.org, non dal Microsoft Store)' });
     } else if (r?.checked) {
       add({ kind: 'deps', ok: true, summary: 'Librerie importate tutte disponibili' });
     }

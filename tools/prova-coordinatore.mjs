@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { userRoot } from '../src/workspace.js';
 
 const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : def; };
@@ -116,6 +117,13 @@ if (user.role !== 'admin') console.warn('⚠ L\'utente non è amministratore: i 
 
 // Senza Ollama i task falliscono subito e la prova non dice niente del coordinatore
 const status = await api('/api/status');
+// dopo un git pull LocalAI va riavviato: se gira con codice vecchio la prova misura la versione sbagliata
+let local = null;
+try { local = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+if (!status.version || (local && status.version !== local)) {
+  console.error(`✖ LocalAI gira con una versione diversa da quella della cartella (${status.version ? status.version.slice(0, 7) : 'vecchia, senza numero di versione'} invece di ${local ? local.slice(0, 7) : '?'}): chiudi e riavvia LocalAI dopo il git pull, poi rilancia la prova.`);
+  process.exit(1);
+}
 if (!status.ollama) { console.error('✖ Ollama non risponde: avvialo (o controlla OLLAMA_URL di LocalAI) e rilancia la prova.'); process.exit(1); }
 const { models } = await api('/api/config');
 console.log(`Modelli con strumenti installati: ${models.map((m) => m.name.replace(/:latest$/, '')).join(', ') || 'nessuno'}`);
@@ -133,7 +141,8 @@ for (const s of SCENARIOS) {
     fs.writeFileSync(path.join(s.dir, f), text);
   }
   // un solo tentativo per task: alla prima verifica fallita interviene il coordinatore (è lui che si vuole provare)
-  await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { coordinator: true, autoTest: true, maxAttempts: Number(arg('tentativi', 1)) } });
+  const set = await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { coordinator: true, autoTest: true, maxAttempts: Number(arg('tentativi', 1)) } });
+  if (set.maxAttempts !== Number(arg('tentativi', 1))) { console.error('✖ LocalAI non ha accettato il numero di tentativi: è una versione vecchia, riavvialo.'); process.exit(1); }
   for (const t of s.tasks) await api(`/api/projects/${p.id}/tasks`, { body: { text: t } });
   await api(`/api/projects/${p.id}/start`, { method: 'POST' });
   if (s === SCENARIOS[0]) console.log(`Modelli dei task: codice e pagine → ${p.models?.code || '?'}, lettura → ${p.models?.read || '?'}`);

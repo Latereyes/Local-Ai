@@ -2,6 +2,7 @@ import express from 'express';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import config from './src/config.js';
 import * as auth from './src/auth.js';
@@ -88,9 +89,13 @@ app.post('/api/users/:id/reset-password', auth.requireAdmin, wrap(async (req, re
 }));
 
 // ---- Stato e configurazione ----
+// Versione del codice in esecuzione (commit git all'avvio): serve a capire se dopo un git pull LocalAI va riavviato
+let codeVersion = null;
+try { codeVersion = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: config.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim(); } catch {}
+
 app.get('/api/status', wrap(async (req, res) => {
   const [o, c] = await Promise.all([ollama.isUp(), comfy.isUp()]);
-  res.json({ ollama: o, comfy: c, gpu: gpu.state() });
+  res.json({ ollama: o, comfy: c, gpu: gpu.state(), version: codeVersion });
 }));
 
 app.get('/api/config', wrap(async (req, res) => {
@@ -469,7 +474,7 @@ files.listen(config.workspace.port, config.host).on('error', (e) => console.warn
 
 const server = app.listen(config.port, config.host, () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i?.family === 'IPv4' && !i.internal).map((i) => i.address);
-  console.log(`\n  LocalAI pronto`);
+  console.log(`\n  LocalAI pronto${codeVersion ? ` (versione ${codeVersion.slice(0, 7)})` : ''}`);
   console.log(`  → su questo PC:     http://localhost:${config.port}`);
   for (const ip of ips) console.log(`  → telefono/tablet: http://${ip}:${config.port}   (stessa rete Wi-Fi)`);
   if (config.notify.appUrl) console.log(`  → in HTTPS:        ${config.notify.appUrl}   (microfono e notifiche anche dal telefono)`);
