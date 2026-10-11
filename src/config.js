@@ -45,10 +45,21 @@ export default {
     app: 'localai',
   },
 
+  // Notifiche dei progetti (coda finita, task non riusciti, coordinatore). Nel browser arrivano sempre;
+  // NTFY_URL (es. https://ntfy.sh/un-nome-segreto) le manda anche al telefono con l'app ntfy.
+  notify: {
+    ntfyUrl: env.NTFY_URL || '',
+    ntfyToken: env.NTFY_TOKEN || '',
+    // indirizzo dell'app per il link nella notifica (es. https://pc.tuo-tailnet.ts.net)
+    appUrl: (env.APP_URL || '').replace(/\/$/, ''),
+  },
+
   // Cartella di lavoro (modalità «Computer»): progetti, file e comandi dell'assistente.
   // I file si aprono nel browser da una porta separata, così pagine e giochi creati non toccano l'app.
   workspace: {
     port: Number(env.WORKSPACE_PORT || 3001),
+    // Porta HTTPS da cui arrivano i file quando l'app è aperta in HTTPS (tailscale serve --https=8443, vedi README)
+    httpsPort: Number(env.WORKSPACE_HTTPS_PORT || 0) || null,
     // Modello usato in modalità Computer quando è selezionato quello predefinito (se installato)
     model: env.WORKSPACE_MODEL ?? 'qwen3.8-coder:latest',
     maxRounds: Number(env.WORKSPACE_MAX_ROUNDS || 16),
@@ -70,6 +81,8 @@ export default {
     maxAttempts: Number(env.TASK_MAX_ATTEMPTS || 3),
     // Task bloccato: il modello sta lavorando (ha la GPU) ma non arriva niente da questi minuti → si ferma
     stallMinutes: Number(env.TASK_STALL_MINUTES || 15),
+    // Tempo massimo di lavoro del modello su un task (contato solo mentre ha la GPU, non nell'attesa)
+    maxMinutes: Number(env.TASK_MAX_MINUTES || 45),
     // Coordinatore della coda: interventi automatici per task (dopo un fallimento o un blocco) prima di chiedere all'utente
     coordinatorRuns: Number(env.TASK_COORDINATOR_RUNS || 2),
     testTimeoutMs: Number(env.TASK_TEST_SECONDS || 120) * 1000,

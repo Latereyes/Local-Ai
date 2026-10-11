@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import config from './config.js';
 import * as ollama from './ollama.js';
 import * as workspace from './workspace.js';
+import * as snapshots from './snapshots.js';
 
 /**
  * Progetti: ogni progetto è una cartella della cartella di lavoro dell'utente (workspace/<utente>/<cartella>),
@@ -114,6 +115,32 @@ export function save(p, { touch = true } = {}) {
   return next;
 }
 
+/**
+ * Notifica all'utente del progetto: nel browser (evento 'notify' verso l'interfaccia) e, se configurato,
+ * sul telefono con ntfy (pubblicazione JSON, così titolo e testo restano in UTF-8).
+ * level: 'ok' | 'info' | 'warn'.
+ */
+export function notify(p, { title, body = '', level = 'info' }) {
+  const n = { ownerId: p.ownerId, projectId: p.id, project: p.name, title, body: String(body).slice(0, 400), level, at: Date.now() };
+  bus.emit('notify', n);
+  const { ntfyUrl, ntfyToken, appUrl } = config.notify;
+  if (!ntfyUrl) return;
+  let url;
+  try { url = new URL(ntfyUrl); } catch { return console.warn('[notifiche] NTFY_URL non valido'); }
+  const topic = url.pathname.replace(/^\/+|\/+$/g, '');
+  fetch(url.origin, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(ntfyToken ? { Authorization: `Bearer ${ntfyToken}` } : {}) },
+    body: JSON.stringify({
+      topic, title: `${p.name}: ${title}`, message: n.body || title,
+      tags: [{ ok: 'white_check_mark', info: 'robot', warn: 'warning' }[level] || 'robot'],
+      priority: level === 'warn' ? 4 : 3,
+      ...(appUrl ? { click: `${appUrl}/progetti/${encodeURIComponent(p.id)}` } : {}),
+    }),
+    signal: AbortSignal.timeout(10000),
+  }).then((r) => { if (!r.ok) console.warn(`[notifiche] ntfy → ${r.status}`); }).catch((e) => console.warn(`[notifiche] ntfy: ${e.message}`));
+}
+
 export function addLog(p, text) {
   p.log.push({ at: Date.now(), text });
   if (p.log.length > 200) p.log.splice(0, p.log.length - 200);
@@ -178,6 +205,12 @@ export async function remove(user, p) {
 
 /** Utente "ristretto" alla cartella del progetto, per le funzioni di workspace.js. */
 export const scoped = (user, p) => ({ ...user, project: p.folder });
+
+/** Cartella del progetto sul disco. */
+export const dirOf = (user, p) => workspace.userRoot(scoped(user, p));
+
+/** Fotografia della cartella del progetto (snapshots.js): commit solo se è cambiato qualcosa; null senza git. */
+export const snap = (user, p, message) => snapshots.snapshot(dirOf(user, p), message);
 
 export async function readPlan(user, p) {
   try { return (await workspace.readFile(scoped(user, p), PLAN_FILE)).text || ''; } catch { return ''; }
@@ -295,7 +328,10 @@ export async function chatContext(user, p) {
   };
 }
 
-/** All'avvio: i task rimasti a metà tornano in coda, con la coda del progetto in pausa. */
+/**
+ * All'avvio: i task rimasti a metà tornano in coda. La coda del progetto va in pausa, tranne che nei progetti
+ * con «riprendi dopo un riavvio» (autoResume): lì riparte da sola (server.js chiama runner.kick).
+ */
 export function recoverInterrupted() {
   let dirs = [];
   try { dirs = fs.readdirSync(config.paths.projects); } catch { return; }
@@ -307,7 +343,8 @@ export function recoverInterrupted() {
       if (!stuck.length && !p.active) continue;
       for (const t of stuck) { t.status = 'queued'; t.attempts = 0; }
       if (stuck.length) addLog(p, 'LocalAI riavviato: il task in corso è tornato in coda');
-      if (p.active) { p.active = false; addLog(p, 'Coda in pausa dopo il riavvio: premi «Avvia» per riprendere'); }
+      if (p.active && p.autoResume) addLog(p, 'LocalAI riavviato: la coda riparte da sola');
+      else if (p.active) { p.active = false; addLog(p, 'Coda in pausa dopo il riavvio: premi «Avvia» per riprendere'); }
       save(p, { touch: false });
     }
   }

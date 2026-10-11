@@ -21,6 +21,7 @@ const P = {
   close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
@@ -439,7 +440,9 @@ function wsUrl(p, download = false) {
   const ws = state.config?.workspace;
   if (!ws) return '#';
   const enc = String(p).split('/').map(encodeURIComponent).join('/');
-  return `${location.protocol}//${location.hostname}:${ws.port}/${ws.token}/${enc}${download ? '?download' : ''}`;
+  // in HTTPS (tailscale serve) i file passano da una porta HTTPS a parte: il browser non mescola http e https
+  const port = location.protocol === 'https:' && ws.httpsPort ? ws.httpsPort : ws.port;
+  return `${location.protocol}//${location.hostname}:${port}/${ws.token}/${enc}${download ? '?download' : ''}`;
 }
 function wsLinks(p, { dir = false, bare = false } = {}) {
   if (!p) return '';
@@ -480,6 +483,10 @@ function renderComputer(node, m) {
         const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
       }
+      if (s.action === 'history') {
+        const head = s.status === 'error' ? 'Storia del progetto non disponibile' : s.status === 'done' ? `Storia: ${esc(s.what || '')}` : 'Consulto la storia del progetto…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('refresh', 14)}<span>${head}</span>${spin}</div>${err}</div>`;
+      }
       if (s.action === 'queue') {
         const head = s.status === 'error' ? 'Coda non modificata' : s.status === 'done' ? `Coda: ${esc(s.what || '')}` : 'Gestisco la coda…';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : ''}</div>${err}</div>`;
@@ -488,7 +495,9 @@ function renderComputer(node, m) {
         // chat del progetto: test e pagina nel browser, come la verifica della coda
         const checks = (s.checks || []).map((c) => `<div class="${c.ok === true ? 'ws-ok' : c.ok === false ? 'step-err' : 'faint'}">${c.ok === true ? '✓' : c.ok === false ? '✗' : '–'} ${esc(c.summary)}</div>`).join('');
         const head = s.status === 'done' ? 'Verifica del progetto' : s.status === 'error' ? 'Verifica non riuscita' : `Verifico il progetto${s.command ? ` (${esc(s.command)})` : ''}…`;
-        return `<div class="ws-act"><div class="ws-act-head">${icon('search', 14)}<span>${head}</span>${spin}</div>${checks || (s.status === 'done' ? '<div class="faint">Niente da verificare (nessun test e nessuna pagina)</div>' : '')}${err}</div>`;
+        const judging = s.judging ? `<div class="faint"><span class="spin"></span> Un modello che legge le immagini guarda lo screenshot…</div>` : '';
+        const shot = s.shot ? `<a href="/media/${esc(s.shot)}" target="_blank" rel="noopener"><img class="ws-shot" src="/media/${esc(s.shot)}" alt="Screenshot" loading="lazy"></a>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('search', 14)}<span>${head}</span>${spin}</div>${checks || (s.status === 'done' ? '<div class="faint">Niente da verificare (nessun test e nessuna pagina)</div>' : '')}${judging}${shot}${err}</div>`;
       }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
@@ -511,6 +520,27 @@ document.addEventListener('click', (e) => {
   const op = e.target.closest('[data-open-project]');
   if (op) { e.preventDefault(); openProject(op.dataset.openProject); }
 });
+
+/**
+ * Notifiche dei progetti: un avviso nell'app (clic = apri il progetto) e, se la scheda non è in primo piano
+ * e l'utente le ha permesse, una notifica di sistema.
+ */
+function showNotice(n) {
+  const box = $('#notices') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'notices', className: 'notices' }));
+  const el2 = document.createElement('button');
+  el2.className = `notice ${n.level || 'info'}`;
+  el2.innerHTML = `${icon(n.level === 'warn' ? 'alert' : n.level === 'ok' ? 'check' : 'folder', 16)}<span><b>${esc(n.project)}: ${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}</span>`;
+  const close = () => el2.remove();
+  el2.onclick = () => { close(); openProject(n.projectId); };
+  box.prepend(el2);
+  setTimeout(close, n.level === 'warn' ? 30000 : 10000);
+  if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const sys = new Notification(`${n.project}: ${n.title}`, { body: n.body || '', tag: `pj-${n.projectId}-${n.at}` });
+      sys.onclick = () => { window.focus(); openProject(n.projectId); sys.close(); };
+    } catch {}
+  }
+}
 
 /**
  * Barra in cima alle chat dei progetti: di che progetto è, stato della coda e link al progetto.
@@ -743,6 +773,7 @@ function connectEvents() {
 
 function onEvent(evt) {
   if (evt.type === 'gpu') return renderGpu(evt.state);
+  if (evt.type === 'notify') return showNotice(evt);
   if (evt.type === 'project') {
     if (state.view === 'projects' && (!state.project || state.project.id === evt.project.id)) refreshProject();
     if (state.conv?.projectChat && state.conv.project?.id === evt.project.id) renderConvProject(evt.project);
@@ -1330,7 +1361,7 @@ function renderTask(t, i, p) {
     </div>
     ${open ? `<div class="pj-task-body">
       <div class="pj-text">${esc(t.text)}</div>
-      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${t.fromChat ? ` · <a href="/c/${t.fromChat}" data-conv="${t.fromChat}">chiesto in chat</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}</div>
+      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${t.fromChat ? ` · <a href="/c/${t.fromChat}" data-conv="${t.fromChat}">chiesto in chat</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}${!busy && t.snapBefore && t.snapAfter && t.snapBefore !== t.snapAfter && !/annullate/.test(t.error || '') ? ` · <button class="linkish" data-task="${t.id}" data-act="undo">annulla le modifiche di questo task</button>` : ''}</div>
       ${t.error ? `<div class="step-err">${esc(t.error)}</div>` : ''}
       ${t.summary ? `<div class="pj-summary">${esc(t.summary)}</div>` : ''}
       ${(t.checks || []).map(renderCheck).join('')}
@@ -1388,6 +1419,8 @@ function renderProject() {
       <div class="pj-card-head"><h3>Verifica</h3></div>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
+      ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
       <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
     </section>
@@ -1395,6 +1428,13 @@ function renderProject() {
     <section class="pj-card">
       <div class="pj-card-head"><h3>File</h3><span class="faint">${files.length}</span></div>
       ${files.length ? files.map((f) => `<div class="project-file"><span class="name">${esc(f.path)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(`${p.folder}/${f.path}`)}</div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Storia della cartella</h3><span class="faint">fotografie prima e dopo ogni task e ogni modifica dalla chat</span></div>
+      ${!p.git ? '<div class="faint-note" style="margin:0">Git non è installato sul PC: senza, i task non si possono annullare. Installalo da git-scm.com e riavvia LocalAI.</div>'
+        : p.history.length ? p.history.map((h, i) => `<div class="pj-ver"><span class="faint">${when(h.at)}</span><span class="name">${esc(h.message)}</span><span class="faint">${h.files} file</span>${i ? `<button class="linkish" data-restore="${h.commit}" data-label="${esc(h.message)}">ripristina</button>` : '<span class="faint">attuale</span>'}</div>`).join('')
+        : '<div class="faint-note" style="margin:0">La prima fotografia si fa al primo task o al primo messaggio nella chat del progetto.</div>'}
     </section>
 
     <section class="pj-card">
@@ -1436,9 +1476,15 @@ el.projects.addEventListener('click', async (e) => {
   if (!p) return;
   const base = `/api/projects/${encodeURIComponent(p.id)}`;
   const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } } catch (err) { alert(err.message); } };
+  const rs = e.target.closest('[data-restore]');
+  if (rs) {
+    if (!confirm(`Riportare la cartella alla versione «${rs.dataset.label}»? Lo stato attuale resta nella storia e si può ripristinare.`)) return;
+    return run(() => api(`${base}/restore`, { body: { commit: rs.dataset.restore } }));
+  }
   const tb = e.target.closest('[data-task]');
   if (tb) {
     if (tb.dataset.act === 'delete' && !confirm('Eliminare questo task?')) return;
+    if (tb.dataset.act === 'undo' && !confirm('Riportare la cartella a com\'era prima di questo task? Spariscono anche le modifiche fatte dopo (restano nella storia e si possono ripristinare).')) return;
     return run(() => api(`${base}/tasks/${tb.dataset.task}`, { body: { action: tb.dataset.act } }));
   }
   const b = e.target.closest('[data-pj]');
@@ -1483,6 +1529,9 @@ el.projects.addEventListener('click', async (e) => {
       if (!text) return $('#pj-task-text').focus();
       return run(() => api(`${base}/tasks`, { body: { text, type: $('#pj-task-type').value || undefined } }));
     }
+    case 'notify':
+      try { await Notification.requestPermission(); } catch {}
+      return renderProject();
     case 'save-test': return run(() => api(base, { method: 'PATCH', body: { testCommand: $('#pj-testcmd').value } }));
     case 'vision':
       b.disabled = true;
@@ -1501,6 +1550,7 @@ el.projects.addEventListener('change', (e) => {
   const sel = e.target.closest('[data-task-type]');
   if (sel) api(`${base}/tasks/${sel.dataset.taskType}`, { body: { action: 'type', type: sel.value } }).then((out) => { state.project = out; renderProject(); }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autotest') api(base, { method: 'PATCH', body: { autoTest: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
 });
 

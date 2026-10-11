@@ -14,6 +14,7 @@ import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
 import { checkMelody } from './src/melody.js';
+import * as snapshots from './src/snapshots.js';
 import * as workspace from './src/workspace.js';
 import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
@@ -100,7 +101,7 @@ app.get('/api/config', wrap(async (req, res) => {
     defaultModel: config.ollama.model,
     models,
     workflows: workflows().map(publicInfo),
-    workspace: { port: config.workspace.port, token: workspace.linkToken(req.user), canRun: req.user.role === 'admin' },
+    workspace: { port: config.workspace.port, httpsPort: config.workspace.httpsPort, token: workspace.linkToken(req.user), canRun: req.user.role === 'admin' },
   });
 }));
 
@@ -119,12 +120,14 @@ app.get('/api/events', (req, res) => {
   const onEvent = (evt) => { if (store.get(evt.conversationId)?.ownerId === userId) send(evt); };
   const onGpu = (state) => send({ type: 'gpu', state });
   const onProject = (evt) => { if (evt.ownerId === userId) send({ type: 'project', project: evt.project }); };
+  const onNotify = (n) => { if (n.ownerId === userId) send({ type: 'notify', ...n }); };
   send({ type: 'gpu', state: gpu.state() });
   bus.on('event', onEvent);
   gpu.on('state', onGpu);
   projects.bus.on('project', onProject);
+  projects.bus.on('notify', onNotify);
   const ping = setInterval(() => res.write(': ping\n\n'), 20000);
-  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); projects.bus.off('project', onProject); });
+  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); projects.bus.off('project', onProject); projects.bus.off('notify', onNotify); });
 });
 
 // ---- Conversazioni ----
@@ -196,7 +199,9 @@ const ownTask = (p, id) => {
 };
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
-  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, log: p.log.slice(-60),
+  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume,
+  history: await snapshots.history(projects.dirOf(req.user, p), 15),
+  git: await snapshots.hasGit(), log: p.log.slice(-60),
   tasks: p.tasks.map((t) => ({ ...t, checks: t.checks.map((c) => ({ ...c, screenshotUrl: mediaUrl(c.screenshot) })) })),
   plan: await projects.readPlan(req.user, p),
   files: await workspace.listFiles(projects.scoped(req.user, p), '', { limit: 400 }).catch(() => []),
@@ -218,6 +223,7 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   if (typeof b.name === 'string' && b.name.trim()) p.name = b.name.trim().slice(0, 80);
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
   if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
+  if (typeof b.autoResume === 'boolean') p.autoResume = b.autoResume;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
     p.testCommand = b.testCommand.trim().slice(0, 300);
@@ -298,6 +304,17 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
       if (busy) throw httpError(409, 'Il task è in corso');
       t.type = req.body.type;
       break;
+    case 'undo': {
+      // annulla le modifiche del task: la cartella torna a prima del task (anche le modifiche successive spariscono,
+      // ma il ripristino stesso è una fotografia e si può annullare dalla storia)
+      if (busy) throw httpError(409, 'Il task è in corso');
+      if (!t.snapBefore) throw httpError(400, 'Per questo task non c\'è la fotografia di prima (serve Git)');
+      if (p.tasks.some((x) => x.status === 'running' || x.status === 'testing')) throw httpError(409, 'Un altro task sta lavorando: aspetta che finisca');
+      await snapshots.restore(projects.dirOf(req.user, p), t.snapBefore, `Annullato «${t.title}»`);
+      Object.assign(t, { status: 'cancelled', error: 'Modifiche annullate: la cartella è tornata a prima del task' });
+      projects.addLog(p, `Annullate le modifiche di «${t.title}»`);
+      break;
+    }
     case 'up': case 'down': {
       const i = p.tasks.indexOf(t), j = i + (req.body.action === 'up' ? -1 : 1);
       if (j >= 0 && j < p.tasks.length) [p.tasks[i], p.tasks[j]] = [p.tasks[j], p.tasks[i]];
@@ -313,6 +330,18 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
 app.post('/api/projects/:id/chat', projectErr(async (req, res) => {
   const c = await runner.projectChat(ownProject(req), req.user, { fresh: !!req.body?.new });
   res.json({ id: c.id });
+}));
+// Ripristino di una versione della storia (fotografie git del progetto)
+app.post('/api/projects/:id/restore', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  if (p.tasks.some((x) => x.status === 'running' || x.status === 'testing')) throw httpError(409, 'Un task sta lavorando: mettilo in pausa o aspetta che finisca');
+  const commit = String(req.body?.commit || '');
+  const h = (await snapshots.history(projects.dirOf(req.user, p), 200)).find((x) => x.commit === commit);
+  if (!h) throw httpError(404, 'Versione non trovata');
+  await snapshots.restore(projects.dirOf(req.user, p), commit, `Ripristinata la versione «${h.message}»`);
+  projects.addLog(p, `Ripristinata la versione «${h.message}»`);
+  await projects.save(p);
+  res.json(await fullProject(req, p));
 }));
 app.post('/api/projects/:id/start', projectErr(async (req, res) => { const p = ownProject(req); runner.setActive(p, true); res.json(await fullProject(req, p)); }));
 app.post('/api/projects/:id/pause', projectErr(async (req, res) => {
@@ -413,6 +442,8 @@ const adopted = store.adoptOwnerless(auth.adminUser().id);
 if (adopted) console.log(`  ${adopted} conversazioni esistenti assegnate all'utente ${auth.adminUser().displayName}`);
 recoverInterrupted();
 projects.recoverInterrupted();
+// code dei progetti con «riprendi dopo un riavvio»: ripartono appena il server è su
+setTimeout(() => runner.kick(), 5000);
 // File della cartella di lavoro su una porta a parte (origine diversa dall'app): pagine e giochi creati
 // dall'assistente girano liberi (anche localStorage) ma non possono leggere chat o dati dell'app.
 // L'accesso è con il codice dell'utente nell'URL, non con i cookie.
@@ -439,6 +470,8 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`\n  LocalAI pronto`);
   console.log(`  → su questo PC:     http://localhost:${config.port}`);
   for (const ip of ips) console.log(`  → telefono/tablet: http://${ip}:${config.port}   (stessa rete Wi-Fi)`);
+  if (config.notify.appUrl) console.log(`  → in HTTPS:        ${config.notify.appUrl}   (microfono e notifiche anche dal telefono)`);
+  else console.log('  (Microfono e notifiche dal telefono richiedono HTTPS: tools/attiva-https.ps1, vedi README)');
   console.log(`\n  Ollama:  ${config.ollama.url}  (${config.ollama.model})`);
   console.log(`  ComfyUI: ${config.comfy.url}`);
   console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);

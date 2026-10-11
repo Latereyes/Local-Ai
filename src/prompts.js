@@ -316,6 +316,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
         text: p('Per edit: il nuovo testo completo del task, più chiaro o più piccolo.'),
         type: { type: 'string', enum: ['code', 'page', 'read', 'chat'], description: 'Per edit: tipo del task, se va cambiato.' },
       }, ['action']),
+      fn('project_history', 'Storia del progetto: LocalAI fotografa la cartella (git) prima e dopo ogni task e ogni turno di questa chat. list = elenco delle versioni; diff = cosa è cambiato in una versione; restore = riporta la cartella a una versione (anche il ripristino resta nella storia e si può annullare).', {
+        action: { type: 'string', enum: ['list', 'diff', 'restore'] },
+        version: p('Per diff e restore: il codice della versione (le prime 7 cifre bastano), dall\'elenco di list.'),
+      }, ['action']),
       fn('check_project', 'Verifica il progetto come fa la coda: esegue i test automatici (se ci sono e se l\'utente è amministratore) e apre la pagina in un browser raccogliendo gli errori JavaScript. Da usare dopo aver modificato codice o pagine.', {
         page: p('Pagina da aprire, relativa al progetto (default: index.html se esiste).'),
       }, []),
@@ -359,6 +363,7 @@ function projectChatPrompt(project, { text, busy }) {
 - Modifiche piccole e mirate (un bug, colori, testi, una funzione, un controllo in più): falle subito. Leggi prima il file, poi riscrivilo intero. Dopo aver cambiato codice o pagine chiama check_project e, se qualcosa non va, correggi (al massimo 2-3 tentativi).
 - Lavori grandi o in più passi (una funzionalità ampia, più file, una riscrittura): spiega in breve il piano e crea i task con add_project_tasks, piccoli e verificabili, con il tipo giusto. Avvia la coda (start: true) solo se l'utente l'ha chiesto o te lo conferma; altrimenti chiedigli se avviarla.
 - Se l'utente cambia l'obiettivo o aggiunge requisiti importanti, aggiorna anche PIANO.md (letto e riscritto intero).
+- La cartella ha una storia (project_history): se l'utente chiede di annullare o tornare a com'era, o se un task ha rovinato file che funzionavano, guarda le versioni (list, diff) e ripristina quella giusta (restore).
 - Sei anche il coordinatore della coda: con manage_queue rimetti in coda, riscrivi, segni come fatti o elimini i task e avvii o fermi la coda. Quando un task fallisce o si blocca ricevi un messaggio automatico: indaga e sblocca il lavoro.
 ${busy ? `- ADESSO un task della coda sta lavorando sui file: non modificarli tu (le modifiche si sovrapporrebbero). Rispondi alle domande e, per le modifiche, aggiungi task con add_project_tasks.
 ` : ''}

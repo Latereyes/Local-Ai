@@ -209,6 +209,18 @@ body:not(.is-admin) .admin-only { display: none; }
 .pj-chats a:hover { background: var(--hover); }
 .pj-chats a .faint { margin-left: auto; font-size: 12px; }
 .pj-chats .linkish { align-self: flex-start; padding: 4px 6px; }
+.ws-shot { display: block; max-width: 320px; width: 100%; margin-top: 6px; border-radius: 8px; border: 1px solid var(--border); }
+.pj-ver { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.pj-ver:first-of-type { border-top: 0; }
+.pj-ver .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notices { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+.notice { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 12px 14px; border-radius: 14px; background: var(--bg-elev); border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(0,0,0,.18); color: var(--accent-text); animation: notice-in .2s ease-out; }
+.notice span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.notice b { color: var(--text); font-weight: 600; font-size: 13.5px; }
+.notice small { color: var(--muted); font-size: 12.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.notice.ok { color: var(--ok); }
+.notice.warn { color: var(--err); }
+@keyframes notice-in { from { transform: translateY(8px); opacity: 0; } }
 .ws-tasks { margin: 4px 0 0; padding-left: 22px; font-size: 13px; }
 .scroller { flex: 1; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; }
 .thread { max-width: 780px; margin: 0 auto; padding: 12px 24px 40px; }
