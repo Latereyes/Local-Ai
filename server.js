@@ -202,6 +202,10 @@ const fullProject = async (req, p) => ({
   files: await workspace.listFiles(projects.scoped(req.user, p), '', { limit: 400 }).catch(() => []),
   current: runner.state(),
   types: projects.TYPES,
+  // chat del progetto (dalla più recente): domande, modifiche e nuovi task a voce
+  chats: (p.chats || []).map((id) => store.get(id)).filter((c) => c && c.ownerId === req.user.id)
+    .map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: c.messages.filter((m) => m.role === 'user').length, running: chat.isRunning(c.id) }))
+    .sort((a, b) => b.updatedAt - a.updatedAt),
   models: Object.fromEntries(await Promise.all(Object.keys(projects.TYPES).map(async (k) => [k, await projects.modelFor(k)]))),
 });
 
@@ -301,6 +305,23 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
   }
   await projects.save(p);
   res.json(await fullProject(req, p));
+}));
+// Chat del progetto: l'ultima (o una nuova con { new: true }). Lavora nella cartella del progetto,
+// conosce piano e task e può aggiungere task alla coda (chat.js, strumenti add_project_tasks e check_project).
+app.post('/api/projects/:id/chat', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  p.chats = (p.chats || []).filter((id) => store.get(id)?.ownerId === req.user.id);
+  const last = p.chats.map((id) => store.get(id)).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  if (last && !req.body?.new) return res.json({ id: last.id });
+  const c = store.create(req.user.id);
+  c.title = `${p.name} · chat`;
+  c.computer = true;
+  c.project = { id: p.id, folder: p.folder, name: p.name };
+  c.projectChat = true;
+  await store.save(c);
+  p.chats.push(c.id);
+  await projects.save(p, { touch: false });
+  res.json({ id: c.id });
 }));
 app.post('/api/projects/:id/start', projectErr(async (req, res) => { const p = ownProject(req); runner.setActive(p, true); res.json(await fullProject(req, p)); }));
 app.post('/api/projects/:id/pause', projectErr(async (req, res) => {

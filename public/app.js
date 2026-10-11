@@ -44,6 +44,7 @@ const P = {
   terminal: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><path d="M12 15h5"/>',
   play: '<path d="M7 4v16l13-8z"/>',
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
@@ -240,6 +241,7 @@ function newChat(push = true) {
   state.conv = null;
   state.computer = false;
   renderOpts();
+  renderConvProject();
   showView('chat');
   el.thread.innerHTML = '';
   el.welcome.hidden = false;
@@ -258,6 +260,7 @@ async function openConv(id, push = true) {
   state.conv = c;
   state.computer = !!c.computer;
   renderOpts();
+  renderConvProject();
   el.welcome.hidden = true;
   el.thread.innerHTML = '';
   for (const m of c.messages) renderMessage(m);
@@ -467,6 +470,19 @@ function renderComputer(node, m) {
         const player = s.status === 'done' ? `<audio class="ws-audio" src="${esc(wsUrl(stepPath(s)))}" controls preload="none"></audio>` : '';
         return `<div class="ws-act"><div class="ws-act-head">${icon('audio', 14)}<span>${head}</span><b>${esc(s.path || '')}</b>${s.status === 'done' ? `<span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}` : spin}</div>${player}${err}</div>`;
       }
+      if (s.action === 'tasks') {
+        // chat del progetto: task messi in coda
+        const head = s.status === 'error' ? 'Task non aggiunti' : s.status === 'done' ? `${s.tasks.length === 1 ? 'Task aggiunto' : `${s.tasks.length} task aggiunti`} alla coda${s.started ? ' · coda avviata' : s.active ? '' : ' · coda in pausa'}` : 'Aggiungo i task…';
+        const list = (s.tasks || []).map((t) => `<li>${esc(t.title)}</li>`).join('');
+        const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
+      }
+      if (s.action === 'check') {
+        // chat del progetto: test e pagina nel browser, come la verifica della coda
+        const checks = (s.checks || []).map((c) => `<div class="${c.ok === true ? 'ws-ok' : c.ok === false ? 'step-err' : 'faint'}">${c.ok === true ? '✓' : c.ok === false ? '✗' : '–'} ${esc(c.summary)}</div>`).join('');
+        const head = s.status === 'done' ? 'Verifica del progetto' : s.status === 'error' ? 'Verifica non riuscita' : `Verifico il progetto${s.command ? ` (${esc(s.command)})` : ''}…`;
+        return `<div class="ws-act"><div class="ws-act-head">${icon('search', 14)}<span>${head}</span>${spin}</div>${checks || (s.status === 'done' ? '<div class="faint">Niente da verificare (nessun test e nessuna pagina)</div>' : '')}${err}</div>`;
+      }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
       const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
@@ -482,6 +498,29 @@ function renderComputer(node, m) {
     const out = s.output ? `<pre>${esc(s.output)}</pre>` : '';
     return `<div class="ws-act${s.status === 'confirm' ? ' confirm' : ''}"><div class="ws-act-head">${icon('terminal', 14)}<code>${esc(s.command)}</code>${where}${spin}${res}</div>${confirm}${out}${err}</div>`;
   }).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const op = e.target.closest('[data-open-project]');
+  if (op) { e.preventDefault(); openProject(op.dataset.openProject); }
+});
+
+/**
+ * Barra in cima alle chat dei progetti: di che progetto è, stato della coda e link al progetto.
+ * pj = riepilogo arrivato dagli eventi (altrimenti si chiede la lista dei progetti).
+ */
+async function renderConvProject(pj) {
+  const bar = $('#conv-project');
+  const c = state.conv;
+  if (!c?.projectChat || !c.project) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+  if (!pj) {
+    bar.innerHTML = `${icon('folder', 15)}<span>Chat del progetto <b>${esc(c.project.name)}</b></span><span class="grow"></span><button class="btn ghost" data-open-project="${esc(c.project.id)}">Apri il progetto</button>`;
+    pj = (await api('/api/projects').catch(() => [])).find((x) => x.id === c.project.id);
+    if (!pj || state.conv !== c) return;
+  }
+  const status = [pj.total ? `${pj.done} di ${pj.total} task fatti` : 'nessun task', pj.queued ? `${pj.queued} in coda` : '', pj.running ? `ora: ${pj.running}` : '', pj.active ? 'coda attiva' : pj.queued ? 'coda in pausa' : ''].filter(Boolean).join(' · ');
+  bar.innerHTML = `${icon('folder', 15)}<span>Chat del progetto <b>${esc(c.project.name)}</b> <span class="faint">· ${esc(status)}</span></span><span class="grow"></span><button class="btn ghost" data-open-project="${esc(c.project.id)}">Apri il progetto</button>`;
 }
 
 document.addEventListener('click', async (e) => {
@@ -699,6 +738,7 @@ function onEvent(evt) {
   if (evt.type === 'gpu') return renderGpu(evt.state);
   if (evt.type === 'project') {
     if (state.view === 'projects' && (!state.project || state.project.id === evt.project.id)) refreshProject();
+    if (state.conv?.projectChat && state.conv.project?.id === evt.project.id) renderConvProject(evt.project);
     return;
   }
   if (evt.type === 'title') {
@@ -1078,6 +1118,8 @@ dropZone.addEventListener('drop', (e) => {
 
 function renderOpts() {
   updateHum();
+  // le chat dei progetti lavorano sempre nella cartella del progetto: niente interruttore Computer
+  $('#chip-computer').hidden = !!state.conv?.projectChat;
   $$('.chip[data-tool]').forEach((c) => c.classList.toggle('on', c.dataset.tool === state.tool));
   $('#chip-think').classList.toggle('on', state.think);
   $('#chip-computer').classList.toggle('on', state.computer);
@@ -1281,7 +1323,7 @@ function renderTask(t, i, p) {
     </div>
     ${open ? `<div class="pj-task-body">
       <div class="pj-text">${esc(t.text)}</div>
-      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}</div>
+      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${t.fromChat ? ` · <a href="/c/${t.fromChat}" data-conv="${t.fromChat}">chiesto in chat</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}</div>
       ${t.error ? `<div class="step-err">${esc(t.error)}</div>` : ''}
       ${t.summary ? `<div class="pj-summary">${esc(t.summary)}</div>` : ''}
       ${(t.checks || []).map(renderCheck).join('')}
@@ -1308,6 +1350,15 @@ function renderProject() {
       ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}
       <button class="btn ghost" data-pj="delete" title="Elimina progetto e cartella">${icon('trash', 14)}</button>
     </div>
+    <section class="pj-card pj-talk">
+      <div class="pj-card-head"><h3>Parla con il progetto</h3><span class="faint">domande, modifiche e nuove funzioni: le piccole le fa subito, le grandi diventano task della coda</span></div>
+      <div class="pj-add">
+        <textarea id="pj-ask" rows="2" placeholder="Es. «aggiungi un tasto pausa», «il punteggio non sale quando completo una riga», «come funziona il salvataggio?»"></textarea>
+        <button class="btn primary" data-pj="ask">Invia</button>
+      </div>
+      ${(p.chats || []).length ? `<div class="pj-chats">${p.chats.slice(0, 5).map((c, i) => `<a href="/c/${c.id}" data-conv="${c.id}">${icon('chat', 13)}${esc(c.title)}<span class="faint">${c.running ? 'risponde…' : when(c.updatedAt)}${i === 0 ? ' · i nuovi messaggi vanno qui' : ''}</span></a>`).join('')}<button class="linkish" data-pj="new-chat">Nuova chat del progetto</button></div>` : ''}
+    </section>
+
     <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge.</p>
 
     <section class="pj-card">
@@ -1405,6 +1456,18 @@ el.projects.addEventListener('click', async (e) => {
       const plan = $('#pj-plan');
       await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }));
       if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
+      return;
+    }
+    case 'ask': case 'new-chat': {
+      // la richiesta va nella chat del progetto (l'ultima, o una nuova): lì l'AI lavora nella cartella e aggiunge i task
+      const text = b.dataset.pj === 'ask' ? $('#pj-ask').value.trim() : '';
+      if (b.dataset.pj === 'ask' && !text) return $('#pj-ask').focus();
+      try {
+        const { id } = await api(`${base}/chat`, { body: { new: b.dataset.pj === 'new-chat' } });
+        await openConv(id);
+        if (text) await sendMessage(text, null);
+        else el.input.focus();
+      } catch (err) { alert(err.message); }
       return;
     }
     case 'add-task': {

@@ -85,7 +85,7 @@ export async function modelFor(type) {
 
 function blank(ownerId, folder, name) {
   const now = Date.now();
-  return { id: folder, ownerId, name: name || folder, folder, createdAt: now, updatedAt: now, active: false, autoTest: true, testCommand: '', tasks: [], log: [] };
+  return { id: folder, ownerId, name: name || folder, folder, createdAt: now, updatedAt: now, active: false, autoTest: true, testCommand: '', tasks: [], log: [], chats: [] };
 }
 
 function read(ownerId, id) {
@@ -232,6 +232,67 @@ export async function tasksFromPlan(user, p) {
   if (added.length) addLog(p, `${added.length} task creati dal piano`);
   await save(p);
   return added;
+}
+
+/** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */
+export async function testCommand(user, p) {
+  if (p.testCommand) return p.testCommand;
+  const files = (await workspace.listFiles(user, '', { limit: 2000 })).filter((f) => !f.dir).map((f) => f.path);
+  let pkg = null;
+  try { if (files.includes('package.json')) pkg = JSON.parse(fs.readFileSync(workspace.resolve(user, 'package.json').abs, 'utf8')); } catch {}
+  if (pkg?.scripts?.test && !/no test specified/.test(pkg.scripts.test)) return 'npm test';
+  if (files.some((f) => /(^|\/)(test[-_][^/]*|[^/]*[._-]test|[^/]*\.spec)\.(c|m)?js$/.test(f) || /(^|\/)test\/[^/]+\.(c|m)?js$/.test(f))) return 'node --test';
+  const py = files.filter((f) => /(^|\/)(test_[^/]*|[^/]*_test)\.py$/.test(f));
+  if (py.length) {
+    const hasPytest = (await workspace.runCommand(user, 'python -c "import pytest"', { timeout: 20000 })).exitCode === 0;
+    if (hasPytest) return 'python -m pytest -q';
+    const dir = path.posix.dirname(py[0]);
+    // i test aggiungono da soli la cartella del progetto a sys.path (vedi taskPrompt in runner.js)
+    return dir === '.' ? 'python -m unittest discover -v' : `python -m unittest discover -v -s ${dir}`;
+  }
+  return null;
+}
+
+/**
+ * Task aggiunti da una chat del progetto (strumento add_project_tasks). items: [{ text, type }].
+ * I testi già presenti tra i task non ancora fatti non si ripetono.
+ */
+export async function addTasks(p, items, { from } = {}) {
+  const pending = new Set(p.tasks.filter((t) => t.status !== 'done').map((t) => t.text));
+  const added = [];
+  for (const it of (Array.isArray(items) ? items : []).slice(0, 12)) {
+    const text = String(it?.text || '').trim().slice(0, 4000);
+    if (!stripTag(text)) continue;
+    const t = newTask(text, it?.type);
+    if (pending.has(t.text)) continue;
+    if (from) t.fromChat = from;
+    pending.add(t.text);
+    added.push(t);
+  }
+  p.tasks.push(...added);
+  if (added.length) addLog(p, `${added.length === 1 ? `Task aggiunto dalla chat: «${added[0].title}»` : `${added.length} task aggiunti dalla chat`}`);
+  await save(p);
+  return added;
+}
+
+/**
+ * Stato del progetto per la chat del progetto: piano, task con esito e ultime voci della cronologia.
+ * Si ricalcola a ogni messaggio, così il modello vede anche quello che la coda ha fatto nel frattempo.
+ */
+export async function chatContext(user, p) {
+  const plan = (await readPlan(user, p)).trim();
+  const STATUS = { queued: 'in coda', running: 'IN CORSO', testing: 'IN VERIFICA', done: 'fatto', failed: 'non riuscito', error: 'errore', cancelled: 'fermato' };
+  const tasks = p.tasks.map((t, i) => `${i + 1}. [${STATUS[t.status] || t.status}] (${TYPES[t.type] || t.type}) ${t.title}${t.summary && t.status === 'done' ? ` — ${t.summary.slice(0, 160)}` : ''}${t.error ? ` — ${t.error.slice(0, 120)}` : ''}`);
+  const log = p.log.slice(-6).map((l) => `- ${new Date(l.at).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${l.text}`);
+  return {
+    busy: p.tasks.some((t) => t.status === 'running' || t.status === 'testing'),
+    active: !!p.active,
+    text: [
+      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>` : `Piano: ${PLAN_FILE} è vuoto.`,
+      tasks.length ? `Task del progetto (coda ${p.active ? 'attiva' : 'in pausa'}):\n${tasks.slice(-30).join('\n')}` : 'Nessun task.',
+      log.length ? `Ultime voci della cronologia:\n${log.join('\n')}` : '',
+    ].filter(Boolean).join('\n\n'),
+  };
 }
 
 /** All'avvio: i task rimasti a metà tornano in coda, con la coda del progetto in pausa. */

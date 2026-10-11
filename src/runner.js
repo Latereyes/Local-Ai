@@ -93,25 +93,6 @@ ${rules}
 - Alla fine scrivi un riepilogo di 2-3 righe: cosa hai fatto e quali file.`;
 }
 
-/** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */
-async function testCommand(user, p) {
-  if (p.testCommand) return p.testCommand;
-  const files = (await workspace.listFiles(user, '', { limit: 2000 })).filter((f) => !f.dir).map((f) => f.path);
-  let pkg = null;
-  try { if (files.includes('package.json')) pkg = JSON.parse(fs.readFileSync(workspace.resolve(user, 'package.json').abs, 'utf8')); } catch {}
-  if (pkg?.scripts?.test && !/no test specified/.test(pkg.scripts.test)) return 'npm test';
-  if (files.some((f) => /(^|\/)(test[-_][^/]*|[^/]*[._-]test|[^/]*\.spec)\.(c|m)?js$/.test(f) || /(^|\/)test\/[^/]+\.(c|m)?js$/.test(f))) return 'node --test';
-  const py = files.filter((f) => /(^|\/)(test_[^/]*|[^/]*_test)\.py$/.test(f));
-  if (py.length) {
-    const hasPytest = (await workspace.runCommand(user, 'python -c "import pytest"', { timeout: 20000 })).exitCode === 0;
-    if (hasPytest) return 'python -m pytest -q';
-    const dir = path.posix.dirname(py[0]);
-    // i test aggiungono da soli la cartella del progetto a sys.path (vedi taskPrompt)
-    return dir === '.' ? 'python -m unittest discover -v' : `python -m unittest discover -v -s ${dir}`;
-  }
-  return null;
-}
-
 /** Pagina da controllare: l'html scritto in questo task (index.html se c'è), altrimenti index.html del progetto. */
 function entryPage(user, conv) {
   const written = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append'].includes(s.action) && s.status === 'done' && /\.html?$/i.test(s.path)).map((s) => s.path);
@@ -131,7 +112,7 @@ async function verify(p, task, conv, owner) {
 
   // 1. Test automatici (codice, e pagine che ne hanno)
   if (p.autoTest && (task.type === 'code' || task.type === 'page')) {
-    const cmd = canRun ? await testCommand(user, p) : null;
+    const cmd = canRun ? await projects.testCommand(user, p) : null;
     if (!canRun) add({ kind: 'test', ok: null, summary: 'Test non eseguiti: solo l\'amministratore può far girare il codice' });
     else if (!cmd && task.type === 'code') {
       add({ kind: 'test', ok: false, summary: 'Nessun test trovato' });
