@@ -23,7 +23,7 @@ import { checkPage } from './browser.js';
 import * as snapshots from './snapshots.js';
 import * as deps from './deps.js';
 import { judgeScreenshot } from './vision.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 const running = new Map(); // conversationId -> AbortController
 
@@ -38,7 +38,7 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 // in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -200,7 +200,7 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -224,13 +224,46 @@ function waitConfirmation(convId, stepId, signal) {
 }
 
 /**
+ * Cicli di riscrittura (prova Missile Command del 2026-10-11): un task riscriveva game.js all'infinito,
+ * con il segnaposto o con lo stesso contenuto, e la coda restava ferma lì. Per ogni conversazione si contano
+ * le riscritture intere di ogni file: oltre il limite il turno si ferma e il task passa al coordinatore
+ * con il motivo, invece di consumare tentativi. Nei task il conteggio vale per tutti i tentativi.
+ */
+const writeGuards = new Map(); // conversationId -> { files: Map(path -> { writes, hashes }), placeholders, loop }
+
+export function trackWrite(conv, name, file, content, error) {
+  let g = writeGuards.get(conv.id);
+  if (!g) writeGuards.set(conv.id, g = { files: new Map(), placeholders: 0, loop: null });
+  if (error?.placeholder) {
+    if (++g.placeholders >= 2) g.loop = { path: file, reason: `ha provato ${g.placeholders} volte a scrivere in ${file} il segnaposto della cronologia invece del codice` };
+  } else if (!error && name === 'write_file') {
+    const f = g.files.get(file) || { writes: 0, hashes: new Map() };
+    g.files.set(file, f);
+    f.writes++;
+    const h = createHash('sha1').update(String(content ?? '')).digest('hex');
+    f.hashes.set(h, (f.hashes.get(h) || 0) + 1);
+    if (f.hashes.get(h) >= 3) g.loop = { path: file, reason: `ha scritto ${f.hashes.get(h)} volte lo stesso contenuto in ${file} senza che il problema si risolvesse` };
+    else if (f.writes > Math.max(2, config.projects.maxRewrites)) g.loop = { path: file, reason: `ha riscritto da capo ${file} ${f.writes} volte` };
+  }
+  if (g.loop) running.get(conv.id)?.abort();
+  return g.loop;
+}
+
+/** Ciclo di riscrittura rilevato in questa conversazione (e azzera il conteggio), oppure null. */
+export function takeLoop(conversationId) {
+  const loop = writeGuards.get(conversationId)?.loop || null;
+  writeGuards.delete(conversationId);
+  return loop;
+}
+
+/**
  * Esegue uno strumento della modalità Computer, registra il passaggio (visibile nella UI)
  * e restituisce il risultato per il modello.
  */
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -259,7 +292,34 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       case 'write_file': {
         const r = await workspace.writeFile(user, step.path, args.content);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
-        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, created: r.created });
+        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}) });
+        if (trackWrite(conv, name, r.path, args.content)) output = JSON.stringify({ error: 'Ciclo di riscrittura: il turno si ferma' });
+        break;
+      }
+      case 'edit_file': {
+        const r = await workspace.editFile(user, step.path, args.old_text, args.new_text, { all: args.replace_all === true || args.replace_all === 'true' });
+        Object.assign(step, { path: r.path, size: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, replaced: r.replaced, lines: r.lines });
+        break;
+      }
+      case 'restore_file': {
+        const r = await workspace.restoreFile(user, step.path);
+        Object.assign(step, { path: r.path, size: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, lines: r.lines, version_of: new Date(r.from).toLocaleString('it-IT') });
+        break;
+      }
+      case 'install_packages': {
+        // librerie Python (pip) o npm: solo amministratore, solo pacchetti che esistono davvero sul registro
+        if (!canRun) throw new workspace.WorkspaceError('Solo l\'amministratore può installare librerie');
+        const lang = args.language === 'js' || args.language === 'npm' ? 'js' : 'python';
+        const list = (Array.isArray(args.packages) ? args.packages : String(args.packages || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean).slice(0, 10);
+        if (!list.length) throw new workspace.WorkspaceError('Nessuna libreria da installare');
+        step.path = list.join(', ');
+        emitStep();
+        const r = await deps.installPackages(workspace.userRoot(user), list.map((pkg) => ({ lang, pkg })), { timeout: config.projects.testTimeoutMs * 3 });
+        Object.assign(step, { what: r.installed.length ? `installate: ${r.installed.join(', ')}` : 'nessuna installata', output: r.output.slice(-3000) });
+        if (!r.installed.length) throw new workspace.WorkspaceError(`Nessuna libreria installata: ${r.skipped.map((x) => `${x.pkg} (${x.why})`).join(', ')}`);
+        output = JSON.stringify({ ok: true, installed: r.installed, skipped: r.skipped.length ? r.skipped : undefined });
         break;
       }
       case 'append_file': {
@@ -340,14 +400,15 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const added = await projects.addTasks(p, args.tasks, { from: conv.id });
         if (!added.length) throw new workspace.WorkspaceError('Nessun task nuovo (vuoti o già in coda)');
         let started = false;
-        if (args.start === true || args.start === 'true') {
+        // la coda parte da sola (prova del 2026-10-11: l'utente doveva chiederlo ogni volta); start: false la lascia in pausa
+        if (args.start !== false && args.start !== 'false') {
           // import al momento: runner.js importa chat.js
           const runner = await import('./runner.js');
           if (!p.active) runner.setActive(p, true); else runner.kick();
           started = true;
         }
         Object.assign(step, { path: '', tasks: added.map((t) => ({ title: t.title, type: t.type })), started, active: p.active });
-        output = JSON.stringify({ ok: true, added: added.map((t) => `${t.title} (${projects.TYPES[t.type]})`), queue: p.active ? 'attiva: i task partono uno alla volta' : 'in pausa: l\'utente la avvia dalla pagina del progetto, oppure richiama con start: true se te lo chiede' });
+        output = JSON.stringify({ ok: true, added: added.map((t) => `${t.title} (${projects.TYPES[t.type]})`), queue: p.active ? 'attiva: i task partono uno alla volta' : 'in pausa: l\'utente la avvia dalla pagina del progetto, oppure manage_queue con action start' });
         break;
       }
       case 'manage_queue': {
@@ -476,7 +537,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
           }
           if (install) {
             checks.push({ kind: 'deps', ok: null, summary: `Da installare: ${install}` });
-            report.push(`Librerie esistenti ma non installate sul PC: per usarle serve ${install}${canRun ? ' (puoi proporre all\'utente di eseguirlo)' : ' (dillo all\'utente)'}.`);
+            report.push(`Librerie esistenti ma non installate sul PC: per usarle serve ${install}${canRun ? ' (installale tu con install_packages)' : ' (dillo all\'utente)'}.`);
           }
         } else if (d?.checked) report.push('Librerie importate: tutte disponibili.');
         // 2. pagina nel browser: errori JavaScript
@@ -517,6 +578,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
     step.status = 'error';
     step.error = e.message;
     output = JSON.stringify({ error: e.message });
+    if (e.placeholder) trackWrite(conv, name, step.path, args.content, e);
   }
   step.finishedAt = Date.now();
   emitStep();
@@ -558,7 +620,8 @@ async function judgeProjectPage(conv, msg, step, owner, request) {
 function compactCall(c) {
   const a = { ...parseArgs(c.function.arguments) };
   if ((c.function.name === 'write_file' || c.function.name === 'append_file') && typeof a.content === 'string' && a.content.length > 400) {
-    a.content = `[${a.content.length} caratteri scritti nel file: usa read_file per rileggerlo]`;
+    // non è contenuto da copiare: se il modello lo riscrive in un file, workspace.writeFile lo rifiuta
+    a.content = `«omessi ${a.content.length} caratteri: sono già salvati in ${a.path || 'quel file'}; per rivederli usa read_file, per cambiarne una parte edit_file»`;
   }
   return { function: { name: c.function.name, arguments: a } };
 }
@@ -901,6 +964,8 @@ export async function send(conv, opts) {
 
   const ac = new AbortController();
   running.set(conv.id, ac);
+  // nei task il conteggio delle riscritture vale per tutti i tentativi; nelle altre chat riparte a ogni turno
+  if (!projectTask) writeGuards.delete(conv.id);
   const isFirst = conv.messages.filter((m) => m.role === 'user').length === 1;
   let finish;
   const finished = new Promise((r) => { finish = r; });
@@ -1158,6 +1223,12 @@ export async function send(conv, opts) {
       for (const st of msg.steps) if (st.status === 'running') st.status = 'error';
       if (ac.signal.aborted) {
         msg.status = 'stopped';
+        const loop = writeGuards.get(conv.id)?.loop;
+        if (loop && !projectTask) {
+          const note = `\n\n*[Fermato da LocalAI: ciclo di riscrittura, il modello ${loop.reason}. La versione precedente del file è salvata: chiedimi di ripristinarla.]*`;
+          msg.content += note;
+          emit(conv.id, { type: 'delta', messageId: msg.id, content: note });
+        }
         for (const md of msg.media) if (md.status === 'engineering') { md.status = 'cancelled'; emitMedia(conv, msg, md); }
       } else {
         msg.status = 'error';

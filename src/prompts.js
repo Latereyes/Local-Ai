@@ -285,6 +285,15 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       path: p('Percorso relativo del file.'),
       content: p('Testo da aggiungere in fondo (continua esattamente da dove finisce il file).'),
     }, ['path', 'content']),
+    fn('edit_file', 'Modifica una parte di un file esistente: sostituisce un pezzo di testo esatto con quello nuovo. È il modo giusto per correggere o cambiare un file: non riscriverlo intero.', {
+      path: p('Percorso relativo del file.'),
+      old_text: p('Pezzo esatto da sostituire, copiato dal file (spazi e rientri compresi), abbastanza lungo da essere unico.'),
+      new_text: p('Testo nuovo al posto di old_text (vuoto per toglierlo).'),
+      replace_all: { type: 'boolean', description: 'true per sostituire tutte le volte che compare.' },
+    }, ['path', 'old_text', 'new_text']),
+    fn('restore_file', 'Rimette la versione precedente di un file (LocalAI ne tiene una copia prima di ogni modifica). Da usare se un file è stato rovinato, svuotato o troncato.', {
+      path: p('Percorso relativo del file.'),
+    }, ['path']),
     fn('delete_file', 'Elimina un file o una cartella della cartella di lavoro. Solo se l\'utente lo chiede.', { path: p('Percorso relativo.') }, ['path']),
     fn('html_to_word', 'Converte una pagina HTML della cartella di lavoro in documento Word (.docx).', {
       html_path: p('File .html da convertire.'),
@@ -303,6 +312,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
+      packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
+      language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },
+    }, ['packages'])] : []),
     ...(canRun ? [fn('run_command', 'Esegue un comando sul PC dell\'utente (Windows, cmd.exe; per PowerShell usa powershell -NoProfile -Command "..."). Parte dalla cartella di lavoro. I comandi di sola lettura (dir, type, tasklist, systeminfo, ipconfig, ping, node -v…) partono subito; tutti gli altri aspettano la conferma dell\'utente. Massimo 2 minuti: niente server o programmi che restano aperti.', {
       command: p('Comando da eseguire.'),
       cwd: p('Sottocartella della cartella di lavoro da cui eseguirlo (default: la cartella di lavoro).'),
@@ -314,7 +327,7 @@ export function computerTools({ canRun = false, images = [], project = false, pr
           text: p('Cosa fare, con i nomi dei file; dettagli su righe successive.'),
           type: { type: 'string', enum: ['code', 'page', 'read', 'chat'], description: 'code = script e logica con test; page = pagine web e giochi; read = analisi di file, log, dati; chat = testi e README.' },
         }, required: ['text'] } },
-        start: { type: 'boolean', description: 'true per avviare subito la coda (solo se l\'utente l\'ha chiesto o ha confermato).' },
+        start: { type: 'boolean', description: 'La coda parte subito (default true). false solo se l\'utente ha chiesto di aspettare.' },
       }, ['tasks']),
       fn('manage_queue', 'Gestisce la coda del progetto: rimette in coda un task da rifare (retry), solo per la verifica completa dopo averlo sistemato (verify), lo riscrive e lo rimette in coda (edit), lo segna come fatto senza verifica (done, solo se l\'utente lo chiede), lo elimina (delete), oppure avvia (start) o mette in pausa (pause) la coda.', {
         action: { type: 'string', enum: ['retry', 'verify', 'edit', 'done', 'delete', 'start', 'pause'] },
@@ -338,11 +351,14 @@ export function computerPrompt({ files, canRun, os = 'Windows', project = null, 
   return `
 
 # Modalità Computer: cartella di lavoro
-${projectChat ? projectChatPrompt(project, projectChat) : ''}${project ? `Stai lavorando al progetto «${project.name}»: hai la sua cartella sul PC dell'utente (${os}) e gli strumenti per gestirla. Puoi accedere solo ai file di questa cartella.
+${projectChat ? projectChatPrompt(project, projectChat, canRun) : ''}${project ? `Stai lavorando al progetto «${project.name}»: hai la sua cartella sul PC dell'utente (${os}) e gli strumenti per gestirla. Puoi accedere solo ai file di questa cartella.
 - La cartella di lavoro È la cartella del progetto: scrivi i file direttamente qui (es. index.html, src/app.js, tests/test_app.py), senza creare una sottocartella con il nome del progetto. Usa percorsi relativi.` : `L'utente ha attivato la modalità Computer: hai una cartella di lavoro sul suo PC (${os}) dove creare e sviluppare progetti, e gli strumenti per gestirla. In questa modalità puoi accedere ai file della cartella di lavoro (solo a quelli).
 - Ogni progetto va nella sua sottocartella con un nome breve (es. tetris/, sito-ristorante/, script-backup/). Usa percorsi relativi: non puoi scrivere fuori dalla cartella.`}
 - Per creare qualcosa usa write_file con il contenuto COMPLETO e funzionante del file: niente segnaposto, niente "resto del codice qui".
-- La tua finestra di contesto è limitata: ogni chiamata deve restare sotto le 150 righe circa. Per un file più lungo (pagine ricche, documenti con molte sezioni, giochi) scrivi con write_file la prima parte e aggiungi il resto con append_file, un blocco per chiamata, finché il file è completo. CSS sobrio e breve. Per modificare un file esistente leggilo prima con read_file, poi riscrivilo intero.
+- La tua finestra di contesto è limitata: ogni chiamata deve restare sotto le 150 righe circa. Per un file più lungo (pagine ricche, documenti con molte sezioni, giochi) scrivi con write_file la prima parte e aggiungi il resto con append_file, un blocco per chiamata, finché il file è completo. CSS sobrio e breve.
+- Per modificare un file esistente leggilo con read_file e cambia solo i pezzi che servono con edit_file: non riscriverlo intero (una riscrittura a blocchi interrotta a metà lascia il file troncato). Riscrivi da capo solo un file che cambia quasi tutto.
+- Nella cronologia le tue scritture precedenti compaiono accorciate («omessi N caratteri…»): è una nota di LocalAI, non contenuto. Non copiarla mai in un file: LocalAI la rifiuta. Se ti serve il contenuto, rileggilo con read_file.
+- Se un file risulta vuoto, troncato o rovinato, rimetti la versione precedente con restore_file invece di riscriverlo a memoria.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
@@ -363,12 +379,15 @@ ${files}`;
  * Chat del progetto: l'utente parla con il progetto (domande, modifiche, nuove funzioni).
  * Le modifiche piccole si fanno subito; i lavori grandi diventano task della coda, con la verifica automatica.
  */
-function projectChatPrompt(project, { text, busy }) {
+function projectChatPrompt(project, { text, busy }, canRun) {
   return `Questa è la chat del progetto «${project.name}»: l'utente ti parla del progetto per farti domande, chiedere modifiche o nuove funzioni. Il progetto ha un piano (PIANO.md) e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici.
 - Domande sul progetto (come funziona, dove sta una cosa, cosa manca): leggi i file che servono con read_file e rispondi. Non inventare il contenuto dei file.
-- Modifiche piccole e mirate (un bug, colori, testi, una funzione, un controllo in più): falle subito. Leggi prima il file, poi riscrivilo intero. Dopo aver cambiato codice o pagine chiama check_project e, se qualcosa non va, correggi (al massimo 2-3 tentativi).
-- Lavori grandi o in più passi (una funzionalità ampia, più file, una riscrittura): spiega in breve il piano e crea i task con add_project_tasks, piccoli e verificabili, con il tipo giusto. Avvia la coda (start: true) solo se l'utente l'ha chiesto o te lo conferma; altrimenti chiedigli se avviarla.
-- Se l'utente cambia l'obiettivo o aggiunge requisiti importanti, aggiorna anche PIANO.md (letto e riscritto intero).
+- Guidi tu il lavoro, senza aspettare che l'utente ti dica ogni passo. Scegli da solo chi fa cosa:
+  - FAI TU, subito: modifiche piccole e mirate (un bug, colori, testi, una funzione, un controllo in più), installare librerie mancanti, sistemare un file rovinato. Leggi il file e cambialo con edit_file; poi chiama check_project e, se qualcosa non va, correggi (al massimo 2-3 tentativi).
+  - DIVENTA TASK: lavori grandi o in più passi (una funzionalità ampia, file nuovi lunghi, più file, codice con i suoi test).
+- Quando l'utente chiede di realizzare il progetto o una funzionalità grande, fai tutti i passi nello stesso turno: 1) scrivi o aggiorna PIANO.md (obiettivo, file, passi); 2) crea i task con add_project_tasks, piccoli e verificabili, con il tipo giusto; 3) la coda parte da sola. Non chiedere conferma tra un passo e l'altro: chiedi solo se manca un'informazione che cambia il risultato. Se l'utente dice di aspettare, usa start: false.
+${canRun ? `- Librerie mancanti (ModuleNotFoundError, «No module named», «Cannot find package»): installale tu con install_packages, se esistono davvero; non chiedere all'utente di farlo.
+` : ''}- Se l'utente cambia l'obiettivo o aggiunge requisiti importanti, aggiorna anche PIANO.md.
 - La cartella ha una storia (project_history): se l'utente chiede di annullare o tornare a com'era, o se un task ha rovinato file che funzionavano, guarda le versioni (list, diff) e ripristina quella giusta (restore).
 - Sei anche il coordinatore della coda: con manage_queue rimetti in coda, riscrivi, segni come fatti o elimini i task e avvii o fermi la coda. Quando un task fallisce o si blocca ricevi un messaggio automatico: indaga e sblocca il lavoro.
 ${busy ? `- ADESSO un task della coda sta lavorando sui file: non modificarli tu (le modifiche si sovrapporrebbero). Rispondi alle domande e, per le modifiche, aggiungi task con add_project_tasks.

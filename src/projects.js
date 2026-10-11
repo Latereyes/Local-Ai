@@ -218,7 +218,7 @@ export async function readPlan(user, p) {
 }
 
 export async function writePlan(user, p, text) {
-  await workspace.writeFile(scoped(user, p), PLAN_FILE, String(text || ''));
+  await workspace.writeFile(scoped(user, p), PLAN_FILE, String(text || ''), { fromUser: true });
   addLog(p, 'Piano aggiornato');
   await save(p);
 }
