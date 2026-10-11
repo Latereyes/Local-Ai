@@ -13,6 +13,7 @@ import { gpu } from './src/gpu.js';
 import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
+import { checkMelody } from './src/melody.js';
 import * as workspace from './src/workspace.js';
 import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
@@ -105,7 +106,7 @@ app.get('/api/config', wrap(async (req, res) => {
 
 app.post('/api/workflows/reload', auth.requireAdmin, wrap(async (req, res) => {
   loadWorkflows();
-  res.json((await checkAvailability(comfy.listModels)).map(publicInfo));
+  res.json((await checkAvailability(comfy.listModels, comfy.hasNode)).map(publicInfo));
 }));
 
 app.post('/api/gpu/release', wrap(async (req, res) => { await gpu.release(); res.json(gpu.state()); }));
@@ -323,9 +324,13 @@ const looksLikeImage = (b) => (b[0] === 0xff && b[1] === 0xd8) // JPEG
 
 const DOC_TYPES = { 'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md' };
 
-app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Object.keys(DOC_TYPES)], limit: '60mb' }), wrap(async (req, res) => {
+// Melodie canticchiate: il browser converte la registrazione in WAV mono (src/melody.js)
+const AUDIO_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave'];
+
+app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Object.keys(DOC_TYPES), ...AUDIO_TYPES], limit: '60mb' }), wrap(async (req, res) => {
   const ctype = (req.headers['content-type'] || '').split(';')[0];
   if (DOC_TYPES[ctype]) return res.json(await saveDocument(req, DOC_TYPES[ctype]));
+  if (AUDIO_TYPES.includes(ctype)) return res.json(await saveMelody(req));
   if (req.body?.length > 15 * 1024 * 1024) throw httpError(413, 'Immagine troppo grande (max 15 MB)');
   const ext = IMAGE_TYPES[ctype];
   if (!ext || !Buffer.isBuffer(req.body) || req.body.length < 16 || !looksLikeImage(req.body)) {
@@ -336,6 +341,18 @@ app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Ob
   await fs.writeFile(path.join(config.paths.media, file), req.body);
   res.json({ file, url: mediaUrl(file), width: Number(req.query.w) || 0, height: Number(req.query.h) || 0 });
 }));
+
+/** Salva una melodia canticchiata dopo averla controllata (durata, voce intonata) e ne stima tonalità e tempo. */
+async function saveMelody(req) {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Registrazione vuota');
+  if (req.body.length > 20 * 1024 * 1024) throw httpError(413, 'Registrazione troppo grande');
+  let info;
+  try { info = checkMelody(req.body); } catch (e) { throw httpError(400, e.message); }
+  const file = `${req.user.id}/up-${randomUUID()}.wav`;
+  await fs.mkdir(path.join(config.paths.media, req.user.id), { recursive: true });
+  await fs.writeFile(path.join(config.paths.media, file), req.body);
+  return { kind: 'audio', file, url: mediaUrl(file), ...info };
+}
 
 /** Salva un documento e ne estrae subito il testo (pagina per pagina). */
 async function saveDocument(req, ext) {
@@ -416,9 +433,9 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
   // Workflow utilizzabili = quelli con tutti i modelli presenti su ComfyUI (ricontrollo ogni 5 minuti)
-  const refresh = () => checkAvailability(comfy.listModels).then((list) => {
+  const refresh = () => checkAvailability(comfy.listModels, comfy.hasNode).then((list) => {
     const off = list.filter((w) => w.available === false);
-    if (off.length) console.log(`  Workflow non disponibili (modelli mancanti): ${off.map((w) => `${w.name} → ${w.missing.join(', ')}`).join(' | ')}`);
+    if (off.length) console.log(`  Workflow non disponibili (modelli o nodi mancanti): ${off.map((w) => `${w.name} → ${w.missing.join(', ')}`).join(' | ')}`);
   });
   refresh();
   setInterval(refresh, 5 * 60 * 1000);

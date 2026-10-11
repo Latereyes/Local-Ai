@@ -9,11 +9,12 @@ import * as workspace from './workspace.js';
  * Musica ed effetti sonori con ComfyUI (workflow di tipo "audio"):
  *   music → ACE-Step 1.5 (brani con o senza voce, BPM e tonalità)
  *   sfx   → Stable Audio 3 Medium (effetti, ambienti, suoni da videogioco)
+ *   melody → ACE-Step 1.5 in modalità cover: un brano dalla melodia canticchiata dall'utente (melody.js)
  * In chat il brano passa dalla coda di jobs.js come foto e video; in modalità Computer e nei progetti
  * il file va direttamente nella cartella di lavoro, generato a fine turno (la GPU della chat è di Ollama).
  */
 
-export const KIND_LABEL = { music: 'musica', sfx: 'effetto sonoro' };
+export const KIND_LABEL = { music: 'musica', sfx: 'effetto sonoro', melody: 'musica dalla melodia' };
 
 const NOTES = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
 // lingue del testo accettate da TextEncodeAceStepAudio1.5 (ComfyUI, comfy_extras/nodes_ace.py)
@@ -44,7 +45,7 @@ export function keyscale(value) {
  */
 export function audioSettings(kind, args = {}, w = audioWorkflow(kind)) {
   const seconds = audioSeconds(w, args.duration ?? args.seconds);
-  if (kind !== 'music') return { seconds };
+  if (kind === 'sfx') return { seconds };
   const text = String(args.lyrics || '').trim();
   const lyrics = !text || args.instrumental === true || /^\[?\s*(instrumental|strumentale|inst)\s*\]?$/i.test(text) ? INSTRUMENTAL : text;
   const bpm = Math.round(Number(args.bpm)) || 0;

@@ -404,6 +404,8 @@ body:not(.is-admin) .admin-only { display: none; }
 .select-chip select option { background: var(--bg-elev); color: var(--text); }
 .icon-chip { width: 32px; height: 30px; display: inline-grid; place-items: center; border-radius: 99px; color: var(--muted); border: 1px solid var(--border); }
 .icon-chip:hover { background: var(--hover); color: var(--text); }
+.icon-chip.on { background: var(--err); border-color: transparent; color: #fff; animation: rec-pulse 1.4s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: .65; } }
 .camera-only { display: none; }
 @media (pointer: coarse) { .camera-only { display: inline-grid; } }
 .attachments { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
@@ -417,6 +419,10 @@ body:not(.is-admin) .admin-only { display: none; }
 .att-doc-info b { color: var(--text); font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .att-doc-info small { color: var(--muted); font-size: 11.5px; }
 .att-doc .spin { position: static; margin: 0; }
+.att-rec { color: var(--err); padding-right: 10px; }
+.att-stop { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--err); color: #fff; flex: none; margin-left: auto; }
+.tune-chip { flex-wrap: wrap; max-width: 340px; }
+.tune-chip audio { width: 100%; height: 34px; }
 .doc-chip { display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg-elev); color: var(--accent-text); text-decoration: none; max-width: 300px; }
 .doc-chip:hover { border-color: var(--border-strong); }
 .doc-chip span { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }

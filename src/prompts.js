@@ -4,13 +4,16 @@ import { workflows, ASPECTS } from './workflows.js';
 // musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
 const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
 
+/** «18 s, tonalità stimata A minor, tempo stimato 96 BPM»: i dati di una melodia canticchiata per il modello. */
+export const melodyFacts = (m) => [`${Math.round(m.seconds)} s`, m.key ? `tonalità stimata ${m.key}` : '', m.bpm ? `tempo stimato ${m.bpm} BPM` : ''].filter(Boolean).join(', ');
+
 const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
 /**
  * Prompt di sistema. Le sezioni su documenti e immagini allegate entrano solo quando la conversazione ne ha:
  * sono ~1.500 token che altrimenti occuperebbero la finestra di contesto senza servire.
  */
-export function systemPrompt(name = config.assistantName, { documents = true, images = true } = {}) {
+export function systemPrompt(name = config.assistantName, { documents = true, images = true, melody = false } = {}) {
   return `Sei ${name}, un assistente AI che gira interamente in locale sul computer dell'utente. Oggi è ${today()}.
 
 # Come rispondi
@@ -65,7 +68,8 @@ Puoi creare musica con generate_music e effetti sonori con generate_sound_effect
 - Canzoni con voce: scrivi tu il testo nel campo lyrics, nella lingua richiesta (di norma italiano), diviso in sezioni [verse], [chorus], [bridge], e indica la lingua in language. Senza testo il brano è strumentale.
 - Più suoni diversi (es. gli effetti di un gioco): una chiamata per suono.
 - Non puoi ascoltare i risultati: dopo la chiamata non descriverli. Al massimo una frase breve.
-` : ''}${images ? `
+${melody && workflows('audio', 'melody').length ? `- Melodie canticchiate: l'utente può registrare una melodia (la vedi come «[Melodia canticchiata allegata…]»). Se chiede di trasformarla in un brano, di arrangiarla, di farne una canzone o una base, o allega solo la melodia, chiama generate_music con melody: true: il modello ne prende melodia e ritmo, tu scegli lo stile (in description), lo strumento che la suona e, se vuole una canzone, il testo. Tonalità e tempo li prende dalla registrazione. Se l'utente non indica una durata usa quella della melodia; per un brano più lungo la melodia viene ripetuta.
+` : ''}` : ''}${images ? `
 # Immagini allegate e modifiche
 - L'utente può allegare immagini (anche foto scattate col telefono). Se non le vedi direttamente, ricevi nel messaggio una descrizione automatica fatta da un modello visivo, con il testo trascritto: basati su quella, non inventare dettagli che non contiene e, se serve un dettaglio che manca, dillo.
 - Per rispondere a domande su un'immagine (cosa c'è, leggere un testo, tradurre, spiegare un grafico o un documento) rispondi normalmente, senza strumenti.
@@ -96,7 +100,7 @@ const WEB_TOOLS = [
   } },
 ];
 
-export function tools({ forcedImageModel, web = true, images: recent = [] } = {}) {
+export function tools({ forcedImageModel, web = true, images: recent = [], melody = null } = {}) {
   const source = recent[0] || null;
   // Con più immagini nella chat, gli strumenti che partono da un'immagine possono sceglierne una
   const short = (t) => { const s = String(t || 'senza descrizione').replace(/\s+/g, ' ').trim(); return s.length > 90 ? `${s.slice(0, 90)}…` : s; };
@@ -200,7 +204,7 @@ export function tools({ forcedImageModel, web = true, images: recent = [] } = {}
       }, required: ['description', 'duration', 'aspect_ratio'] },
     } });
   }
-  out.push(...audioTools());
+  out.push(...audioTools(melody));
   return out;
 }
 
@@ -239,13 +243,17 @@ function computerAudioProps() {
   return out;
 }
 
-function audioTools() {
+function audioTools(melody) {
   const out = [];
   const music = audioProps('music');
+  // melodia canticchiata nella chat e workflow cover installato: generate_music può partire da lì
+  if (music && melody && workflows('audio', 'melody').length) {
+    music.melody = { type: 'boolean', description: `true per usare come melodia del brano quella canticchiata dall'utente (${melodyFacts(melody)}). Con melody la durata predefinita è quella della registrazione.` };
+  }
   if (music) out.push({ type: 'function', function: {
     name: 'generate_music',
-    description: 'Genera un brano musicale (strumentale o canzone con voce) con ComfyUI. Da usare quando l\'utente chiede musica, una canzone, una base, una colonna sonora o un jingle.',
-    parameters: { type: 'object', properties: music, required: ['description', 'duration'] },
+    description: `Genera un brano musicale (strumentale o canzone con voce) con ComfyUI. Da usare quando l'utente chiede musica, una canzone, una base, una colonna sonora o un jingle${music.melody ? ', o di trasformare in brano la melodia che ha canticchiato' : ''}.`,
+    parameters: { type: 'object', properties: music, required: music.melody ? ['description'] : ['description', 'duration'] },
   } });
   const sfx = audioProps('sfx');
   if (sfx) out.push({ type: 'function', function: {

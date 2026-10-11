@@ -7,6 +7,7 @@ import * as store from './store.js';
 import { gpu } from './gpu.js';
 import { getWorkflow, buildGraph } from './workflows.js';
 import { audioValues } from './audio.js';
+import { melodyForComfy } from './melody.js';
 
 /** Bus globale degli eventi verso il frontend (SSE). */
 export const bus = new EventEmitter();
@@ -42,13 +43,17 @@ export function enqueue(conv, msg, media) {
     const upload = async (file) => comfy.uploadImage(await fs.readFile(path.join(config.paths.media, file)), `localai_${path.basename(file)}`);
     const image = media.sourceFile ? await upload(media.sourceFile) : undefined;
     const [image2, image3] = await Promise.all((media.extraSources || []).slice(0, 2).map(upload));
+    // Melodia canticchiata: ripulita e ripetuta fino alla durata del brano (melody.js), poi caricata su ComfyUI
+    const melody = media.melodyFile
+      ? await comfy.uploadImage(melodyForComfy(await fs.readFile(path.join(config.paths.media, media.melodyFile)), media.seconds).buffer, `localai_melody_${media.id}.wav`)
+      : undefined;
 
     const graph = buildGraph(w, {
       prompt: media.prompt, seed: media.seed,
       width: media.width, height: media.height, frames: media.frames,
       image, image2, image3, denoise: media.denoise,
       // audio (audio.js): durata, testo della canzone, BPM, tonalità e lingua
-      ...audioValues(media),
+      ...audioValues(media), melody,
     });
 
     let lastPreview = 0;

@@ -44,6 +44,7 @@ const P = {
   terminal: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><path d="M12 15h5"/>',
   play: '<path d="M7 4v16l13-8z"/>',
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
 const icon = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[n] || ''}</svg>`;
@@ -312,7 +313,9 @@ function renderMessage(m) {
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
     const imgs = (m.attachments || []).map((a, i) => a.kind === 'document'
       ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : ''}</small></span></a>`
-      : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
+      : a.kind === 'audio'
+        ? `<div class="doc-chip tune-chip">${icon('mic', 18)}<span><b>Melodia canticchiata</b><small>${esc(melodyFacts(a))}</small></span><audio src="${esc(a.url)}" controls preload="none"></audio></div>`
+        : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
     el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-user" id="m-${m.id}">${imgs ? `<div class="user-images">${imgs}</div>` : ''}${m.content || tag ? `<div class="bubble">${tag}${esc(m.content)}</div>` : ''}</div>`);
     return;
   }
@@ -580,7 +583,7 @@ function renderMedia(msg, md) {
     const isAudio = md.type === 'audio';
     card.style.maxWidth = `${isAudio ? 460 : Math.min(560, Math.round(460 * ratio))}px`;
     const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '',
-      isAudio && md.mode === 'music' ? [md.bpm ? `${md.bpm} BPM` : '', md.keyscale, md.lyrics && md.lyrics !== '[Instrumental]' ? 'con voce' : 'strumentale'].filter(Boolean).join(' · ') : ''].filter(Boolean).join(' · ');
+      isAudio && md.mode !== 'sfx' ? [md.melodyFile ? 'dalla tua melodia' : '', md.bpm ? `${md.bpm} BPM` : '', md.keyscale, md.lyrics && md.lyrics !== '[Instrumental]' ? 'con voce' : 'strumentale'].filter(Boolean).join(' · ') : ''].filter(Boolean).join(' · ');
     let frame = '';
     if (md.status === 'done' && md.url) {
       frame = md.type === 'video'
@@ -596,7 +599,7 @@ function renderMedia(msg, md) {
     }
     const showPrompt = md.status === 'engineering' || card.dataset.promptOpen === '1';
     card.innerHTML = `
-      <div class="media-head">${md.sourceUrl ? `<img class="src-thumb" src="${esc(md.sourceUrl)}" alt="" title="Immagine di partenza">` : icon(md.type, 15)}<span class="name">${esc(md.workflowName || '')}</span><span class="sep">·</span><span class="meta">${esc(meta)}</span><span class="grow"></span><span class="st">${statusText(md)}</span></div>
+      <div class="media-head">${md.sourceUrl ? `<img class="src-thumb" src="${esc(md.sourceUrl)}" alt="" title="Immagine di partenza">` : icon(md.melodyFile ? 'mic' : md.type, 15)}<span class="name">${esc(md.workflowName || '')}</span><span class="sep">·</span><span class="meta">${esc(meta)}</span><span class="grow"></span><span class="st">${statusText(md)}</span></div>
       ${frame ? `<div class="media-frame${isAudio ? ' audio' : ''}" style="${isAudio ? '' : `aspect-ratio:${md.width}/${md.height}`}">${frame}</div>` : ''}
       ${isAudio && md.status === 'done' && md.lyrics && md.lyrics !== '[Instrumental]' ? `<details class="media-lyrics"><summary>Testo</summary><pre>${esc(md.lyrics)}</pre></details>` : ''}
       ${md.status === 'error' ? `<div class="media-error">${esc(md.error || 'Errore sconosciuto')}</div>` : ''}
@@ -887,10 +890,13 @@ async function prepareImage(file) {
 const docType = (f) => (/\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'application/pdf'
   : /\.(md|markdown)$/i.test(f.name) ? 'text/markdown' : /\.txt$/i.test(f.name) || f.type === 'text/plain' ? 'text/plain' : null);
 
+const isAudioFile = (f) => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|oga|opus|webm|flac|3gp|amr)$/i.test(f.name);
+
 async function addFiles(files) {
-  const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name) || docType(f));
+  const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name) || docType(f) || isAudioFile(f));
   for (const f of list) {
     if (state.attachments.length >= MAX_ATT) { alert(`Massimo ${MAX_ATT} allegati per messaggio`); break; }
+    if (isAudioFile(f) && !docType(f)) { await addMelody(f); continue; }
     const dt = docType(f);
     const att = { key: Math.random().toString(36).slice(2), preview: dt ? null : URL.createObjectURL(f), kind: dt ? 'document' : 'image', name: f.name };
     state.attachments.push(att);
@@ -925,25 +931,134 @@ async function addFiles(files) {
 }
 
 function renderAttachments() {
-  attBox.hidden = !state.attachments.length;
-  attBox.innerHTML = state.attachments.map((a) => a.kind === 'document'
+  attBox.hidden = !state.attachments.length && !rec;
+  attBox.innerHTML = (rec ? `<div class="att att-doc att-rec">${icon('mic', 22)}<div class="att-doc-info"><b>Registro la melodia…</b><small class="rec-time">0:00 / ${clock(MELODY_MAX)}</small></div>
+      <button type="button" class="att-stop" data-rec-stop title="Ferma la registrazione">${icon('stop', 14)}</button></div>` : '')
+    + state.attachments.map((a) => a.kind === 'audio'
+    ? `<div class="att att-doc ${a.file ? '' : 'loading'}" data-key="${a.key}">${icon('mic', 22)}<div class="att-doc-info"><b>Melodia</b><small>${a.file ? esc(melodyFacts(a)) : 'analisi…'}</small></div>${a.file ? '' : '<span class="spin"></span>'}
+      <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`
+    : a.kind === 'document'
     ? `<div class="att att-doc ${a.file ? '' : 'loading'}" data-key="${a.key}">${icon('doc', 22)}<div class="att-doc-info"><b>${esc(a.name)}</b><small>${a.file ? `${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}` : 'lettura…'}</small></div>${a.file ? '' : '<span class="spin"></span>'}
       <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`
     : `<div class="att ${a.file ? '' : 'loading'}" data-key="${a.key}">
     <img src="${a.preview}" alt="">${a.file ? '' : '<span class="spin"></span>'}
     <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`).join('');
   const hasDoc = state.attachments.some((a) => a.kind === 'document');
-  const hasImg = state.attachments.some((a) => a.kind !== 'document');
-  el.input.placeholder = hasDoc && !hasImg ? 'Chiedi di riassumerlo, analizzarlo o verificarlo sul web…'
+  const hasImg = state.attachments.some((a) => a.kind === 'image');
+  const hasTune = state.attachments.some((a) => a.kind === 'audio');
+  el.input.placeholder = hasTune && !hasImg && !hasDoc ? 'Che brano ne faccio? (es. rock con chitarre, piano malinconico, canzone pop con testo…)'
+    : hasDoc && !hasImg ? 'Chiedi di riassumerlo, analizzarlo o verificarlo sul web…'
     : hasImg ? 'Chiedi qualcosa sull\'immagine, o chiedi di modificarla o animarla…' : 'Scrivi un messaggio…';
   updateSend();
 }
 attBox.addEventListener('click', (e) => {
+  if (e.target.closest('[data-rec-stop]')) return stopRecording();
   const k = e.target.closest('[data-remove]')?.dataset.remove;
   if (!k) return;
   state.attachments = state.attachments.filter((a) => a.key !== k);
   renderAttachments();
 });
+// ---------- Melodia canticchiata ----------
+// Registrata nel browser (o scelta tra i file audio), convertita in WAV mono e analizzata dal server
+// (src/melody.js: tonalità e tempo). ACE-Step la usa come melodia del brano (workflow acestep15-melody).
+const MELODY_MAX = 60;
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const melodyFacts = (a) => [clock(a.seconds || 0), a.key, a.bpm ? `~${a.bpm} BPM` : ''].filter(Boolean).join(' · ');
+const humInput = $('#hum-input');
+let rec = null; // { recorder, stream, chunks, t0, timer }
+
+/** WAV mono a 16 bit dall'audio decodificato dal browser (massimo MELODY_MAX secondi). */
+function toWav(buf) {
+  const n = Math.min(buf.length, Math.floor(MELODY_MAX * buf.sampleRate));
+  const mono = new Float32Array(n);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += d[i] / buf.numberOfChannels;
+  }
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, s) => [...s].forEach((ch, i) => out.setUint8(o + i, ch.charCodeAt(0)));
+  str(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, buf.sampleRate, true); out.setUint32(28, buf.sampleRate * 2, true);
+  out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, 'data'); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, mono[i])) * 32767, true);
+  return new Blob([out], { type: 'audio/wav' });
+}
+
+/** Aggiunge una melodia (registrazione o file audio): una sola per messaggio, la nuova sostituisce la vecchia. */
+async function addMelody(blob) {
+  state.attachments = state.attachments.filter((a) => a.kind !== 'audio');
+  if (state.attachments.length >= MAX_ATT) { alert(`Massimo ${MAX_ATT} allegati per messaggio`); return; }
+  const att = { key: Math.random().toString(36).slice(2), kind: 'audio', name: 'Melodia' };
+  state.attachments.push(att);
+  renderAttachments();
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    let decoded;
+    try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+    catch { throw new Error('Formato audio non supportato dal browser'); }
+    finally { ctx.close?.(); }
+    const res = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: toWav(decoded) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Caricamento non riuscito');
+    Object.assign(att, data);
+  } catch (err) {
+    state.attachments = state.attachments.filter((a) => a !== att);
+    alert(err.message);
+  }
+  renderAttachments();
+}
+
+async function startRecording() {
+  let stream;
+  try {
+    // senza cancellazione dell'eco e riduzione del rumore: tendono a cancellare le note tenute
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+  } catch (err) {
+    alert(err.name === 'NotAllowedError' ? 'Permesso del microfono negato: consentilo dalle impostazioni del sito.' : `Microfono non disponibile (${err.message})`);
+    return;
+  }
+  const recorder = new MediaRecorder(stream);
+  rec = { recorder, stream, chunks: [], t0: Date.now() };
+  recorder.ondataavailable = (e) => { if (e.data.size) rec?.chunks.push(e.data); };
+  recorder.onstop = () => {
+    const { chunks, stream: s, timer } = rec;
+    clearInterval(timer);
+    s.getTracks().forEach((t) => t.stop());
+    rec = null;
+    $('#btn-hum').classList.remove('on');
+    renderAttachments();
+    if (chunks.length) addMelody(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+  };
+  recorder.start(250);
+  $('#btn-hum').classList.add('on');
+  renderAttachments();
+  rec.timer = setInterval(() => {
+    const s = (Date.now() - rec.t0) / 1000;
+    const t = attBox.querySelector('.rec-time');
+    if (t) t.textContent = `${clock(s)} / ${clock(MELODY_MAX)}`;
+    if (s >= MELODY_MAX) stopRecording();
+  }, 250);
+}
+
+function stopRecording() {
+  if (rec?.recorder.state === 'recording') rec.recorder.stop();
+}
+
+// Il microfono nel browser richiede HTTPS (o localhost): altrimenti si apre il registratore del telefono o la scelta di un file
+$('#btn-hum').onclick = () => {
+  if (rec) return stopRecording();
+  if (window.isSecureContext && navigator.mediaDevices?.getUserMedia && window.MediaRecorder) return startRecording();
+  humInput.click();
+};
+humInput.onchange = () => { if (humInput.files[0]) addMelody(humInput.files[0]); humInput.value = ''; };
+
+/** Il tasto melodia compare solo se su ComfyUI c'è il workflow che la usa. */
+function updateHum() {
+  $('#btn-hum').hidden = !(state.config?.workflows || []).some((w) => w.type === 'audio' && w.mode === 'melody' && w.available !== false);
+}
+
 $('#btn-attach').onclick = () => fileInput.click();
 $('#btn-camera').onclick = () => cameraInput.click();
 for (const inp of [fileInput, cameraInput]) inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
@@ -962,6 +1077,7 @@ dropZone.addEventListener('drop', (e) => {
 });
 
 function renderOpts() {
+  updateHum();
   $$('.chip[data-tool]').forEach((c) => c.classList.toggle('on', c.dataset.tool === state.tool));
   $('#chip-think').classList.toggle('on', state.think);
   $('#chip-computer').classList.toggle('on', state.computer);

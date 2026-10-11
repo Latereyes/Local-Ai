@@ -12,7 +12,8 @@ import * as workspace from './workspace.js';
 import * as audio from './audio.js';
 import { getUser } from './auth.js';
 import { workflows, getWorkflow, dimensions, dimensionsForRatio, frameCount, randomSeed, ASPECTS } from './workflows.js';
-import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt } from './prompts.js';
+import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt, melodyFacts } from './prompts.js';
+import { checkMelody } from './melody.js';
 
 const running = new Map(); // conversationId -> AbortController
 
@@ -44,13 +45,25 @@ const PAGE_CHARS = { min: 1000, max: 6000 };
 
 const ORIGIN = { edit: 'modificata', upscale: 'upscale', identity: 'foto con volto', scene: 'stessa persona, nuova scena' };
 
+// allegati che sono immagini (i più vecchi non hanno kind): né documenti né melodie canticchiate
+const isImage = (a) => a.kind !== 'document' && a.kind !== 'audio';
+
+/** Melodia canticchiata più recente della conversazione ({ file, seconds, key, bpm }), o null. */
+function recentMelody(conv) {
+  for (let i = conv.messages.length - 1; i >= 0; i--) {
+    const a = (conv.messages[i].attachments || []).findLast((x) => x.kind === 'audio' && x.file);
+    if (a) return a;
+  }
+  return null;
+}
+
 /** Immagini della conversazione dalla più recente (allegate o generate): tra queste Gemma sceglie quella di partenza. */
 function recentImages(conv, limit = 6) {
   const out = [];
   for (let i = conv.messages.length - 1; i >= 0 && out.length < limit; i--) {
     const m = conv.messages[i];
     const items = m.role === 'user'
-      ? (m.attachments || []).filter((a) => a.kind !== 'document' && a.file)
+      ? (m.attachments || []).filter((a) => isImage(a) && a.file)
         .map((a) => ({ file: a.file, width: a.width, height: a.height, description: a.description || '', origin: 'allegata' }))
       : (m.media || []).filter((x) => x.type === 'image' && x.status === 'done' && x.file)
         .map((md) => ({ file: md.file, width: md.width, height: md.height, description: md.prompt || md.description || '', origin: ORIGIN[md.mode] || 'generata' }));
@@ -74,7 +87,7 @@ function sourceImages(conv, max, pick = 0) {
     if (chosen) return [chosen];
   }
   const lastUser = conv.messages.findLast((m) => m.role === 'user');
-  const atts = (lastUser?.attachments || []).filter((a) => a.file && a.kind !== 'document');
+  const atts = (lastUser?.attachments || []).filter((a) => a.file && isImage(a));
   if (atts.length) return atts.slice(0, max).map((a) => ({ file: a.file, width: a.width, height: a.height, description: a.description || '', origin: 'allegata' }));
   const one = findSourceImage(conv);
   return one ? [one] : [];
@@ -104,9 +117,10 @@ function history(conv, opts) {
   const msgs = [];
   for (const m of conv.messages) {
     if (m.role === 'user') {
-      const atts = (m.attachments || []).filter((a) => a.kind !== 'document');
+      const atts = (m.attachments || []).filter(isImage);
       const docs = (m.attachments || []).filter((a) => a.kind === 'document');
-      const um = { role: 'user', content: m.content || (atts.length ? 'Ecco un\'immagine.' : docs.length ? 'Ecco un documento.' : '') };
+      const tunes = (m.attachments || []).filter((a) => a.kind === 'audio');
+      const um = { role: 'user', content: m.content || (atts.length ? 'Ecco un\'immagine.' : docs.length ? 'Ecco un documento.' : tunes.length ? 'Trasforma questa melodia in un brano musicale.' : '') };
       if (atts.length) {
         if (opts.vision) {
           um.images = atts.map((a) => imageBase64(a.file)).filter(Boolean);
@@ -115,6 +129,7 @@ function history(conv, opts) {
           um.content += attachmentNote(atts);
         }
       }
+      for (const t of tunes) um.content += `\n\n[Melodia canticchiata allegata: ${melodyFacts(t)}]`;
       for (const d of docs) {
         um.content += d.scanned
           ? `\n\n[Documento allegato: "${d.name}" (${d.pages} pagine) — PDF scansionato senza testo selezionabile: il contenuto non è leggibile]`
@@ -142,6 +157,7 @@ function history(conv, opts) {
         ...(opts.computer ? {} : { final_prompt: md.prompt }),
         aspect_ratio: md.aspect,
         ...(md.seconds ? { duration_seconds: md.seconds } : {}),
+        ...(md.melodyFile ? { from_hummed_melody: true } : {}),
         ...(md.error ? { error: md.error } : {}),
       }) });
     }
@@ -158,6 +174,8 @@ function history(conv, opts) {
   const sections = {
     documents: conv.messages.some((m) => m.attachments?.some((a) => a.kind === 'document')),
     images: !opts.auto && recentImages(conv, 1).length > 0,
+    // in modalità Computer generate_music non c'è (l'audio va nei file con create_audio_file)
+    melody: !opts.computer && !!recentMelody(conv),
   };
   const system = systemPrompt(opts.assistantName, sections) + (opts.computer ? computerPrompt(opts.computer) : '');
   return [{ role: 'system', content: system }, ...msgs];
@@ -339,15 +357,23 @@ function mediaFromCall(call, callIndex, opts, conv) {
   let args = call.function.arguments || {};
   if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = { description: args }; } }
   if (type === 'audio') {
+    // Musica dalla melodia canticchiata (ACE-Step in modalità cover): tonalità e tempo vengono dalla registrazione,
+    // così i metadati non contraddicono la melodia; la durata predefinita è quella della registrazione
+    const melody = mode === 'music' && args.melody && args.melody !== 'false' ? recentMelody(conv) : null;
+    if (melody && audio.audioWorkflow('melody')) {
+      mode = 'melody';
+      args = { ...args, duration: args.duration ?? melody.seconds, key: melody.key || args.key, bpm: melody.bpm || args.bpm };
+    }
     // Musica ed effetti: niente immagini né formato, solo durata e (per la musica) testo, BPM e tonalità
     const w = audio.audioWorkflow(mode);
     if (!w) return [];
     const settings = audio.audioSettings(mode, args, w);
     // il prompt engineer deve sapere se c'è una voce: la descrizione di Gemma a volte non lo dice
-    const voice = mode !== 'music' ? '' : settings.lyrics === '[Instrumental]' ? ' (Instrumental, no vocals.)' : ` (Song with sung lyrics, language: ${settings.language}.)`;
+    const voice = mode === 'sfx' ? '' : settings.lyrics === '[Instrumental]' ? ' (Instrumental, no vocals.)' : ` (Song with sung lyrics, language: ${settings.language}.)`;
     return [{
       id: store.newId(), type, toolName: name, callIndex, args, mode, workflow: w.id, workflowName: w.name,
       description: String(args.description || '').trim() + voice, prompt: '', ...settings,
+      ...(mode === 'melody' ? { melodyFile: melody.file, melodyUrl: mediaUrl(melody.file), melodySeconds: melody.seconds } : {}),
       seed: randomSeed(), status: 'engineering', createdAt: Date.now(),
     }];
   }
@@ -582,14 +608,20 @@ export async function send(conv, opts) {
       const meta = JSON.parse(fs.readFileSync(path.join(config.paths.media, tf), 'utf8'));
       const chars = meta.pages.reduce((n, p) => n + p.length, 0);
       attachments.push({ id: store.newId(), kind: 'document', file: f, textFile: tf, url: mediaUrl(f), name: meta.name, pages: meta.pages.length, chars, scanned: chars < 30 * meta.pages.length });
+    } else if (a?.kind === 'audio') {
+      // melodia canticchiata (WAV caricato da /api/uploads): durata, tonalità e tempo si ricalcolano dal file
+      if (!f.startsWith(`${conv.ownerId}/up-`) || !f.endsWith('.wav') || !exists(f)) throw invalid();
+      let info;
+      try { info = checkMelody(fs.readFileSync(path.join(config.paths.media, f))); } catch { throw invalid(); }
+      attachments.push({ id: store.newId(), kind: 'audio', file: f, url: mediaUrl(f), ...info });
     } else {
-      if (!f.startsWith(`${conv.ownerId}/up-`) || !exists(f)) throw invalid();
+      if (!f.startsWith(`${conv.ownerId}/up-`) || f.endsWith('.wav') || !exists(f)) throw invalid();
       attachments.push({ id: store.newId(), kind: 'image', file: f, url: mediaUrl(f), width: Number(a.width) || 0, height: Number(a.height) || 0 });
     }
   }
   const images = attachments.filter((a) => a.kind === 'image');
   if (!rawText && !attachments.length) throw new Error('Messaggio vuoto');
-  const text = rawText || (images.length ? 'Descrivi questa immagine.' : 'Riassumi e analizza questo documento.');
+  const text = rawText || (images.length ? 'Descrivi questa immagine.' : attachments.some((a) => a.kind === 'audio') ? 'Trasforma questa melodia in un brano musicale.' : 'Riassumi e analizza questo documento.');
   // Modalità Computer: cartella di lavoro + comandi (solo amministratori). Resta attiva per la conversazione.
   if (typeof opts.computer === 'boolean') conv.computer = opts.computer;
   const owner = getUser(conv.ownerId);
@@ -660,7 +692,7 @@ export async function send(conv, opts) {
         const allTools = [
           // nella ripresa automatica servono solo i file: niente strumenti per immagini e web (risparmia contesto);
           // nei task dei progetti, solo i file (i test li fa la coda)
-          ...(opts.auto || conv.project ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })
+          ...(opts.auto || conv.project ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv), melody: recentMelody(conv) })
             .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
           ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project }) : []),
         ];

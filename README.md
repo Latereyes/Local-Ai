@@ -60,6 +60,12 @@ LocalAI crea musica ed effetti sonori con ComfyUI, sulla stessa GPU e con la ste
 
 - **Musica** (`generate_music`, workflow `acestep15-music`): brani strumentali o canzoni con voce, con BPM e tonalità. Il testo lo scrive Gemma, nella lingua che chiedi. Esempi: «fammi una base chiptune per un gioco tipo Tetris», «una canzone pop in italiano sull'estate, voce femminile».
 - **Effetti sonori** (`generate_sound_effect`, workflow `stable-audio3-sfx`): colpi, esplosioni, passi, suoni di interfaccia o da videogioco, ambienti, singole note di strumenti, da 1 a 30 s. Esempi: «il suono di una moneta raccolta, stile arcade», «pioggia su un tetto di lamiera, 20 secondi».
+- **Dalla tua melodia** (`generate_music` con `melody`, workflow `acestep15-melody`): premi il tasto **microfono** nel composer, canticchia o fischietta la melodia (fino a 60 s) e premi stop. Poi scrivi che brano vuoi, per esempio «fanne un pezzo rock con le chitarre», «un piano malinconico» o «una canzone pop con un testo sull'estate». Se mandi solo la melodia, Gemma sceglie lo stile da sé. ACE-Step la usa in modalità *cover* (nodo `ReferenceTimbreAudio`): prende melodia e ritmo dalla registrazione e li arrangia nello stile chiesto.
+  - Il server stima tonalità e tempo della registrazione (`src/melody.js`, altezza delle note con YIN e profili tonali di Krumhansl) e li passa ad ACE-Step, così i metadati non contraddicono la melodia. Toglie anche i silenzi all'inizio e alla fine e normalizza il volume.
+  - La durata predefinita è quella della melodia (almeno 10 s). Per un brano più lungo la melodia viene ripetuta, perché oltre la fine della registrazione ACE-Step produrrebbe silenzio.
+  - Il microfono nel browser funziona su `http://localhost` e in HTTPS. Dal telefono, con l'indirizzo `http://192.168…`, il browser non lo concede: il tasto apre allora il registratore del telefono o la scelta di un file audio. Una nota vocale va bene, e si può allegare un file audio anche con la graffetta.
+  - Serve un ComfyUI con il nodo `ReferenceTimbreAudio` (sperimentale, nelle versioni con ACE-Step 1.5). Se manca, il tasto non compare e all'avvio LocalAI lo segnala tra i workflow non disponibili: basta aggiornare ComfyUI. I modelli sono gli stessi della musica.
+  - Ascolta il risultato con un po' di pazienza: la modalità cover è sperimentale. Il timbro della registrazione può affiorare, quindi conviene nominare lo strumento che suona la melodia (Gemma lo fa da sé). Se il risultato non convince, **Riprova** usa un altro seed.
 - In chat compare un lettore audio con la durata, i BPM e la tonalità. Il testo della canzone si apre sotto il lettore e il file si scarica in MP3.
 - **Modalità Computer e Progetti** (`create_audio_file`): l'assistente crea i file MP3 direttamente nella cartella del gioco o del sito (es. `tetris/audio/musica.mp3`, `tetris/audio/riga.mp3`). Nello stesso turno scrive il codice che li usa. I file vengono generati alla fine del turno, quando la chat lascia la GPU, e si ascoltano dal riquadro delle azioni. Nei progetti la verifica del task parte quando i file ci sono già.
 
@@ -225,6 +231,7 @@ Messaggio ─► Gemma (Ollama) ──► risposta in streaming
 | `upscale-fedele` | immagine (upscale, predefinito) | 4x-UltraMix_Restore, ridotto a 2x | ingrandimento fedele senza ridisegno, adatto a foto vere anche mosse o compresse, ~5 s |
 | `qwen3vl-vision` | vision | Qwen3-VL 4B (`TextGenerate`) | lettura/descrizione delle immagini allegate |
 | `acestep15-music` | audio (music) | ACE-Step 1.5 Turbo (8 step) + encoder Qwen 0.6B/1.7B | musica e canzoni con testo, BPM e tonalità, 10–240 s, MP3 |
+| `acestep15-melody` | audio (melody) | come sopra, in modalità cover: melodia canticchiata → `VAEEncodeAudio` → `ReferenceTimbreAudio`, senza codici audio dell'LM | brano dalla melodia registrata dall'utente, ripetuta fino alla durata scelta |
 | `stable-audio3-sfx` | audio (sfx) | Stable Audio 3 Medium (8 step) + T5Gemma | effetti sonori e ambienti, 1–30 s, MP3 |
 
 Questi workflow sono stati ricostruiti in formato API sui modelli e sui nodi **effettivamente installati** su ComfyUI. Alcuni file citati dai JSON originali non sono presenti sul server (per esempio `z_image_turbo_bf16`, il loader int8 di Krea e lo scheduler Krea custom). I JSON originali sono conservati in `workflows/_originali/`.
@@ -269,6 +276,7 @@ src/
   context.js         stima dei token e budget della finestra di contesto
   jobs.js            generazioni su ComfyUI + bus eventi
   audio.js           musica ed effetti sonori: impostazioni del brano, file nella cartella di lavoro
+  melody.js          melodia canticchiata: lettura del WAV, tonalità e tempo stimati, file per ComfyUI
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)

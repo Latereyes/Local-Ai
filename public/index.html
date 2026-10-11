@@ -71,8 +71,10 @@
               <div class="chips">
                 <button type="button" class="icon-chip" id="btn-attach" title="Allega immagini o documenti (PDF, TXT, MD)" data-icon="clip"></button>
                 <button type="button" class="icon-chip camera-only" id="btn-camera" title="Scatta una foto" data-icon="camera"></button>
-                <input type="file" id="file-input" accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown" multiple hidden>
+                <button type="button" class="icon-chip" id="btn-hum" title="Canticchia una melodia: diventa un brano" data-icon="mic" hidden></button>
+                <input type="file" id="file-input" accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown,audio/*" multiple hidden>
                 <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+                <input type="file" id="hum-input" accept="audio/*" capture hidden>
                 <button type="button" class="chip" data-tool="web" title="Cerca sul web prima di rispondere"><span data-icon="globe"></span><span>Cerca</span></button>
                 <button type="button" class="chip" data-tool="image"><span data-icon="image"></span><span>Immagine</span></button>
                 <button type="button" class="chip" data-tool="video"><span data-icon="video"></span><span>Video</span></button>
