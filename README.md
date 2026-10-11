@@ -116,7 +116,7 @@ Se il motore configurato non risponde, si ripiega su DuckDuckGo.
 Con il tasto **Computer** nel composer l'assistente lavora in una cartella del PC: crea pagine web, piccoli giochi per il browser (per esempio un Tetris), script, documenti PDF e Word, e può eseguire comandi. La modalità resta attiva per tutta la conversazione e funziona anche da telefono, in casa o da fuori con Tailscale, come il resto dell'app.
 
 - **Cartella di lavoro**: `workspace\<utente>\` dentro LocalAI, con una sottocartella per progetto (`tetris\`, `sito\`…). Il modello scrive, legge ed elimina file solo lì: i percorsi con `..`, quelli assoluti e i collegamenti che puntano fuori vengono rifiutati.
-- **Aprire i file**: sotto la risposta compaiono i file creati con i link **Apri** e **Scarica**. La voce **Progetti** nella barra laterale elenca tutto il contenuto della cartella. Pagine e giochi vengono serviti dalla porta `3001`, un'origine diversa dall'app: girano liberamente (anche con `localStorage`) ma non possono leggere chat o dati di LocalAI. Il link contiene un codice personale dell'utente, quindi si apre anche da un altro dispositivo senza fare l'accesso.
+- **Aprire i file**: sotto la risposta compaiono i file creati con i link **Apri** e **Scarica**. La voce **Progetti** nella barra laterale elenca le cartelle, con i loro file (vedi sotto). Pagine e giochi vengono serviti dalla porta `3001`, un'origine diversa dall'app: girano liberamente (anche con `localStorage`) ma non possono leggere chat o dati di LocalAI. Il link contiene un codice personale dell'utente, quindi si apre anche da un altro dispositivo senza fare l'accesso.
 - **PDF e Word**: l'assistente scrive una pagina HTML e la converte. Il PDF si crea stampando la pagina con Edge (o Chrome) in modalità headless. Il Word usa Microsoft Word se è installato, altrimenti un convertitore interno che gestisce titoli, paragrafi, grassetto e corsivo, elenchi e tabelle.
 - **Comandi** (solo per gli amministratori): partono da `cmd.exe` nella cartella di lavoro, con un limite di 2 minuti. I comandi di sola lettura (`dir`, `type`, `tasklist`, `systeminfo`, `ipconfig`, `ping`, `nvidia-smi`, `node -v`, `git status`…) senza percorsi esterni partono subito. Tutti gli altri, compreso l'avvio degli script creati, si fermano su una scheda **Esegui / Annulla** nella chat. Senza risposta entro 5 minuti il comando viene annullato. Mentre aspetta la conferma, la chat tiene occupata la GPU.
 - **Modello**: in modalità Computer, se nel menu è selezionato il modello predefinito, si usa **Qwen Coder** (`qwen3.8-coder`), che nel benchmark scrive il codice migliore. Se scegli a mano un altro modello, si usa quello.
@@ -129,6 +129,30 @@ Con il tasto **Computer** nel composer l'assistente lavora in una cartella del P
 | `WORKSPACE_MAX_ROUNDS` | `16` (azioni massime per risposta) |
 | `WORKSPACE_CONFIRM_SECONDS` | `300` |
 | `PDF_BROWSER` | percorso di Edge/Chrome, se non è nella posizione standard |
+
+## Progetti: piano, coda di task e verifica automatica
+
+La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartella della cartella di lavoro (`workspace\<utente>\<progetto>\`) con un piano, una coda di task e la cronologia. Le cartelle create in chat con **Computer** compaiono anche qui.
+
+- **Piano**: si scrive nel riquadro *Piano* (o lo scrive Claude Code direttamente in `PIANO.md` nella cartella del progetto). Con **Scrivi il piano con l'AI** basta scrivere l'obiettivo: il modello per la lettura (Gemma 26B, o il predefinito) prepara il piano nel formato giusto, da rivedere prima di creare i task. **Crea task dal piano** trasforma ogni punto di elenco (`- …` o `1. …`) in un task; le righe rientrate sotto un punto ne sono i dettagli e le caselle già spuntate (`- [x] …`) si saltano. Un task si può aggiungere anche a mano.
+- **Coda**: **Avvia coda** esegue i task in ordine, uno alla volta per tutto LocalAI (nei 16 GB di VRAM sta un solo modello). Tra progetti diversi passa prima il task che usa il modello già caricato. Gira sul server: continua anche con il browser chiuso o dal telefono spento. Se un task non riesce la coda del progetto va in pausa; dopo un riavvio di LocalAI il task interrotto torna in coda e si riprende con **Avvia**. Le chat dell'utente passano davanti ai task (priorità bassa verso l'agent del PC).
+- **Modello per tipo di task** (dal benchmark in `C:\AI\benchmark-delega`): *Codice* e *Pagina o gioco* a **Qwen Coder** (40k di contesto), *Lettura e analisi* (riassunti, log, estrazione, JSON) a **Gemma 26B HauhauCS** (64k di contesto), *Testo* al modello predefinito. Il tipo si sceglie da solo dalle parole del task, si forza nel piano con `[codice]`, `[pagina]`, `[lettura]`, `[testo]` all'inizio del punto, o si cambia dal menu del task. Se il modello scelto non è installato o non supporta gli strumenti (servono per leggere e scrivere i file) si usa quello predefinito: l'interfaccia mostra quale modello userà ogni tipo.
+- **Ogni task ha la sua chat** (titolo «Progetto · task»), con tutti i file scritti e gli esiti delle verifiche: si apre dal task. Il modello vede il piano, i task già fatti con il loro riepilogo, e lavora solo nella cartella del progetto. Nei task non esegue comandi: i test li lancia LocalAI.
+- **Verifica automatica**, dopo ogni turno del modello:
+  - *test* (codice, e pagine che ne hanno; solo per gli amministratori perché esegue il codice scritto dal modello): il comando impostato nel progetto, altrimenti `npm test` se `package.json` ha uno script di test, `node --test` per i file `*.test.js`, `pytest` (se installato) o `unittest` per i `test_*.py`. Se un task di codice non ha test, il modello deve scriverli;
+  - *pagina* (task di tipo pagina o gioco): Edge headless apre `index.html` (o la pagina scritta nel task) dal server dei file, raccoglie gli errori JavaScript e della console (la favicon mancante non conta) e fa uno screenshot, visibile nel task;
+  - *screenshot*: se la pagina non ha errori, un modello che vede le immagini giudica se mostra quanto richiesto.
+  Se qualcosa non va, l'esito torna al modello nella stessa chat e lui corregge, fino a 3 tentativi (`TASK_MAX_ATTEMPTS`).
+- **Quale modello legge davvero le immagini**: non basta che Ollama dichiari la capacità `vision`, quindi si misura. LocalAI fotografa con Edge una pagina con una parola e un numero a caso e chiede a ogni candidato di leggerli: i modelli Ollama che dichiarano la visione e Qwen3-VL di ComfyUI. Per giudicare gli screenshot si usa il più veloce tra quelli che hanno letto giusto. La verifica parte da sola al primo task di tipo pagina, oppure dal riquadro *Verifica* di un progetto (**Verifica ora**, solo amministratori); il risultato resta in `data/vision-check.json`. Con Qwen3-VL lo screenshot viene descritto e poi giudicato dal modello predefinito.
+
+| Variabile | Default |
+|---|---|
+| `TASK_MODEL_CODE` / `TASK_MODEL_PAGE` | `qwen3.8-coder:latest` |
+| `TASK_MODEL_READ` | `hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS` |
+| `TASK_MODEL_CHAT` | vuoto = modello predefinito |
+| `TASK_MAX_ATTEMPTS` | `3` |
+| `TASK_TEST_SECONDS` | `120` (tempo massimo dei test) |
+| `VISION_MODEL` | vuoto = scelto dalla verifica (es. `gemma4-12b-uncensored:latest`, oppure `comfy:qwen3-vl`) |
 
 ## Configurazione
 
@@ -144,7 +168,7 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `AGENT_URL` | `http://127.0.0.1:7070` (agent del PC, arbitro della GPU condiviso con ChatBz) |
 | `GPU_ARBITER` | `1` (`0` = solo l'arbitro interno) |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` |
-| `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni) |
+| `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni, progetti) |
 | `ASSISTANT_NAME` | `Gemma` |
 
 ## Come funziona
@@ -234,6 +258,10 @@ src/
   store.js           salvataggio delle conversazioni
   workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
   docx.js            conversione HTML → .docx senza dipendenze
+  projects.js        progetti: piano (PIANO.md), task, scelta del modello per tipo
+  runner.js          coda dei task: un task alla volta, test, controllo pagine e tentativi
+  browser.js         Edge/Chrome headless via DevTools: errori della console e screenshot
+  vision.js          verifica dei modelli che leggono le immagini e giudizio degli screenshot
 public/              interfaccia (HTML/CSS/JS, senza build)
 workflows/           workflow ComfyUI (API) + manifest + guide
 _legacy/             vecchia versione del progetto (si può eliminare)

@@ -25,9 +25,25 @@ export class WorkspaceError extends Error {}
 
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'utente';
 
-/** Cartella dell'utente (creata se manca). */
+/** Nome di cartella valido per un progetto (lettere, cifre, - e _), oppure '' se non ce n'è uno. */
+export const folderName = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+
+/** Il nome se è una singola cartella valida (anche creata in chat, es. «Sito ristorante»), altrimenti ''. */
+export const safeFolder = (s) => {
+  const n = String(s || '');
+  return n.length <= 100 && /^[^\\/:*?"<>|\u0000-\u001f]+$/.test(n) && !n.startsWith('.') && n.trim() === n ? n : '';
+};
+
+/**
+ * Cartella dell'utente (creata se manca). Con user.project è la cartella di quel progetto:
+ * così i task di un progetto vedono e scrivono solo lì dentro.
+ */
 export function userRoot(user) {
-  const dir = path.join(ROOT, slug(user.username));
+  const base = path.join(ROOT, slug(user.username));
+  const sub = user.project ? safeFolder(user.project) : '';
+  if (user.project && !sub) throw new WorkspaceError('Nome del progetto non valido');
+  const dir = sub ? path.join(base, sub) : base;
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -163,7 +179,7 @@ export async function htmlToWord(user, htmlRel, docxRel) {
 }
 
 /** Browser per la stampa in PDF: Edge (sempre presente su Windows) o Chrome/Chromium. PDF_BROWSER lo forza. */
-function findBrowser() {
+export function findBrowser() {
   const env = process.env;
   const list = IS_WIN
     ? [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean).flatMap((b) => [
@@ -243,7 +259,7 @@ export function isSafeCommand(command) {
   return !!SAFE_SUB[cmd] && SAFE_SUB[cmd].test(args.join(' '));
 }
 
-function killTree(p) {
+export function killTree(p) {
   if (!p.pid || p.exitCode !== null) return;
   if (IS_WIN) spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
   else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); }
@@ -257,7 +273,7 @@ export function runCommand(user, command, { cwd = '', timeout = 120000, signal }
   return new Promise((done) => {
     // Su Windows l'output della console è in UTF-8 solo dopo chcp 65001
     const line = IS_WIN ? `chcp 65001>nul & ${command}` : command;
-    const p = spawn(line, { cwd: dir.abs, shell: true, windowsHide: true, detached: !IS_WIN, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+    const p = spawn(line, { cwd: dir.abs, shell: true, windowsHide: true, detached: !IS_WIN, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' } });
     let out = '';
     let cut = false;
     const add = (b) => {

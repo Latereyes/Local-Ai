@@ -35,11 +35,13 @@ export async function capabilities(model) {
 
 /**
  * Contesto (token) da usare con il modello: quello del suo Modelfile se lo fissa
- * (es. Qwen Coder a 40k, misurato perché stia tutto nei 16 GB), altrimenti OLLAMA_CTX.
+ * (es. Qwen Coder a 40k, misurato perché stia tutto nei 16 GB), altrimenti quello in config.ollama.ctx, altrimenti OLLAMA_CTX.
  */
 export async function contextSize(model) {
-  const m = /^num_ctx\s+(\d+)/m.exec((await show(model || config.ollama.model)).parameters || '');
-  return m ? Number(m[1]) : config.ollama.numCtx;
+  const name = model || config.ollama.model;
+  const m = /^num_ctx\s+(\d+)/m.exec((await show(name)).parameters || '');
+  if (m) return Number(m[1]);
+  return config.ollama.ctx[name] || config.ollama.ctx[name.replace(/:latest$/, '')] || config.ollama.numCtx;
 }
 
 async function isHealthy(m) {
