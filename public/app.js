@@ -1439,7 +1439,7 @@ async function openUsers() {
   renderWorkflows(state.config?.workflows || []);
   await renderUsers();
 }
-const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini' };
+const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', duo: 'due persone insieme', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini' };
 function renderWorkflows(list) {
   $('#wf-list').innerHTML = list.map((w) => `<div class="wf-row ${w.available ? '' : 'off'}">
     <span class="wf-dot"></span><div><b>${esc(w.name)}</b> <small>${esc(MODE_LABEL[w.mode] || w.mode)}</small>

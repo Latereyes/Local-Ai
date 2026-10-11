@@ -42,7 +42,7 @@ const MAX_ATTACHMENTS = 4;
 const MIN_READ_TOKENS = 1200;
 const PAGE_CHARS = { min: 1000, max: 6000 };
 
-const ORIGIN = { edit: 'modificata', upscale: 'upscale', identity: 'foto con volto', scene: 'stessa persona, nuova scena' };
+const ORIGIN = { edit: 'modificata', upscale: 'upscale', identity: 'foto con volto', scene: 'stessa persona, nuova scena', duo: 'due persone insieme' };
 
 /** Immagini della conversazione dalla più recente (allegate o generate): tra queste Gemma sceglie quella di partenza. */
 function recentImages(conv, limit = 6) {
@@ -331,6 +331,10 @@ function mediaFromCall(call, callIndex, opts, conv) {
     // IPAdapter Plus Face (identity) resta solo come riserva se il workflow scene non è disponibile.
     mode = 'scene';
   }
+  // Due foto allegate con una persona ciascuna: le due persone insieme in una scena nuova (qwen-duo-real, da ChatBz)
+  const lastUser = conv.messages.findLast((m) => m.role === 'user');
+  const attachedImages = (lastUser?.attachments || []).filter((a) => a.file && a.kind !== 'document');
+  if (name === 'photo_with_face' && attachedImages.length >= 2 && workflows('image', 'duo').length) mode = 'duo';
 
   let wfId = type === 'image'
     ? (opts.imageModel && opts.imageModel !== 'auto' ? opts.imageModel : args.model)
@@ -344,8 +348,8 @@ function mediaFromCall(call, callIndex, opts, conv) {
   if (!w) return [];
 
   // Image to image / image to video / editing: serve almeno un'immagine di partenza
-  const fromImage = ['img2img', 'img2video', 'edit', 'identity', 'scene', 'upscale'].includes(mode);
-  let sources = fromImage ? sourceImages(conv, mode === 'edit' ? (w.maxImages || 1) : 1, Math.floor(Number(args.image)) || 0) : [];
+  const fromImage = ['img2img', 'img2video', 'edit', 'identity', 'scene', 'duo', 'upscale'].includes(mode);
+  let sources = fromImage ? sourceImages(conv, mode === 'edit' ? (w.maxImages || 1) : mode === 'duo' ? 2 : 1, mode === 'duo' ? 0 : Math.floor(Number(args.image)) || 0) : [];
   // Più scene di fila con la stessa persona: si riparte sempre dal ritratto originale, così gli errori non si sommano
   if (mode === 'scene' && sources[0]) sources = [sceneReference(conv, sources[0])];
   const source = sources[0] || null;
