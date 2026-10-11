@@ -310,9 +310,9 @@ export function computerTools({ canRun = false, images = [], project = false, pr
         }, required: ['text'] } },
         start: { type: 'boolean', description: 'true per avviare subito la coda (solo se l\'utente l\'ha chiesto o ha confermato).' },
       }, ['tasks']),
-      fn('manage_queue', 'Gestisce la coda del progetto: rimette in coda un task (retry), lo riscrive e lo rimette in coda (edit), lo segna come fatto (done), lo elimina (delete), oppure avvia (start) o mette in pausa (pause) la coda.', {
-        action: { type: 'string', enum: ['retry', 'edit', 'done', 'delete', 'start', 'pause'] },
-        task: { type: 'integer', minimum: 1, description: 'Numero del task (come nell\'elenco dei task del progetto), per retry, edit, done e delete.' },
+      fn('manage_queue', 'Gestisce la coda del progetto: rimette in coda un task da rifare (retry), solo per la verifica completa dopo averlo sistemato (verify), lo riscrive e lo rimette in coda (edit), lo segna come fatto senza verifica (done, solo se l\'utente lo chiede), lo elimina (delete), oppure avvia (start) o mette in pausa (pause) la coda.', {
+        action: { type: 'string', enum: ['retry', 'verify', 'edit', 'done', 'delete', 'start', 'pause'] },
+        task: { type: 'integer', minimum: 1, description: 'Numero del task (come nell\'elenco dei task del progetto), per retry, verify, edit, done e delete.' },
         text: p('Per edit: il nuovo testo completo del task, più chiaro o più piccolo.'),
         type: { type: 'string', enum: ['code', 'page', 'read', 'chat'], description: 'Per edit: tipo del task, se va cambiato.' },
       }, ['action']),

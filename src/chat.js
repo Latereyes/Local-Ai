@@ -352,16 +352,24 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const p = conv.projectChat && projects.get(getUser(conv.ownerId), conv.project.id);
         if (!p) throw new workspace.WorkspaceError('Solo nella chat di un progetto');
         const runner = await import('./runner.js');
-        const action = String(args.action || '');
+        let action = String(args.action || '');
         const n = Math.floor(Number(args.task));
         let t = null;
-        if (['retry', 'edit', 'done', 'delete'].includes(action)) {
+        // il coordinatore non chiude i task da solo: «done» diventa «verify» (verifica completa della coda)
+        const byCoordinator = !!conv.messages.findLast((m) => m.role === 'user')?.autoLabel?.startsWith('Coordinatore');
+        if (byCoordinator && action === 'done') args.action = 'verify';
+        if (['retry', 'edit', 'done', 'delete', 'verify'].includes(String(args.action))) {
           t = p.tasks[n - 1];
           if (!t) throw new workspace.WorkspaceError(`Task ${args.task} inesistente: i task sono numerati da 1 a ${p.tasks.length}`);
           if (t.status === 'running' || t.status === 'testing') throw new workspace.WorkspaceError('Il task è in corso: aspetta che finisca');
         }
+        action = String(args.action);
         let what;
         switch (action) {
+          case 'verify':
+            Object.assign(t, { status: 'queued', attempts: 0, error: null, verifyOnly: true, fixedBy: byCoordinator ? 'coordinator' : 'chat' });
+            what = `«${t.title}» rimesso in coda per la verifica completa`;
+            break;
           case 'retry':
             Object.assign(t, { status: 'queued', attempts: 0, error: null });
             what = `«${t.title}» di nuovo in coda`;
@@ -375,7 +383,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
           }
           case 'done':
             // fatto dalla chat del progetto o dal coordinatore (non dalla coda): si ricorda chi l'ha chiuso
-            Object.assign(t, { status: 'done', skipped: true, doneBy: conv.messages.findLast((m) => m.role === 'user')?.autoLabel?.startsWith('Coordinatore') ? 'coordinator' : 'chat', error: null });
+            Object.assign(t, { status: 'done', skipped: true, doneBy: 'chat', error: null });
             what = `«${t.title}» segnato come fatto`;
             break;
           case 'delete':
@@ -393,7 +401,12 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
           default:
             throw new workspace.WorkspaceError('Azione sconosciuta: retry, edit, done, delete, start o pause');
         }
-        projects.addLog(p, `Dalla chat: ${what}`);
+        // il coordinatore lavora da solo: dopo verify, retry o edit la coda riparte senza aspettare un altro comando
+        if (byCoordinator && ['verify', 'retry', 'edit'].includes(action) && !p.active) {
+          runner.setActive(p, true);
+          what += ', coda ripartita';
+        }
+        projects.addLog(p, `${byCoordinator ? 'Coordinatore' : 'Dalla chat'}: ${what}`);
         await projects.save(p);
         Object.assign(step, { path: '', what, active: p.active });
         output = JSON.stringify({ ok: true, done: what, queue: p.active ? 'attiva' : 'in pausa', tasks: p.tasks.map((x, i) => `${i + 1}. [${x.status}] ${x.title}`).slice(-20) });
