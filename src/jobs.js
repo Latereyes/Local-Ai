@@ -6,6 +6,7 @@ import * as comfy from './comfy.js';
 import * as store from './store.js';
 import { gpu } from './gpu.js';
 import { getWorkflow, buildGraph } from './workflows.js';
+import { applyKeepFace } from './faces.js';
 
 /** Bus globale degli eventi verso il frontend (SSE). */
 export const bus = new EventEmitter();
@@ -42,14 +43,16 @@ export function enqueue(conv, msg, media) {
     const image = media.sourceFile ? await upload(media.sourceFile) : undefined;
     const [image2, image3] = await Promise.all((media.extraSources || []).slice(0, 2).map(upload));
 
-    const graph = buildGraph(w, {
+    const values = {
       prompt: media.prompt, seed: media.seed,
       width: media.width, height: media.height, frames: media.frames,
       image, image2, image3, denoise: media.denoise,
-    });
+    };
+    let graph = buildGraph(w, values);
+    const keepFace = media.keepFace && applyKeepFace(graph, w.keepFace);
 
     let lastPreview = 0;
-    const { files } = await comfy.run(graph, {
+    const render = (g) => comfy.run(g, {
       signal: ac.signal,
       onEvent: (e) => {
         if (e.type === 'progress') emit(conv.id, { type: 'progress', mediaId: media.id, value: e.value, max: e.max });
@@ -60,6 +63,18 @@ export function enqueue(conv, msg, media) {
         }
       },
     });
+    let files;
+    try {
+      ({ files } = await render(graph));
+      media.faceKept = keepFace || undefined;
+    } catch (e) {
+      // Nodi dell'Impact Pack mancanti o diversi sul PC: si rifà la modifica come prima, senza ricucire il volto
+      if (!keepFace || e.aborted || ac.signal.aborted) throw e;
+      console.warn(`[job ${media.id}] volto originale non rimesso, rifaccio senza: ${e.message}`);
+      graph = buildGraph(w, values);
+      ({ files } = await render(graph));
+      media.faceKept = false;
+    }
 
     const out = files.find((f) => /\.(mp4|webm|mov|gif)$/i.test(f.filename)) || files[0];
     if (!out) throw new Error('ComfyUI non ha restituito alcun file');
@@ -105,6 +120,11 @@ export function recoverInterrupted() {
   }
 }
 
+/** Richiesta di descrizione di un'immagine allegata (la usano Qwen3-VL su ComfyUI e i modelli Ollama che vedono). */
+export function describePrompt(question) {
+  return `Analizza questa immagine per un assistente che non può vederla. Descrivi in italiano, in modo oggettivo e completo: tipo di immagine (foto, screenshot, illustrazione, documento…), soggetti (aspetto, età apparente, abbigliamento, espressione, posa), oggetti, ambiente, colori, luce, stile, composizione e inquadratura. Trascrivi fedelmente tutto il testo visibile.${question ? ` Includi in particolare i dettagli utili per rispondere a questa richiesta dell'utente: «${question.slice(0, 500)}»` : ''}`;
+}
+
 /**
  * Lettura di un'immagine con il modello visivo di ComfyUI (Qwen3-VL).
  * Va chiamata con la GPU già assegnata a ComfyUI (dentro gpu.run('comfy', ...)).
@@ -114,7 +134,7 @@ export async function describeImage(file, question) {
   if (!w) throw new Error('Nessun workflow di lettura immagini installato');
   const buf = await fs.readFile(path.join(config.paths.media, file));
   const image = await comfy.uploadImage(buf, `localai_${path.basename(file)}`);
-  const prompt = `Analizza questa immagine per un assistente che non può vederla. Descrivi in italiano, in modo oggettivo e completo: tipo di immagine (foto, screenshot, illustrazione, documento…), soggetti (aspetto, età apparente, abbigliamento, espressione, posa), oggetti, ambiente, colori, luce, stile, composizione e inquadratura. Trascrivi fedelmente tutto il testo visibile.${question ? ` Includi in particolare i dettagli utili per rispondere a questa richiesta dell'utente: «${question.slice(0, 500)}»` : ''}`;
+  const prompt = describePrompt(question);
   const { texts } = await comfy.run(buildGraph(w, { image, prompt }));
   const text = (texts[0] || '').trim();
   if (!text) throw new Error('Il modello visivo non ha restituito testo');

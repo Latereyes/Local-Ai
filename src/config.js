@@ -73,6 +73,14 @@ export default {
     visionModel: env.VISION_MODEL || '',
   },
 
+  // Immagini allegate quando il modello della chat non le vede: le descrive un modello Ollama che le legge
+  // (verifica visiva del 2026-10-10 sul PC: Gemma 26B, Qwen Coder e qwen35 leggono bene). Gemma 26B è senza
+  // censura come Qwen3-VL heretic. Se non è installato si usa il migliore della verifica, poi Qwen3-VL su ComfyUI.
+  // DESCRIBE_MODEL=comfy torna a Qwen3-VL su ComfyUI.
+  vision: {
+    describeModel: env.DESCRIBE_MODEL ?? 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',

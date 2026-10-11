@@ -570,7 +570,7 @@ function renderMedia(msg, md) {
   if (card.dataset.sig !== sig) {
     card.dataset.sig = sig;
     card.style.maxWidth = `${Math.min(560, Math.round(460 * ratio))}px`;
-    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : ''].filter(Boolean).join(' · ');
+    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '', md.faceKept ? 'volto originale' : ''].filter(Boolean).join(' · ');
     let frame = '';
     if (md.status === 'done' && md.url) {
       frame = md.type === 'video'

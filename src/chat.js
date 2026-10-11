@@ -10,6 +10,8 @@ import * as documents from './documents.js';
 import * as ctx from './context.js';
 import * as workspace from './workspace.js';
 import { getUser } from './auth.js';
+import { describeModel, describeWithOllama } from './vision.js';
+import { touchesFace } from './faces.js';
 import { workflows, getWorkflow, dimensions, dimensionsForRatio, frameCount, randomSeed, ASPECTS } from './workflows.js';
 import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt } from './prompts.js';
 
@@ -384,6 +386,9 @@ function mediaFromCall(call, callIndex, opts, conv) {
     description: String(args.description || (mode === 'upscale' ? `Upscale 2x: ${(source?.description || '').slice(0, 300)}` : '')).trim(),
     prompt: '', aspect, width, height, seconds, frames, denoise, strength: mode === 'img2img' ? strength : undefined,
     ...(mode === 'scene' && source ? { reference: source } : {}),
+    // Volto originale rimesso dopo la modifica, se la richiesta dell'utente non riguarda viso, testa, luce o stile
+    // (si guarda il messaggio dell'utente, non la descrizione: Gemma ci scrive sempre «keep the face unchanged»)
+    ...(mode === 'edit' && w.keepFace ? { keepFace: args.keep_face !== false && args.keep_face !== 'false' && !touchesFace(opts.text) } : {}),
     ...(source ? { sourceFile: source.file, sourceUrl: mediaUrl(source.file), sourceDescription, extraSources: sources.slice(1).map((s) => s.file) } : {}),
     seed: randomSeed(),
     status: 'engineering',
@@ -515,9 +520,17 @@ async function prepareDocuments(conv, msg, question, model, signal, budget = doc
 }
 
 /** Riscrive la descrizione nel prompt ottimizzato per il modello di destinazione (in streaming). */
-async function engineerPrompt(conv, msg, media, userText, model, signal) {
+async function engineerPrompt(conv, msg, media, userText, model, signal, vision = false) {
   const w = getWorkflow(media.workflow, media.type, media.mode);
   let text = '';
+  const user = { role: 'user', content: promptEngineerUser({ userRequest: userText, description: media.description, workflow: w, width: media.width, height: media.height, seconds: media.seconds, sourceDescription: media.sourceDescription, denoise: media.denoise }) };
+  // Il modello vede le immagini: guarda quelle di partenza invece di fidarsi solo della descrizione
+  // (così l'istruzione nomina la persona, il capo o l'oggetto giusto, con il colore e la posizione veri)
+  const sources = media.sourceFile ? [media.sourceFile, ...(media.extraSources || [])].map(imageBase64).filter(Boolean) : [];
+  if (vision && sources.length) {
+    user.images = sources;
+    user.content += `\n${sources.length > 1 ? `The ${sources.length} starting images are attached in order (image 1, image 2, image 3)` : 'The starting image is attached'}: look at it to refer precisely to the people, clothes, objects and positions that are really there.`;
+  }
   const out = await ollama.chat({
     model,
     signal,
@@ -525,7 +538,7 @@ async function engineerPrompt(conv, msg, media, userText, model, signal) {
     options: { temperature: 0.7 },
     messages: [
       { role: 'system', content: promptEngineerSystem(w) },
-      { role: 'user', content: promptEngineerUser({ userRequest: userText, description: media.description, workflow: w, width: media.width, height: media.height, seconds: media.seconds, sourceDescription: media.sourceDescription, denoise: media.denoise }) },
+      user,
     ],
     onChunk: (c) => {
       if (!c.content) return;
@@ -599,19 +612,24 @@ export async function send(conv, opts) {
 
   (async () => {
     try {
-      // Lettura delle immagini allegate con il modello visivo di ComfyUI (se Gemma non vede le immagini)
+      // Lettura delle immagini allegate se il modello della chat non le vede: prima un modello Ollama che le legge
+      // (Gemma 26B), altrimenti o se sbaglia Qwen3-VL su ComfyUI
       if (images.length && !vision) {
         // I passaggi compaiono subito nella UI, anche mentre si attende/libera la GPU
         const visionSteps = images.map((_, i) => ({ id: store.newId(), type: 'vision', title: images.length > 1 ? `immagine ${i + 1}` : 'immagine', status: 'running', startedAt: Date.now() }));
         for (const step of visionSteps) { msg.steps.push(step); emit(conv.id, { type: 'step', messageId: msg.id, step }); }
-        await gpu.run('comfy', 'Lettura immagine', async () => {
+        const onWait = (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label });
+        const read = async (describe, label, only) => {
           for (const [i, att] of images.entries()) {
-            if (ac.signal.aborted) break;
+            if (ac.signal.aborted || !only(att)) continue;
             const step = visionSteps[i];
             try {
-              att.description = await describeImage(att.file, rawText);
+              att.description = await describe(att);
+              delete att.visionError;
               step.text = att.description;
               step.status = 'done';
+              step.error = undefined;
+              step.title = `${step.title.replace(/ · .*$/, '')} · ${label}`;
             } catch (e) {
               att.visionError = e.message;
               step.status = 'error';
@@ -620,7 +638,21 @@ export async function send(conv, opts) {
             step.finishedAt = Date.now();
             emit(conv.id, { type: 'step', messageId: msg.id, step });
           }
-        }, { onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+        };
+        const reader = await describeModel();
+        if (reader) {
+          await gpu.run('ollama', 'Lettura immagine', () => read((att) => describeWithOllama(reader.name, att.file, rawText), reader.label, () => true), { onWait });
+          for (const att of images) if (att.visionError) console.warn(`[chat] lettura immagine con ${reader.label} non riuscita: ${att.visionError}`);
+        }
+        if (images.some((att) => !att.description) && !ac.signal.aborted && getWorkflow(null, 'vision')) {
+          await gpu.run('comfy', 'Lettura immagine', () => read((att) => describeImage(att.file, rawText), 'Qwen3-VL', (att) => !att.description), { onWait });
+        }
+        for (const [i, step] of visionSteps.entries()) {
+          if (step.status !== 'running' || ac.signal.aborted) continue;
+          images[i].visionError = step.error = 'Nessun modello installato legge le immagini';
+          step.status = 'error';
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        }
         store.save(conv, { touch: false });
         if (ac.signal.aborted) throw new Error('Interrotto');
       }
@@ -792,7 +824,7 @@ export async function send(conv, opts) {
         const byCall = new Map();
         for (const md of msg.media) {
           if (md.mode === 'upscale') continue; // nessun prompt da scrivere
-          if (!byCall.has(md.callIndex)) byCall.set(md.callIndex, await engineerPrompt(conv, msg, md, text, model, ac.signal));
+          if (!byCall.has(md.callIndex)) byCall.set(md.callIndex, await engineerPrompt(conv, msg, md, text, model, ac.signal, vision));
           md.prompt = byCall.get(md.callIndex);
           emitMedia(conv, msg, md);
         }

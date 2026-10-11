@@ -4,7 +4,7 @@
   "type": "image",
   "mode": "edit",
   "default": true,
-  "description": "Modifiche precise con istruzioni: aggiungere, togliere o sostituire oggetti, cambiare sfondo, abiti, colori, espressioni, testo nell'immagine, stile; può combinare fino a 3 immagini. I volti vengono poi rifiniti (Juggernaut XL, FaceDetailer) per un aspetto naturale, senza cambiare identità.",
+  "description": "Modifiche precise con istruzioni: aggiungere, togliere o sostituire oggetti, cambiare sfondo, abiti, colori, espressioni, testo nell'immagine, stile; può combinare fino a 3 immagini. I volti vengono rifiniti (Juggernaut XL, FaceDetailer) e, se la modifica non riguarda viso, testa, luce o stile, si rimette il volto originale della foto.",
   "resolution": {
     "megapixels": 1,
     "multiple": 16
@@ -77,5 +77,12 @@
         "input": "seed"
       }
     ]
+  },
+  "keepFace": {
+    "source": "13",
+    "edited": "20",
+    "image": "45",
+    "save": "21",
+    "detector": "43"
   }
 }

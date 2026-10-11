@@ -123,6 +123,7 @@ export function tools({ forcedImageModel, web = true, images: recent = [] } = {}
       description: `Modifica precisa a istruzioni (${editWf[0].name}) delle immagini allegate all'ultimo messaggio (fino a ${max}) o, se non ce ne sono, dell'immagine più recente della conversazione (${source.origin}): aggiungere, togliere o sostituire oggetti, cambiare sfondo, abiti, colori, espressione, testo, stile, combinare elementi di più immagini. Mantiene tutto ciò che non viene chiesto di cambiare.`,
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'Istruzione di modifica in inglese: cosa cambiare (con dettagli concreti) e cosa deve restare invariato. Con più immagini chiamale image 1, image 2, image 3 (nell\'ordine in cui sono state allegate).' },
+        ...(editWf[0].keepFace ? { keep_face: { type: 'boolean', description: 'true (default): dopo la modifica si rimette il volto originale, identico. false se la richiesta cambia viso, espressione, capelli, trucco, età, cappello od occhiali, oppure luce o stile di tutta la foto.' } } : {}),
         ...pick,
       }, required: ['description'] },
     } });
