@@ -43,6 +43,7 @@ const P = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   terminal: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><path d="M12 15h5"/>',
   play: '<path d="M7 4v16l13-8z"/>',
+  audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
 const icon = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[n] || ''}</svg>`;
@@ -433,14 +434,14 @@ function wsUrl(p, download = false) {
 }
 function wsLinks(p, { dir = false, bare = false } = {}) {
   if (!p) return '';
-  const viewable = dir || /\.(html?|txt|md|json|css|js|py|ps1|bat|csv|svg|png|jpe?g|gif|webp|pdf)$/i.test(p);
+  const viewable = dir || /\.(html?|txt|md|json|css|js|py|ps1|bat|csv|svg|png|jpe?g|gif|webp|pdf|mp3|wav|ogg)$/i.test(p);
   const web = dir || /\.html?$/i.test(p);
   const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
   return bare ? links : `<span class="ws-links">${links}</span>`;
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -456,6 +457,13 @@ function renderComputer(node, m) {
     const spin = s.status === 'running' ? '<span class="spin"></span>' : '';
     const err = s.status === 'error' ? `<div class="step-err">${esc(s.error || 'non riuscito')}</div>` : '';
     if (s.type === 'file') {
+      if (s.action === 'audio') {
+        // musica ed effetti creati nella cartella di lavoro: generati a fine turno, poi si ascoltano qui
+        const what = s.kind === 'sfx' ? 'effetto sonoro' : 'musica';
+        const head = s.status === 'done' ? `Audio creato (${what})` : s.status === 'error' ? `Audio non creato (${what})` : `Genero ${s.kind === 'sfx' ? 'l\'effetto sonoro' : 'la musica'}…${s.progress ? ` ${s.progress}%` : ''}`;
+        const player = s.status === 'done' ? `<audio class="ws-audio" src="${esc(wsUrl(stepPath(s)))}" controls preload="none"></audio>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('audio', 14)}<span>${head}</span><b>${esc(s.path || '')}</b>${s.status === 'done' ? `<span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}` : spin}</div>${player}${err}</div>`;
+      }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
       const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
@@ -569,13 +577,16 @@ function renderMedia(msg, md) {
   }
   if (card.dataset.sig !== sig) {
     card.dataset.sig = sig;
-    card.style.maxWidth = `${Math.min(560, Math.round(460 * ratio))}px`;
-    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : ''].filter(Boolean).join(' · ');
+    const isAudio = md.type === 'audio';
+    card.style.maxWidth = `${isAudio ? 460 : Math.min(560, Math.round(460 * ratio))}px`;
+    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '',
+      isAudio && md.mode === 'music' ? [md.bpm ? `${md.bpm} BPM` : '', md.keyscale, md.lyrics && md.lyrics !== '[Instrumental]' ? 'con voce' : 'strumentale'].filter(Boolean).join(' · ') : ''].filter(Boolean).join(' · ');
     let frame = '';
     if (md.status === 'done' && md.url) {
       frame = md.type === 'video'
         ? `<video src="${md.url}" controls playsinline preload="metadata" loop></video>`
-        : `<img class="result" src="${md.url}" alt="" loading="lazy">`;
+        : isAudio ? `<div class="audio-frame">${icon('audio', 22)}<audio src="${md.url}" controls preload="metadata"></audio></div>`
+          : `<img class="result" src="${md.url}" alt="" loading="lazy">`;
     } else if (['engineering', 'queued', 'running'].includes(md.status)) {
       const label = md.status === 'engineering' ? `Preparo il prompt per ${esc(md.workflowName)}…`
         : md.status === 'queued' ? 'In coda: attendo la GPU…' : '';
@@ -586,7 +597,8 @@ function renderMedia(msg, md) {
     const showPrompt = md.status === 'engineering' || card.dataset.promptOpen === '1';
     card.innerHTML = `
       <div class="media-head">${md.sourceUrl ? `<img class="src-thumb" src="${esc(md.sourceUrl)}" alt="" title="Immagine di partenza">` : icon(md.type, 15)}<span class="name">${esc(md.workflowName || '')}</span><span class="sep">·</span><span class="meta">${esc(meta)}</span><span class="grow"></span><span class="st">${statusText(md)}</span></div>
-      ${frame ? `<div class="media-frame" style="aspect-ratio:${md.width}/${md.height}">${frame}</div>` : ''}
+      ${frame ? `<div class="media-frame${isAudio ? ' audio' : ''}" style="${isAudio ? '' : `aspect-ratio:${md.width}/${md.height}`}">${frame}</div>` : ''}
+      ${isAudio && md.status === 'done' && md.lyrics && md.lyrics !== '[Instrumental]' ? `<details class="media-lyrics"><summary>Testo</summary><pre>${esc(md.lyrics)}</pre></details>` : ''}
       ${md.status === 'error' ? `<div class="media-error">${esc(md.error || 'Errore sconosciuto')}</div>` : ''}
       <div class="media-prompt" ${showPrompt ? '' : 'hidden'}><pre>${esc(md.prompt || md._draft || '')}</pre></div>
       ${mediaActions(md)}`;
@@ -601,7 +613,7 @@ function mediaActions(md) {
   const b = (act, ic, label) => `<button type="button" data-media-act="${act}">${icon(ic, 15)}${label}</button>`;
   if (md.status === 'engineering') return '';
   if (md.status === 'queued' || md.status === 'running') return `<div class="media-actions"><span class="grow"></span>${b('cancel', 'x', 'Annulla')}</div>`;
-  const ext = md.type === 'video' ? 'mp4' : 'png';
+  const ext = md.type === 'video' ? 'mp4' : md.type === 'audio' ? 'mp3' : 'png';
   return `<div class="media-actions">
     ${md.status === 'done' ? `<a href="${md.url}" download="localai-${md.id.slice(0, 8)}.${ext}">${icon('download', 15)}Scarica</a>` : ''}
     ${b('regenerate', 'refresh', md.status === 'done' ? 'Rigenera' : 'Riprova')}
@@ -1060,7 +1072,7 @@ async function openGallery(push = true) {
   renderConvList();
   if (push) history.pushState(null, '', '/galleria');
   document.title = 'Galleria · LocalAI';
-  const items = await api('/api/media').catch(() => []);
+  const items = (await api('/api/media').catch(() => [])).filter((m) => m.type !== 'audio');
   state.gallery = items;
   el.gallery.innerHTML = items.length
     ? items.map((m, i) => `<div class="tile" data-i="${i}">${m.type === 'video'
@@ -1426,7 +1438,7 @@ async function openUsers() {
   renderWorkflows(state.config?.workflows || []);
   await renderUsers();
 }
-const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini' };
+const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini', music: 'testo → musica', sfx: 'effetti sonori' };
 function renderWorkflows(list) {
   $('#wf-list').innerHTML = list.map((w) => `<div class="wf-row ${w.available ? '' : 'off'}">
     <span class="wf-dot"></span><div><b>${esc(w.name)}</b> <small>${esc(MODE_LABEL[w.mode] || w.mode)}</small>

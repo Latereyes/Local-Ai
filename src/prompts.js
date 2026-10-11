@@ -1,6 +1,9 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
 
+// musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
+const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
+
 const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
 /**
@@ -54,7 +57,15 @@ Puoi creare immagini e video con gli strumenti generate_image e generate_video (
 - Se l'utente non indica il formato scegli quello adatto al soggetto: ritratti 3:4 o 9:16, paesaggi e scene 16:9, oggetti e icone 1:1.
 - Non puoi vedere i risultati: dopo la chiamata non descriverli e non dire che sono venuti bene. Se vuoi, aggiungi una sola frase breve.
 - Scelta del modello immagine: per foto «realistiche», «vere», spontanee o amatoriali usa krea2-real; sdxl-juggernaut per look reflex, fotografico o cinematografico; zimage-turbo e krea2-turbo come via di mezzo (krea2-turbo per grafica e testo nell'immagine).
-${images ? `
+${hasAudio() ? `
+# Musica ed effetti sonori
+Puoi creare musica con generate_music e effetti sonori con generate_sound_effect (ComfyUI, sulla stessa GPU). L'utente li ascolta nella chat.
+- Usali solo quando l'utente chiede musica, una canzone, una base, un jingle, un effetto sonoro o un suono. Quando la richiesta c'è, chiama subito lo strumento senza chiedere conferma.
+- Nel campo "description" scrivi IN INGLESE: per la musica genere, atmosfera, strumenti, ritmo, voce (o "instrumental"); per gli effetti la sorgente del suono, il materiale, lo spazio e come evolve nel tempo.
+- Canzoni con voce: scrivi tu il testo nel campo lyrics, nella lingua richiesta (di norma italiano), diviso in sezioni [verse], [chorus], [bridge], e indica la lingua in language. Senza testo il brano è strumentale.
+- Più suoni diversi (es. gli effetti di un gioco): una chiamata per suono.
+- Non puoi ascoltare i risultati: dopo la chiamata non descriverli. Al massimo una frase breve.
+` : ''}${images ? `
 # Immagini allegate e modifiche
 - L'utente può allegare immagini (anche foto scattate col telefono). Se non le vedi direttamente, ricevi nel messaggio una descrizione automatica fatta da un modello visivo, con il testo trascritto: basati su quella, non inventare dettagli che non contiene e, se serve un dettaglio che manca, dillo.
 - Per rispondere a domande su un'immagine (cosa c'è, leggere un testo, tradurre, spiegare un grafico o un documento) rispondi normalmente, senza strumenti.
@@ -189,6 +200,59 @@ export function tools({ forcedImageModel, web = true, images: recent = [] } = {}
       }, required: ['description', 'duration', 'aspect_ratio'] },
     } });
   }
+  out.push(...audioTools());
+  return out;
+}
+
+/** Proprietà comuni agli strumenti audio (chat e modalità Computer), con i limiti del workflow installato. */
+function audioProps(kind) {
+  const w = workflows('audio', kind)[0];
+  if (!w) return null;
+  const d = w.duration || { min: 1, max: 60, default: 10 };
+  const props = {
+    description: { type: 'string', description: kind === 'music'
+      ? 'In inglese: genere e stile, atmosfera ed energia, strumenti principali e di supporto, ritmo, voce (tipo di voce, oppure "instrumental, no vocals"), produzione.'
+      : 'In inglese: sorgente del suono, materiale e timbro, spazio (vicino/lontano, secco/riverberato), come evolve nel tempo, stile (es. retro 8-bit, sci-fi, realistico).' },
+    duration: { type: 'integer', minimum: d.min, maximum: d.max, description: `Durata in secondi (default ${d.default}).${kind === 'sfx' ? ' Colpi, click e notifiche 1-3 s; azioni 3-6 s; ambienti 8-30 s.' : ' Jingle 10-20 s; basi per giochi o video 60-120 s; canzoni 120-240 s.'}` },
+  };
+  if (kind === 'music') {
+    Object.assign(props, {
+      lyrics: { type: 'string', description: 'Testo da cantare, solo se l\'utente vuole una canzone con voce: nella lingua richiesta, con le sezioni [verse], [chorus], [bridge] su righe proprie. Ometti per un brano strumentale.' },
+      language: { type: 'string', description: 'Lingua del testo, codice ISO di due lettere (it, en, es, fr, de, ja…).' },
+      bpm: { type: 'integer', minimum: 40, maximum: 240, description: 'Tempo in battiti al minuto, adatto al genere (ballad 70, pop 110-120, dance 128, arcade/chiptune 140-160).' },
+      key: { type: 'string', description: 'Tonalità, es. "C major", "A minor", "F# minor".' },
+    });
+  }
+  return props;
+}
+
+/** Modalità Computer: un solo strumento per musica ed effetti, con la descrizione e la durata di entrambi. */
+function computerAudioProps() {
+  const music = audioProps('music'), sfx = audioProps('sfx');
+  const both = music && sfx;
+  const out = { ...sfx, ...music };
+  if (both) {
+    out.description = { type: 'string', description: `Per music: ${music.description.description} Per sfx: ${sfx.description.description}` };
+    out.duration = { type: 'integer', minimum: sfx.duration.minimum, maximum: music.duration.maximum,
+      description: `Durata in secondi. Effetti (fino a ${sfx.duration.maximum} s): colpi, click e notifiche 1-3 s, azioni 3-6 s, ambienti 8-30 s. Musica (da ${music.duration.minimum} s): jingle 10-20 s, basi per giochi 60-120 s.` };
+  }
+  return out;
+}
+
+function audioTools() {
+  const out = [];
+  const music = audioProps('music');
+  if (music) out.push({ type: 'function', function: {
+    name: 'generate_music',
+    description: 'Genera un brano musicale (strumentale o canzone con voce) con ComfyUI. Da usare quando l\'utente chiede musica, una canzone, una base, una colonna sonora o un jingle.',
+    parameters: { type: 'object', properties: music, required: ['description', 'duration'] },
+  } });
+  const sfx = audioProps('sfx');
+  if (sfx) out.push({ type: 'function', function: {
+    name: 'generate_sound_effect',
+    description: 'Genera un effetto sonoro o un ambiente sonoro con ComfyUI (colpi, esplosioni, passi, suoni di interfaccia o da videogioco, atmosfere, singole note di strumenti).',
+    parameters: { type: 'object', properties: sfx, required: ['description', 'duration'] },
+  } });
   return out;
 }
 
@@ -216,6 +280,11 @@ export function computerTools({ canRun = false, images = [], project = false } =
       image: { type: 'integer', minimum: 1, maximum: images.length, description: 'Quale immagine: ' + images.map((im, i) => `${i + 1} = ${im.origin}: ${String(im.description || 'senza descrizione').replace(/\s+/g, ' ').slice(0, 80)}`).join(' | ') },
       path: p('Percorso di destinazione nel progetto, es. metodo-scientifico/img/passo1.png'),
     }, ['image', 'path'])] : []),
+    ...(hasAudio() ? [fn('create_audio_file', 'Crea un file audio MP3 nella cartella di lavoro: musica (kind=music) o effetto sonoro (kind=sfx), per giochi, pagine web e video. Il file viene generato alla fine del tuo turno: puoi già usare il suo percorso nel codice.', {
+      kind: { type: 'string', enum: ['music', 'sfx'].filter((k) => workflows('audio', k).length), description: 'music = brano musicale; sfx = effetto sonoro.' },
+      path: p(project ? 'Percorso del file .mp3 nel progetto, es. audio/musica.mp3, audio/riga.mp3' : 'Percorso del file .mp3, es. tetris/audio/musica.mp3'),
+      ...computerAudioProps(),
+    }, ['kind', 'path', 'description', 'duration'])] : []),
     fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF (formato A4), con la grafica della pagina.', {
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
@@ -240,7 +309,8 @@ ${project ? `Stai lavorando al progetto «${project.name}»: hai la sua cartella
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
-- Non dire mai che un file è pronto se non l'hai creato davvero con gli strumenti in questo turno.
+${hasAudio() ? `- Musica ed effetti sonori (giochi, siti, presentazioni): crea i file con create_audio_file, uno per suono (es. audio/musica.mp3, audio/riga.mp3, audio/game-over.mp3), e nello stesso turno scrivi il codice che li usa con percorsi relativi (in JavaScript: new Audio('audio/riga.mp3'); la musica di sottofondo con loop = true e volume più basso, avviata al primo tasto o tocco perché i browser bloccano l'audio prima di un'interazione). I file vengono generati alla fine del turno, circa mezzo minuto ciascuno: crea solo quelli che servono.
+` : ''}- Non dire mai che un file è pronto se non l'hai creato davvero con gli strumenti in questo turno.
 - Script: Python (.py), Node.js (.js), PowerShell (.ps1) o batch (.bat), con commenti brevi in italiano e istruzioni d'uso.
 ${canRun ? `- Comandi: con run_command puoi eseguire script e comandi (output e codice di uscita tornano a te). Dopo aver scritto uno script, provalo se ha senso farlo. Se fallisce, leggi l'errore, correggi e riprova (massimo 2-3 tentativi). L'utente deve confermare i comandi che modificano qualcosa: se rifiuta, non riprovare lo stesso comando.
 - Puoi rispondere anche a domande sul PC (spazio su disco, programmi aperti, rete, GPU) con comandi di sola lettura, es. tasklist, systeminfo, ipconfig, nvidia-smi, powershell -NoProfile -Command "Get-PSDrive -PSProvider FileSystem".
@@ -254,7 +324,7 @@ ${files}`;
 
 /** Prompt di sistema per la riscrittura specializzata (uno per workflow). */
 export function promptEngineerSystem(workflow) {
-  return `You are an expert prompt engineer for generative ${workflow.type === 'video' ? 'video' : 'image'} models. You turn a request into the single best possible prompt for the target model described below.
+  return `You are an expert prompt engineer for generative ${workflow.type === 'video' ? 'video' : workflow.type === 'audio' ? 'audio' : 'image'} models. You turn a request into the single best possible prompt for the target model described below.
 
 ${workflow.guide || 'Write a detailed, natural-language English prompt.'}
 
@@ -271,7 +341,7 @@ export function promptEngineerUser({ userRequest, description, workflow, width, 
     ...(sourceDescription !== undefined ? [`Source image content (the starting image): ${sourceDescription || '(no description available)'}`] : []),
     ...(denoise ? [`Re-render strength: ${denoise} (lower = closer to the source image).`] : []),
     `Assistant's description of what to generate: ${description}`,
-    `Output format: ${width}x${height}${seconds ? `, duration ${seconds} seconds` : ''}.`,
+    `Output format: ${width ? `${width}x${height}` : 'audio'}${seconds ? `, duration ${seconds} seconds` : ''}.`,
     'Write the final prompt now.',
   ];
   return lines.join('\n');
@@ -301,7 +371,7 @@ Decidi se per rispondere bene all'ULTIMO messaggio dell'utente serve una ricerca
 
 Serve cercare (search: true) per: notizie, eventi recenti o in programma, prezzi e costi attuali, quotazioni, meteo, risultati sportivi, classifiche, orari, uscite di prodotti/film/giochi, versioni di software, leggi, tasse e regole attuali, cariche pubbliche, persone o aziende "oggi", qualunque cosa possa essere cambiata dopo il 2024, fatti molto specifici o poco noti (numeri, date, dettagli di nicchia), richieste esplicite di cercare/verificare/dare fonti.
 
-NON serve (search: false) per: saluti e conversazione, opinioni e consigli generici, scrittura creativa, traduzioni, riassunti di testo fornito, codice e matematica, spiegazioni di concetti stabili (scienza, storia consolidata, grammatica), richieste di creare immagini o video, domande sull'assistente stesso.
+NON serve (search: false) per: saluti e conversazione, opinioni e consigli generici, scrittura creativa, traduzioni, riassunti di testo fornito, codice e matematica, spiegazioni di concetti stabili (scienza, storia consolidata, grammatica), richieste di creare immagini, video, musica o suoni, domande sull'assistente stesso.
 
 Se l'utente chiede di verificare, controllare, aggiornare o approfondire sul web informazioni di un documento o della conversazione, search è true. Riassumere, tradurre o analizzare un documento fornito NON richiede ricerca.
 Nella query non inserire MAI dati personali (nomi di persone private, codici fiscali o di prenotazione, indirizzi privati, dati sanitari personali): solo termini generici e pubblici (luoghi, aziende, eventi, nomi di esami medici, treni, prodotti).

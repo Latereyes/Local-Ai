@@ -1,0 +1,18 @@
+{
+  "id": "stable-audio3-sfx",
+  "name": "Stable Audio 3 (effetti sonori)",
+  "type": "audio",
+  "mode": "sfx",
+  "default": true,
+  "description": "Effetti sonori e ambienti da testo: colpi, esplosioni, passi, interfacce, suoni da videogioco, atmosfere, singole note di strumenti.",
+  "duration": { "default": 3, "min": 1, "max": 30 },
+  "params": {
+    "prompt": [{ "node": "3", "input": "text" }],
+    "seed": [{ "node": "6", "input": "seed" }],
+    "seconds": [{ "node": "5", "input": "seconds" }]
+  },
+  "requires": [
+    { "folder": "checkpoints", "file": "stable_audio_3_medium.safetensors" },
+    { "folder": "text_encoders", "file": "t5gemma_b_b_ul2.safetensors" }
+  ]
+}

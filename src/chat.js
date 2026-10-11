@@ -9,6 +9,7 @@ import { webSearch, readPage, engineName } from './search.js';
 import * as documents from './documents.js';
 import * as ctx from './context.js';
 import * as workspace from './workspace.js';
+import * as audio from './audio.js';
 import { getUser } from './auth.js';
 import { workflows, getWorkflow, dimensions, dimensionsForRatio, frameCount, randomSeed, ASPECTS } from './workflows.js';
 import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt } from './prompts.js';
@@ -21,10 +22,12 @@ export function stop(conversationId) {
   running.get(conversationId)?.abort();
 }
 
-const TOOL_TYPE = { generate_image: 'image', generate_video: 'video', edit_image: 'image', animate_image: 'video', photo_with_face: 'image', upscale_image: 'image' };
-const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', edit_image: 'img2img', animate_image: 'img2video', photo_with_face: 'identity', upscale_image: 'upscale' };
+const TOOL_TYPE = { generate_image: 'image', generate_video: 'video', edit_image: 'image', animate_image: 'video', photo_with_face: 'image', upscale_image: 'image', generate_music: 'audio', generate_sound_effect: 'audio' };
+const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', edit_image: 'img2img', animate_image: 'img2video', photo_with_face: 'identity', upscale_image: 'upscale', generate_music: 'music', generate_sound_effect: 'sfx' };
+// in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
+const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'run_command']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -169,7 +172,7 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -199,7 +202,7 @@ function waitConfirmation(convId, stepId, signal) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -265,6 +268,18 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         output = JSON.stringify({ ok: true, pdf: r.path, bytes: r.size });
         break;
       }
+      case 'create_audio_file': {
+        // Il file si genera a fine turno (renderPendingAudio): adesso la GPU è della chat
+        const kind = args.kind === 'sfx' ? 'sfx' : 'music';
+        const w = audio.audioWorkflow(kind);
+        if (!w) throw new workspace.WorkspaceError(`Nessun modello per ${audio.KIND_LABEL[kind]} installato su ComfyUI`);
+        const description = String(args.description || '').trim();
+        if (!description) throw new workspace.WorkspaceError('Manca la descrizione del suono');
+        const settings = audio.audioSettings(kind, args, w);
+        Object.assign(step, { path: audio.audioPath(user, step.path), kind, prompt: description, settings, workflowName: w.name, pending: true });
+        emitStep();
+        return JSON.stringify({ ok: true, path: step.path, kind, seconds: settings.seconds, note: 'Il file verrà generato alla fine del tuo turno: usa già questo percorso nel codice.' });
+      }
       case 'run_command': {
         if (!canRun) throw new workspace.WorkspaceError('Solo l\'amministratore può eseguire comandi');
         if (!step.command) throw new workspace.WorkspaceError('Comando vuoto');
@@ -323,6 +338,19 @@ function mediaFromCall(call, callIndex, opts, conv) {
   if (name === 'edit_image' && workflows('image', 'edit').length) mode = 'edit';
   let args = call.function.arguments || {};
   if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = { description: args }; } }
+  if (type === 'audio') {
+    // Musica ed effetti: niente immagini né formato, solo durata e (per la musica) testo, BPM e tonalità
+    const w = audio.audioWorkflow(mode);
+    if (!w) return [];
+    const settings = audio.audioSettings(mode, args, w);
+    // il prompt engineer deve sapere se c'è una voce: la descrizione di Gemma a volte non lo dice
+    const voice = mode !== 'music' ? '' : settings.lyrics === '[Instrumental]' ? ' (Instrumental, no vocals.)' : ` (Song with sung lyrics, language: ${settings.language}.)`;
+    return [{
+      id: store.newId(), type, toolName: name, callIndex, args, mode, workflow: w.id, workflowName: w.name,
+      description: String(args.description || '').trim() + voice, prompt: '', ...settings,
+      seed: randomSeed(), status: 'engineering', createdAt: Date.now(),
+    }];
+  }
   if (name === 'photo_with_face' && workflows('image', 'scene').length) {
     // Qwen-Edit + Krea Real per tutte le immagini (allegate o generate): tiene il volto e cambia davvero la scena.
     // IPAdapter Plus Face (identity) resta solo come riserva se il workflow scene non è disponibile.
@@ -632,7 +660,8 @@ export async function send(conv, opts) {
         const allTools = [
           // nella ripresa automatica servono solo i file: niente strumenti per immagini e web (risparmia contesto);
           // nei task dei progetti, solo i file (i test li fa la coda)
-          ...(opts.auto || conv.project ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })),
+          ...(opts.auto || conv.project ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv) })
+            .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
           ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
@@ -797,6 +826,15 @@ export async function send(conv, opts) {
           emitMedia(conv, msg, md);
         }
       }, { priority: opts.priority || 'high', onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+
+      // Audio chiesti con create_audio_file: si generano ora che la chat ha lasciato la GPU (nei progetti
+      // la verifica del task parte dopo, con i file già nella cartella)
+      if (msg.steps.some((s) => s.pending)) {
+        await audio.renderPendingAudio(msg.steps, user, {
+          signal: ac.signal, priority: opts.priority === 'low' ? 'low' : 'normal',
+          emitStep: (step) => emit(conv.id, { type: 'step', messageId: msg.id, step }),
+        });
+      }
 
       msg.status = 'done';
     } catch (e) {

@@ -182,7 +182,7 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
   const files = [];
   const texts = [];
   for (const out of Object.values(outputs)) {
-    for (const key of ['images', 'gifs', 'videos', 'video']) {
+    for (const key of ['images', 'gifs', 'videos', 'video', 'audio']) {
       for (const f of out[key] || []) if (f?.filename && f.type === 'output') files.push(f);
     }
     for (const t of out.text || []) if (typeof t === 'string') texts.push(t);

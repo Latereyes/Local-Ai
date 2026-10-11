@@ -54,6 +54,21 @@ Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole s
 
 Esempi: allega una foto e chiedi «cosa c'è scritto?», «trasformala in acquerello», «animala: lei si gira e sorride». Funziona anche su immagini appena generate: «ora animala».
 
+## Musica ed effetti sonori
+
+LocalAI crea musica ed effetti sonori con ComfyUI, sulla stessa GPU e con la stessa coda di foto e video. Non serve Pinokio né un'altra app: i nodi audio sono già nel ComfyUI del PC.
+
+- **Musica** (`generate_music`, workflow `acestep15-music`): brani strumentali o canzoni con voce, con BPM e tonalità. Il testo lo scrive Gemma, nella lingua che chiedi. Esempi: «fammi una base chiptune per un gioco tipo Tetris», «una canzone pop in italiano sull'estate, voce femminile».
+- **Effetti sonori** (`generate_sound_effect`, workflow `stable-audio3-sfx`): colpi, esplosioni, passi, suoni di interfaccia o da videogioco, ambienti, singole note di strumenti, da 1 a 30 s. Esempi: «il suono di una moneta raccolta, stile arcade», «pioggia su un tetto di lamiera, 20 secondi».
+- In chat compare un lettore audio con la durata, i BPM e la tonalità. Il testo della canzone si apre sotto il lettore e il file si scarica in MP3.
+- **Modalità Computer e Progetti** (`create_audio_file`): l'assistente crea i file MP3 direttamente nella cartella del gioco o del sito (es. `tetris/audio/musica.mp3`, `tetris/audio/riga.mp3`). Nello stesso turno scrive il codice che li usa. I file vengono generati alla fine del turno, quando la chat lascia la GPU, e si ascoltano dal riquadro delle azioni. Nei progetti la verifica del task parte quando i file ci sono già.
+
+**Installare i modelli**: lancia `tools/scarica-audio.ps1` da PowerShell sul PC di ComfyUI:
+
+`powershell -ExecutionPolicy Bypass -File scarica-audio.ps1`
+
+Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. Senza i modelli, gli strumenti audio non vengono proposti.
+
 ## Documenti (PDF, TXT, MD)
 
 Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
@@ -209,6 +224,8 @@ Messaggio ─► Gemma (Ollama) ──► risposta in streaming
 | `sdxl-upscale` | immagine (upscale) | Ultimate SD Upscale 2x (4x-UltraSharp + Juggernaut XL, denoise 0.15) + FaceDetailer | «massima qualità» sulle immagini generate: ridisegna il dettaglio fine, ~35–75 s |
 | `upscale-fedele` | immagine (upscale, predefinito) | 4x-UltraMix_Restore, ridotto a 2x | ingrandimento fedele senza ridisegno, adatto a foto vere anche mosse o compresse, ~5 s |
 | `qwen3vl-vision` | vision | Qwen3-VL 4B (`TextGenerate`) | lettura/descrizione delle immagini allegate |
+| `acestep15-music` | audio (music) | ACE-Step 1.5 Turbo (8 step) + encoder Qwen 0.6B/1.7B | musica e canzoni con testo, BPM e tonalità, 10–240 s, MP3 |
+| `stable-audio3-sfx` | audio (sfx) | Stable Audio 3 Medium (8 step) + T5Gemma | effetti sonori e ambienti, 1–30 s, MP3 |
 
 Questi workflow sono stati ricostruiti in formato API sui modelli e sui nodi **effettivamente installati** su ComfyUI. Alcuni file citati dai JSON originali non sono presenti sul server (per esempio `z_image_turbo_bf16`, il loader int8 di Krea e lo scheduler Krea custom). I JSON originali sono conservati in `workflows/_originali/`.
 
@@ -251,6 +268,7 @@ src/
   chat.js            orchestrazione di un turno (ricerca → LLM → tool → prompt → coda)
   context.js         stima dei token e budget della finestra di contesto
   jobs.js            generazioni su ComfyUI + bus eventi
+  audio.js           musica ed effetti sonori: impostazioni del brano, file nella cartella di lavoro
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
