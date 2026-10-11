@@ -60,4 +60,22 @@ test('strumenti e prompt: coda e verifica solo nella chat del progetto', () => {
   assert.match(computerPrompt({ ...base, projectChat: { text: '', busy: true } }), /ADESSO un task della coda sta lavorando/);
 });
 
+test('coordinatore: spento o oltre il limite di interventi non apre turni e lascia la decisione all\'utente', async () => {
+  const { adminUser } = await import('../src/auth.js');
+  const runner = await import('../src/runner.js');
+  const owner = adminUser();
+  const p = await projects.create(owner, 'Coordinato');
+  const task = { ...projects.newTask('[pagina] index.html'), status: 'failed' };
+  p.tasks.push(task);
+  p.coordinator = false;
+  await runner.coordinate(p, task);
+  assert.equal(task.coordinated, undefined);
+  p.coordinator = true;
+  task.coordinated = 2;
+  await runner.coordinate(p, task);
+  assert.equal(task.coordinated, 3);
+  assert.match(p.log.at(-1).text, /serve il tuo aiuto/);
+  assert.deepEqual(p.chats, []);
+});
+
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

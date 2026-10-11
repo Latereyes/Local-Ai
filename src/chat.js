@@ -30,7 +30,7 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 // in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -192,7 +192,7 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato',  delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -222,7 +222,7 @@ function waitConfirmation(convId, stepId, signal) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -340,6 +340,57 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         }
         Object.assign(step, { path: '', tasks: added.map((t) => ({ title: t.title, type: t.type })), started, active: p.active });
         output = JSON.stringify({ ok: true, added: added.map((t) => `${t.title} (${projects.TYPES[t.type]})`), queue: p.active ? 'attiva: i task partono uno alla volta' : 'in pausa: l\'utente la avvia dalla pagina del progetto, oppure richiama con start: true se te lo chiede' });
+        break;
+      }
+      case 'manage_queue': {
+        // chat del progetto e coordinatore: task da rifare, riscrivere, segnare come fatti; coda avviata o in pausa
+        const p = conv.projectChat && projects.get(getUser(conv.ownerId), conv.project.id);
+        if (!p) throw new workspace.WorkspaceError('Solo nella chat di un progetto');
+        const runner = await import('./runner.js');
+        const action = String(args.action || '');
+        const n = Math.floor(Number(args.task));
+        let t = null;
+        if (['retry', 'edit', 'done', 'delete'].includes(action)) {
+          t = p.tasks[n - 1];
+          if (!t) throw new workspace.WorkspaceError(`Task ${args.task} inesistente: i task sono numerati da 1 a ${p.tasks.length}`);
+          if (t.status === 'running' || t.status === 'testing') throw new workspace.WorkspaceError('Il task è in corso: aspetta che finisca');
+        }
+        let what;
+        switch (action) {
+          case 'retry':
+            Object.assign(t, { status: 'queued', attempts: 0, error: null });
+            what = `«${t.title}» di nuovo in coda`;
+            break;
+          case 'edit': {
+            const fresh = projects.newTask(String(args.text || ''), args.type || t.type);
+            if (!fresh.text) throw new workspace.WorkspaceError('Manca il nuovo testo del task (text)');
+            Object.assign(t, { text: fresh.text, title: fresh.title, type: fresh.type, status: 'queued', attempts: 0, error: null });
+            what = `task ${n} riscritto e rimesso in coda: «${t.title}»`;
+            break;
+          }
+          case 'done':
+            Object.assign(t, { status: 'done', skipped: true, error: null });
+            what = `«${t.title}» segnato come fatto`;
+            break;
+          case 'delete':
+            p.tasks.splice(n - 1, 1);
+            what = `«${t.title}» eliminato`;
+            break;
+          case 'start':
+            if (!p.active) runner.setActive(p, true);
+            what = 'coda avviata';
+            break;
+          case 'pause':
+            if (p.active) runner.setActive(p, false);
+            what = 'coda in pausa';
+            break;
+          default:
+            throw new workspace.WorkspaceError('Azione sconosciuta: retry, edit, done, delete, start o pause');
+        }
+        projects.addLog(p, `Dalla chat: ${what}`);
+        await projects.save(p);
+        Object.assign(step, { path: '', what, active: p.active });
+        output = JSON.stringify({ ok: true, done: what, queue: p.active ? 'attiva' : 'in pausa', tasks: p.tasks.map((x, i) => `${i + 1}. [${x.status}] ${x.title}`).slice(-20) });
         break;
       }
       case 'check_project': {
@@ -711,7 +762,7 @@ export async function send(conv, opts) {
   const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null, projectChat } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
-  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true } : {}), createdAt: Date.now() };
+  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true, ...(opts.autoLabel ? { autoLabel: String(opts.autoLabel).slice(0, 200) } : {}) } : {}), createdAt: Date.now() };
   const msg = { id: store.newId(), role: 'assistant', content: '', thinking: '', steps: [], media: [], model, status: 'pending', createdAt: Date.now() };
   conv.messages.push(userMsg, msg);
   await store.save(conv);
@@ -908,7 +959,7 @@ export async function send(conv, opts) {
         calls.forEach((call, i) => msg.media.push(...mediaFromCall(call, i, opts, conv)));
         for (const md of msg.media) emitMedia(conv, msg, md);
 
-        if (isFirst && !projectTask) {
+        if (isFirst && !projectTask && !opts.auto) {
           try {
             const t = (await ollama.complete({ model, messages: titlePrompt(text), options: { num_predict: 24, temperature: 0.3 } }))
               .replace(/["«»*#]/g, '').split('\n')[0].trim().slice(0, 60);

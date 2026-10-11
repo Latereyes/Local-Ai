@@ -68,6 +68,10 @@ export default {
     },
     // Tentativi per task: dopo un test fallito il modello riceve l'errore e corregge, fino a questo numero di giri
     maxAttempts: Number(env.TASK_MAX_ATTEMPTS || 3),
+    // Task bloccato: il modello sta lavorando (ha la GPU) ma non arriva niente da questi minuti → si ferma
+    stallMinutes: Number(env.TASK_STALL_MINUTES || 15),
+    // Coordinatore della coda: interventi automatici per task (dopo un fallimento o un blocco) prima di chiedere all'utente
+    coordinatorRuns: Number(env.TASK_COORDINATOR_RUNS || 2),
     testTimeoutMs: Number(env.TASK_TEST_SECONDS || 120) * 1000,
     // Modello che giudica gli screenshot delle pagine; vuoto = il primo che ha passato la verifica visiva
     visionModel: env.VISION_MODEL || '',

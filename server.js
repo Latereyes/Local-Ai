@@ -196,7 +196,7 @@ const ownTask = (p, id) => {
 };
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
-  autoTest: p.autoTest, testCommand: p.testCommand, log: p.log.slice(-60),
+  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, log: p.log.slice(-60),
   tasks: p.tasks.map((t) => ({ ...t, checks: t.checks.map((c) => ({ ...c, screenshotUrl: mediaUrl(c.screenshot) })) })),
   plan: await projects.readPlan(req.user, p),
   files: await workspace.listFiles(projects.scoped(req.user, p), '', { limit: 400 }).catch(() => []),
@@ -217,6 +217,7 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   const b = req.body || {};
   if (typeof b.name === 'string' && b.name.trim()) p.name = b.name.trim().slice(0, 80);
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
+  if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
     p.testCommand = b.testCommand.trim().slice(0, 300);
@@ -276,7 +277,8 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
   switch (req.body?.action) {
     case 'retry':
       if (busy) throw httpError(409, 'Il task è in corso');
-      Object.assign(t, { status: 'queued', attempts: 0, error: null });
+      // rimesso in coda dall'utente: il coordinatore riparte da zero interventi
+      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0 });
       projects.addLog(p, `«${t.title}» di nuovo in coda`);
       break;
     case 'skip':
@@ -309,18 +311,7 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
 // Chat del progetto: l'ultima (o una nuova con { new: true }). Lavora nella cartella del progetto,
 // conosce piano e task e può aggiungere task alla coda (chat.js, strumenti add_project_tasks e check_project).
 app.post('/api/projects/:id/chat', projectErr(async (req, res) => {
-  const p = ownProject(req);
-  p.chats = (p.chats || []).filter((id) => store.get(id)?.ownerId === req.user.id);
-  const last = p.chats.map((id) => store.get(id)).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  if (last && !req.body?.new) return res.json({ id: last.id });
-  const c = store.create(req.user.id);
-  c.title = `${p.name} · chat`;
-  c.computer = true;
-  c.project = { id: p.id, folder: p.folder, name: p.name };
-  c.projectChat = true;
-  await store.save(c);
-  p.chats.push(c.id);
-  await projects.save(p, { touch: false });
+  const c = await runner.projectChat(ownProject(req), req.user, { fresh: !!req.body?.new });
   res.json({ id: c.id });
 }));
 app.post('/api/projects/:id/start', projectErr(async (req, res) => { const p = ownProject(req); runner.setActive(p, true); res.json(await fullProject(req, p)); }));

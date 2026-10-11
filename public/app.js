@@ -308,7 +308,10 @@ function renderMessage(m) {
   if (m.role === 'user') {
     if (node) return;
     if (m.auto) {
-      el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
+      // messaggi automatici: ripresa dopo le immagini, o il coordinatore della coda (con il dettaglio apribile)
+      el.thread.insertAdjacentHTML('beforeend', m.autoLabel
+        ? `<details class="msg msg-auto" id="m-${m.id}"><summary>${icon('refresh', 13)}${esc(m.autoLabel)}</summary><pre>${esc(m.content)}</pre></details>`
+        : `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
       return;
     }
     const TOOL_LABEL = { image: ['image', 'Immagine'], video: ['video', 'Video'], web: ['globe', 'Ricerca web'] };
@@ -476,6 +479,10 @@ function renderComputer(node, m) {
         const list = (s.tasks || []).map((t) => `<li>${esc(t.title)}</li>`).join('');
         const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
+      }
+      if (s.action === 'queue') {
+        const head = s.status === 'error' ? 'Coda non modificata' : s.status === 'done' ? `Coda: ${esc(s.what || '')}` : 'Gestisco la coda…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : ''}</div>${err}</div>`;
       }
       if (s.action === 'check') {
         // chat del progetto: test e pagina nel browser, come la verifica della coda
@@ -1380,6 +1387,7 @@ function renderProject() {
     <section class="pj-card">
       <div class="pj-card-head"><h3>Verifica</h3></div>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
       <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
     </section>
@@ -1493,6 +1501,7 @@ el.projects.addEventListener('change', (e) => {
   const sel = e.target.closest('[data-task-type]');
   if (sel) api(`${base}/tasks/${sel.dataset.taskType}`, { body: { action: 'type', type: sel.value } }).then((out) => { state.project = out; renderProject(); }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autotest') api(base, { method: 'PATCH', body: { autoTest: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
 });
 
 // ---------- Lightbox ----------
