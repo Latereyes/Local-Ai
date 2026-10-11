@@ -916,7 +916,7 @@ export async function send(conv, opts) {
         // I passaggi compaiono subito nella UI, anche mentre si attende/libera la GPU
         const visionSteps = images.map((_, i) => ({ id: store.newId(), type: 'vision', title: images.length > 1 ? `immagine ${i + 1}` : 'immagine', status: 'running', startedAt: Date.now() }));
         for (const step of visionSteps) { msg.steps.push(step); emit(conv.id, { type: 'step', messageId: msg.id, step }); }
-        const onWait = (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label });
+        const onWait = () => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting' });
         const read = async (describe, label, only) => {
           for (const [i, att] of images.entries()) {
             if (ac.signal.aborted || !only(att)) continue;
@@ -1131,7 +1131,7 @@ export async function send(conv, opts) {
           md.prompt = byCall.get(key);
           emitMedia(conv, msg, md);
         }
-      }, { priority: opts.priority || 'high', model: assistantName, onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+      }, { priority: opts.priority || 'high', model: assistantName, onWait: () => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting' }) });
 
       // Audio chiesti con create_audio_file: si generano ora che la chat ha lasciato la GPU (nei progetti
       // la verifica del task parte dopo, con i file già nella cartella)

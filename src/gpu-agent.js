@@ -33,13 +33,13 @@ async function call(path, { method = 'POST', body, timeoutMs = 30000 } = {}) {
 /**
  * Attende il proprio turno sulla GPU. Restituisce { release() } quando tocca a noi,
  * oppure null se l'agent non c'è. onWait(stato) viene chiamato a ogni giro di attesa
- * con { position, active: { app, label } } (chi sta usando la GPU in questo momento).
+ * con { position } (posto in coda: l'agent non dice chi sta usando la GPU).
  */
 export async function acquire({ who, label, priority = 'high', onWait } = {}) {
   if (!enabled()) return null;
   let r;
   try {
-    // La prima risposta arriva subito: se tocca aspettare, la UI dice chi sta usando la GPU
+    // La prima risposta arriva subito: se tocca aspettare, la UI mostra "GPU occupata, attendere..."
     r = await call('/api/gpu/acquire', { body: { who, label, priority, app: config.agent.app, waitMs: 500 } });
     while (r.status !== 'granted') {
       onWait?.(r);
