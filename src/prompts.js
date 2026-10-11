@@ -1,5 +1,6 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
+import { MAX as LONG_VIDEO } from './videochain.js';
 
 // musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
 const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
@@ -76,7 +77,7 @@ ${melody && workflows('audio', 'melody').length ? `- Melodie canticchiate: l'ute
 - edit_image modifica le immagini allegate all'ultimo messaggio oppure, se non ce ne sono, l'immagine più recente della conversazione (allegata o generata). Cosa sa fare dipende dal modello installato ed è scritto nella descrizione dello strumento: seguila. Con l'editing a istruzioni descrivi solo la modifica e cosa deve restare uguale; con la rielaborazione (parametro strength) descrivi l'immagine finale completa e avvisa l'utente che non sono possibili modifiche chirurgiche di un solo dettaglio.
 - Questi strumenti usano di default l'immagine più recente. Se l'utente si riferisce a un'altra immagine della chat («la foto di prima», «quella col cappello»), indica quale con il parametro image.
 - animate_image trasforma l'immagine più recente (allegata o generata) in un video che parte esattamente da essa: descrivi movimento, camera e audio.
-- photo_with_face (se disponibile) crea una foto NUOVA con il volto della persona di un'immagine della chat, allegata o generata, in un'altra scena, posa o abbigliamento («mettimi su un vulcano», «fammi una foto in smoking con questa faccia», «ora fallo mentre fa colazione»). Descrivi scena, abiti, posa e luce; della persona indica solo genere, età indicativa e capelli, il volto arriva dall'immagine. Se invece l'utente vuole cambiare qualcosa nella foto esistente usa edit_image.
+- photo_with_face (se disponibile) crea una foto NUOVA con il volto della persona di un'immagine della chat, allegata o generata, in un'altra scena, posa o abbigliamento («mettimi su un vulcano», «fammi una foto in smoking con questa faccia», «ora fallo mentre fa colazione»). Descrivi scena, abiti, posa e luce; della persona indica solo genere, età indicativa e capelli, il volto arriva dall'immagine. Se invece l'utente vuole cambiare qualcosa nella foto esistente usa edit_image. Con due foto allegate, una persona ciascuna, e la richiesta di metterle insieme («fai una foto di noi due al bar»), usa photo_with_face: crea una foto nuova con tutte e due; descrivi la scena, cosa fanno, gli abiti di ognuna e chiamale la persona dell'immagine 1 e dell'immagine 2.
 - REGOLA: se l'utente parla di una persona già presente in un'immagine della chat («questa persona», «lui», «lei», «la stessa ragazza», «di nuovo lui») e la vuole in un'altra scena, usa SEMPRE photo_with_face e MAI generate_image: con generate_image verrebbe una persona diversa. Vale anche quando chiede una foto «realistica».
 - upscale_image (se disponibile) aumenta la risoluzione senza cambiare il contenuto: per «migliora la qualità», «ingrandisci», «rendila più nitida», «in HD». Usa quality="massima" (ridisegno del dettaglio) solo su immagini generate e solo se l'utente chiede la massima qualità o più dettaglio; sulle foto allegate l'ingrandimento è sempre fedele.
 - Se l'utente vuole un'immagine nuova ispirata a quella allegata (non una rielaborazione), usa generate_image con una descrizione completa.
@@ -138,6 +139,7 @@ export function tools({ forcedImageModel, web = true, images: recent = [], melod
       description: `Modifica precisa a istruzioni (${editWf[0].name}) delle immagini allegate all'ultimo messaggio (fino a ${max}) o, se non ce ne sono, dell'immagine più recente della conversazione (${source.origin}): aggiungere, togliere o sostituire oggetti, cambiare sfondo, abiti, colori, espressione, testo, stile, combinare elementi di più immagini. Mantiene tutto ciò che non viene chiesto di cambiare.`,
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'Istruzione di modifica in inglese: cosa cambiare (con dettagli concreti) e cosa deve restare invariato. Con più immagini chiamale image 1, image 2, image 3 (nell\'ordine in cui sono state allegate).' },
+        ...(editWf[0].keepFace ? { keep_face: { type: 'boolean', description: 'true (default): dopo la modifica si rimette il volto originale, identico. false se la richiesta cambia viso, espressione, capelli, trucco, età, cappello od occhiali, oppure luce o stile di tutta la foto.' } } : {}),
         ...pick,
       }, required: ['description'] },
     } });
@@ -180,26 +182,30 @@ export function tools({ forcedImageModel, web = true, images: recent = [], melod
     } });
   }
   const i2v = workflows('video', 'img2video');
+  // video lunghi: oltre il massimo di un pezzo servono i pezzi che si continuano (con il workflow image to video)
+  const longMax = (d) => (i2v.length ? Math.max(d.max, LONG_VIDEO) : d.max);
   if (source && i2v.length) {
     const d = i2v[0].duration || { min: 2, max: 10, default: 5 };
+    const long = longMax(d);
     out.push({ type: 'function', function: {
       name: 'animate_image',
       description: `Trasforma in video l'immagine più recente della conversazione (${source.origin}): il video parte esattamente da quell'immagine. Da usare quando l'utente chiede di animarla o di farne un video.`,
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'In inglese: cosa si muove e come, movimenti di camera, audio (suoni, eventuali dialoghi con lingua, musica).' },
-        duration: { type: 'integer', minimum: d.min, maximum: d.max, description: `Durata in secondi (default ${d.default}).` },
+        duration: { type: 'integer', minimum: d.min, maximum: long, description: `Durata in secondi (default ${d.default}).${long > d.max ? ` Oltre ${d.max} s il video si fa in più pezzi che si continuano: usalo solo se l'utente chiede un video lungo.` : ''}` },
         ...pick,
       }, required: ['description', 'duration'] },
     } });
   }
   if (videos.length) {
     const d = videos[0].duration || { min: 2, max: 10, default: 5 };
+    const long = longMax(d);
     out.push({ type: 'function', function: {
       name: 'generate_video',
       description: 'Genera un breve video con audio con ComfyUI. Da usare solo quando l\'utente chiede un video, un\'animazione o una clip.',
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'Descrizione completa e fedele, in inglese: scena, soggetti, azioni nel tempo, movimenti di camera, audio.' },
-        duration: { type: 'integer', minimum: d.min, maximum: d.max, description: `Durata in secondi (default ${d.default}).` },
+        duration: { type: 'integer', minimum: d.min, maximum: long, description: `Durata in secondi (default ${d.default}).${long > d.max ? ` Oltre ${d.max} s il video si fa in più pezzi che si continuano: usalo solo se l'utente chiede un video lungo.` : ''}` },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1', '4:3', '3:4'], description: 'Formato. Default 16:9; 9:16 per contenuti verticali.' },
       }, required: ['description', 'duration', 'aspect_ratio'] },
     } });

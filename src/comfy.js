@@ -177,7 +177,13 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
     cleanup?.();
   }
 
-  const hist = await api(`/history/${promptId}`);
+  // ComfyUI manda «execution_success» prima di scrivere la history: si aspetta che ci sia.
+  // Prova sul PC 2026-10-10 (ChatBz): un pezzo di video finiva con «nessun file» anche se ComfyUI l'aveva salvato.
+  let hist = await api(`/history/${promptId}`);
+  for (let i = 0; i < 40 && !hist[promptId]?.status?.completed; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    hist = await api(`/history/${promptId}`);
+  }
   const outputs = hist[promptId]?.outputs || {};
   const files = [];
   const texts = [];
@@ -201,9 +207,24 @@ export async function hasNode(name) {
   return !!info?.[name];
 }
 
-/** Carica un file (immagine o audio) nella cartella input di ComfyUI (sovrascrive se esiste). */
+/** Nodi installati su ComfyUI (per le funzioni che usano nodi recenti): { nome: true/false }, ricontrollati ogni 5 minuti. */
+const nodeCache = new Map();
+export async function hasNodes(names) {
+  const out = {};
+  for (const name of names) {
+    const hit = nodeCache.get(name);
+    if (hit && Date.now() - hit.at < 5 * 60 * 1000) { out[name] = hit.ok; continue; }
+    let ok = false;
+    try { ok = !!(await api(`/object_info/${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(8000) }))?.[name]; } catch {}
+    nodeCache.set(name, { ok, at: Date.now() });
+    out[name] = ok;
+  }
+  return out;
+}
+
+/** Carica un file (immagine, video o audio) nella cartella input di ComfyUI (sovrascrive se esiste). */
 export async function uploadImage(buffer, filename) {
-  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.wav$/i.test(filename) ? 'audio/wav' : 'image/jpeg';
+  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.wav$/i.test(filename) ? 'audio/wav' : /\.mp4$/i.test(filename) ? 'video/mp4' : /\.webm$/i.test(filename) ? 'video/webm' : 'image/jpeg';
   const fd = new FormData();
   fd.append('image', new Blob([buffer], { type }), filename);
   fd.append('overwrite', 'true');

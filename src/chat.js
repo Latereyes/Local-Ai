@@ -12,6 +12,9 @@ import * as ctx from './context.js';
 import * as workspace from './workspace.js';
 import * as audio from './audio.js';
 import { getUser } from './auth.js';
+import { describeModel, describeWithOllama } from './vision.js';
+import { touchesFace } from './faces.js';
+import { planSegments, secondsFrom, partLine, continuePrompt, addParts, PART } from './videochain.js';
 import { workflows, getWorkflow, dimensions, dimensionsForRatio, frameCount, randomSeed, ASPECTS } from './workflows.js';
 import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt, melodyFacts } from './prompts.js';
 import { checkMelody } from './melody.js';
@@ -50,7 +53,7 @@ const MAX_ATTACHMENTS = 4;
 const MIN_READ_TOKENS = 1200;
 const PAGE_CHARS = { min: 1000, max: 6000 };
 
-const ORIGIN = { edit: 'modificata', upscale: 'upscale', identity: 'foto con volto', scene: 'stessa persona, nuova scena' };
+const ORIGIN = { edit: 'modificata', upscale: 'upscale', identity: 'foto con volto', scene: 'stessa persona, nuova scena', duo: 'due persone insieme' };
 
 // allegati che sono immagini (i più vecchi non hanno kind): né documenti né melodie canticchiate
 const isImage = (a) => a.kind !== 'document' && a.kind !== 'audio';
@@ -596,6 +599,10 @@ function mediaFromCall(call, callIndex, opts, conv) {
     // IPAdapter Plus Face (identity) resta solo come riserva se il workflow scene non è disponibile.
     mode = 'scene';
   }
+  // Due foto allegate con una persona ciascuna: le due persone insieme in una scena nuova (qwen-duo-real, da ChatBz)
+  const lastUser = conv.messages.findLast((m) => m.role === 'user');
+  const attachedImages = (lastUser?.attachments || []).filter((a) => a.file && a.kind !== 'document');
+  if (name === 'photo_with_face' && attachedImages.length >= 2 && workflows('image', 'duo').length) mode = 'duo';
 
   let wfId = type === 'image'
     ? (opts.imageModel && opts.imageModel !== 'auto' ? opts.imageModel : args.model)
@@ -609,8 +616,8 @@ function mediaFromCall(call, callIndex, opts, conv) {
   if (!w) return [];
 
   // Image to image / image to video / editing: serve almeno un'immagine di partenza
-  const fromImage = ['img2img', 'img2video', 'edit', 'identity', 'scene', 'upscale'].includes(mode);
-  let sources = fromImage ? sourceImages(conv, mode === 'edit' ? (w.maxImages || 1) : 1, Math.floor(Number(args.image)) || 0) : [];
+  const fromImage = ['img2img', 'img2video', 'edit', 'identity', 'scene', 'duo', 'upscale'].includes(mode);
+  let sources = fromImage ? sourceImages(conv, mode === 'edit' ? (w.maxImages || 1) : mode === 'duo' ? 2 : 1, mode === 'duo' ? 0 : Math.floor(Number(args.image)) || 0) : [];
   // Più scene di fila con la stessa persona: si riparte sempre dal ritratto originale, così gli errori non si sommano
   if (mode === 'scene' && sources[0]) sources = [sceneReference(conv, sources[0])];
   const source = sources[0] || null;
@@ -639,24 +646,31 @@ function mediaFromCall(call, callIndex, opts, conv) {
   const [dMin, dMax] = w.denoiseRange || [0.3, 0.9];
   const denoise = mode === 'img2img' ? Math.round((dMin + strength * (dMax - dMin)) * 100) / 100 : undefined;
 
-  let seconds, frames;
+  // Video: oltre il massimo di un pezzo (15 s) si fa in pezzi da 10 s che si continuano (videochain.js, da ChatBz)
+  let seconds, frames, segs = null;
   if (type === 'video') {
-    ({ seconds, frames } = frameCount(w, opts.duration && opts.duration !== 'auto' ? opts.duration : args.duration));
+    const asked = Number(opts.duration && opts.duration !== 'auto' ? opts.duration : args.duration) || secondsFrom(opts.text);
+    segs = asked ? planSegments(asked) : null;
+    ({ seconds, frames } = frameCount(w, segs ? segs[0] : undefined));
   }
   const count = type === 'image' && mode !== 'upscale' ? Math.min(4, Math.max(1, Number(args.count) || 1)) : 1;
 
-  return Array.from({ length: count }, () => ({
+  const all = Array.from({ length: count }, () => ({
     id: store.newId(),
     type, toolName: name, callIndex, args,
     mode, workflow: w.id, workflowName: w.name,
     description: String(args.description || (mode === 'upscale' ? `Upscale 2x: ${(source?.description || '').slice(0, 300)}` : '')).trim(),
     prompt: '', aspect, width, height, seconds, frames, denoise, strength: mode === 'img2img' ? strength : undefined,
     ...(mode === 'scene' && source ? { reference: source } : {}),
+    // Volto originale rimesso dopo la modifica, se la richiesta dell'utente non riguarda viso, testa, luce o stile
+    // (si guarda il messaggio dell'utente, non la descrizione: Gemma ci scrive sempre «keep the face unchanged»)
+    ...(mode === 'edit' && w.keepFace ? { keepFace: args.keep_face !== false && args.keep_face !== 'false' && !touchesFace(opts.text) } : {}),
     ...(source ? { sourceFile: source.file, sourceUrl: mediaUrl(source.file), sourceDescription, extraSources: sources.slice(1).map((s) => s.file) } : {}),
     seed: randomSeed(),
     status: 'engineering',
     createdAt: Date.now(),
   }));
+  return segs?.length > 1 ? addParts(all[0], segs, getWorkflow(null, 'video', 'img2video'), { newId: store.newId, seed: randomSeed }) : all;
 }
 
 const parseArgs = (a) => {
@@ -783,9 +797,20 @@ async function prepareDocuments(conv, msg, question, model, signal, budget = doc
 }
 
 /** Riscrive la descrizione nel prompt ottimizzato per il modello di destinazione (in streaming). */
-async function engineerPrompt(conv, msg, media, userText, model, signal) {
-  const w = getWorkflow(media.workflow, media.type, media.mode);
+async function engineerPrompt(conv, msg, media, userText, model, signal, vision = false) {
+  // un pezzo che continua un video usa la guida del workflow image to video (il grafo lo cambia videochain.js)
+  const w = getWorkflow(media.workflow, media.type, media.mode === 'continue' ? 'img2video' : media.mode);
   let text = '';
+  const user = { role: 'user', content: promptEngineerUser({ userRequest: userText, description: media.description, workflow: w, width: media.width, height: media.height, seconds: media.seconds, sourceDescription: media.sourceDescription, denoise: media.denoise }) };
+  if (media.mode === 'continue') user.content += `\n${partLine(media.part, media.seconds)}`;
+  else if (media.part?.total > 1) user.content += `\nThis is part 1 of ${media.part.total} of one continuous video: write only the first ${media.seconds} seconds; the action goes on in the next parts.`;
+  // Il modello vede le immagini: guarda quelle di partenza invece di fidarsi solo della descrizione
+  // (così l'istruzione nomina la persona, il capo o l'oggetto giusto, con il colore e la posizione veri)
+  const sources = media.sourceFile && media.mode !== 'continue' ? [media.sourceFile, ...(media.extraSources || [])].map(imageBase64).filter(Boolean) : [];
+  if (vision && sources.length) {
+    user.images = sources;
+    user.content += `\n${sources.length > 1 ? `The ${sources.length} starting images are attached in order (image 1, image 2, image 3)` : 'The starting image is attached'}: look at it to refer precisely to the people, clothes, objects and positions that are really there.`;
+  }
   const out = await ollama.chat({
     model,
     signal,
@@ -793,15 +818,18 @@ async function engineerPrompt(conv, msg, media, userText, model, signal) {
     options: { temperature: 0.7 },
     messages: [
       { role: 'system', content: promptEngineerSystem(w) },
-      { role: 'user', content: promptEngineerUser({ userRequest: userText, description: media.description, workflow: w, width: media.width, height: media.height, seconds: media.seconds, sourceDescription: media.sourceDescription, denoise: media.denoise }) },
+      user,
     ],
     onChunk: (c) => {
       if (!c.content) return;
       text += c.content;
-      for (const md of msg.media) if (md.callIndex === media.callIndex) emit(conv.id, { type: 'prompt_delta', messageId: msg.id, mediaId: md.id, delta: c.content });
+      // le varianti di una chiamata condividono il prompt; i pezzi di un video lungo hanno il loro
+      const alone = media.part || media.mode === 'continue';
+      for (const md of msg.media) if (alone ? md === media : md.callIndex === media.callIndex && !md.part && md.mode !== 'continue') emit(conv.id, { type: 'prompt_delta', messageId: msg.id, mediaId: md.id, delta: c.content });
     },
   });
-  return cleanPrompt(out.content || text) || media.description;
+  const clean = cleanPrompt(out.content || text);
+  return (media.mode === 'continue' ? continuePrompt(clean) : clean) || media.description;
 }
 
 /**
@@ -882,19 +910,24 @@ export async function send(conv, opts) {
     try {
       // Chat del progetto: fotografia di partenza (modifiche fatte a mano nel frattempo), se nessun task sta lavorando
       if (pj && !projectChat.busy) await projects.snap(owner, pj, 'Modifiche fatte fuori da LocalAI');
-      // Lettura delle immagini allegate con il modello visivo di ComfyUI (se Gemma non vede le immagini)
+      // Lettura delle immagini allegate se il modello della chat non le vede: prima un modello Ollama che le legge
+      // (Gemma 26B), altrimenti o se sbaglia Qwen3-VL su ComfyUI
       if (images.length && !vision) {
         // I passaggi compaiono subito nella UI, anche mentre si attende/libera la GPU
         const visionSteps = images.map((_, i) => ({ id: store.newId(), type: 'vision', title: images.length > 1 ? `immagine ${i + 1}` : 'immagine', status: 'running', startedAt: Date.now() }));
         for (const step of visionSteps) { msg.steps.push(step); emit(conv.id, { type: 'step', messageId: msg.id, step }); }
-        await gpu.run('comfy', 'Lettura immagine', async () => {
+        const onWait = (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label });
+        const read = async (describe, label, only) => {
           for (const [i, att] of images.entries()) {
-            if (ac.signal.aborted) break;
+            if (ac.signal.aborted || !only(att)) continue;
             const step = visionSteps[i];
             try {
-              att.description = await describeImage(att.file, rawText);
+              att.description = await describe(att);
+              delete att.visionError;
               step.text = att.description;
               step.status = 'done';
+              step.error = undefined;
+              step.title = `${step.title.replace(/ · .*$/, '')} · ${label}`;
             } catch (e) {
               att.visionError = e.message;
               step.status = 'error';
@@ -903,7 +936,21 @@ export async function send(conv, opts) {
             step.finishedAt = Date.now();
             emit(conv.id, { type: 'step', messageId: msg.id, step });
           }
-        }, { onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+        };
+        const reader = await describeModel();
+        if (reader) {
+          await gpu.run('ollama', 'Lettura immagine', () => read((att) => describeWithOllama(reader.name, att.file, rawText), reader.label, () => true), { onWait });
+          for (const att of images) if (att.visionError) console.warn(`[chat] lettura immagine con ${reader.label} non riuscita: ${att.visionError}`);
+        }
+        if (images.some((att) => !att.description) && !ac.signal.aborted && getWorkflow(null, 'vision')) {
+          await gpu.run('comfy', 'Lettura immagine', () => read((att) => describeImage(att.file, rawText), 'Qwen3-VL', (att) => !att.description), { onWait });
+        }
+        for (const [i, step] of visionSteps.entries()) {
+          if (step.status !== 'running' || ac.signal.aborted) continue;
+          images[i].visionError = step.error = 'Nessun modello installato legge le immagini';
+          step.status = 'error';
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        }
         store.save(conv, { touch: false });
         if (ac.signal.aborted) throw new Error('Interrotto');
       }
@@ -1078,8 +1125,10 @@ export async function send(conv, opts) {
         const byCall = new Map();
         for (const md of msg.media) {
           if (md.mode === 'upscale') continue; // nessun prompt da scrivere
-          if (!byCall.has(md.callIndex)) byCall.set(md.callIndex, await engineerPrompt(conv, msg, md, text, model, ac.signal));
-          md.prompt = byCall.get(md.callIndex);
+          // i pezzi di un video lungo hanno ognuno il suo prompt (ognuno racconta i secondi successivi)
+          const key = md.part ? `${md.callIndex}-${md.part.index}` : md.callIndex;
+          if (!byCall.has(key)) byCall.set(key, await engineerPrompt(conv, msg, md, text, model, ac.signal, vision));
+          md.prompt = byCall.get(key);
           emitMedia(conv, msg, md);
         }
       }, { priority: opts.priority || 'high', model: assistantName, onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
@@ -1148,6 +1197,36 @@ export async function send(conv, opts) {
 
   // finished: si risolve con il messaggio a fine turno (lo usa la coda dei progetti); non va nel JSON della risposta
   return Object.defineProperty({ userMessage: userMsg, message: msg }, 'finished', { value: finished });
+}
+
+/** Continua un video della chat: un pezzo nuovo che parte da come finisce, incollato in coda (videochain.js). */
+export function continueVideo(conv, messageId, mediaId, { text, seconds, model } = {}) {
+  if (running.has(conv.id)) throw new Error('Una risposta è già in corso in questa chat');
+  const msg = conv.messages.find((m) => m.id === messageId);
+  const src = msg?.media?.find((m) => m.id === mediaId && m.type === 'video' && m.status === 'done' && m.file);
+  if (!src) throw new Error('Video non trovato');
+  const wi = getWorkflow(null, 'video', 'img2video');
+  if (!wi) throw new Error('Nessun workflow video da immagine disponibile su ComfyUI');
+  const secs = Math.max(2, Math.min(PART, Number(seconds) || 5));
+  const md = { id: store.newId(), toolName: 'generate_video', callIndex: src.callIndex, args: src.args, type: 'video', mode: 'continue', workflow: wi.id, workflowName: wi.name,
+    description: String(text || '').trim() || 'the scene goes on naturally', prompt: '', seed: randomSeed(), status: 'engineering', createdAt: Date.now(),
+    seconds: secs, totalSeconds: (src.totalSeconds || src.seconds || 0) + secs, aspect: src.aspect, width: src.width, height: src.height,
+    sourceFile: src.file, sourceUrl: mediaUrl(src.file), sourceDescription: `the video so far: ${src.prompt || src.description}` };
+  msg.media.push(md);
+  emitMedia(conv, msg, md);
+  store.save(conv, { touch: false });
+  const ac = new AbortController();
+  running.set(conv.id, ac);
+  gpu.run('ollama', 'Prompt del video', async () => {
+    md.prompt = await engineerPrompt(conv, msg, md, String(text || ''), model || config.ollama.model, ac.signal);
+    emitMedia(conv, msg, md);
+  }).then(() => enqueue(conv, msg, md)).catch((e) => {
+    md.status = ac.signal.aborted ? 'cancelled' : 'error';
+    md.error = ac.signal.aborted ? null : e.message;
+    emitMedia(conv, msg, md);
+    store.save(conv, { touch: false });
+  }).finally(() => running.delete(conv.id));
+  return md;
 }
 
 /** Rigenera un media: stessa impostazione, nuovo seed (o prompt modificato). Nessun passaggio da Gemma. */

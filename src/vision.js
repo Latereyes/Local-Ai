@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import config from './config.js';
 import * as ollama from './ollama.js';
 import { gpu } from './gpu.js';
-import { describeImage } from './jobs.js';
+import { describeImage, describePrompt } from './jobs.js';
 import { getWorkflow } from './workflows.js';
 import { checkPage } from './browser.js';
 
@@ -136,4 +136,29 @@ Rispondi SOLO con JSON: {"ok": true|false, "descrizione": "cosa si vede, in una 
   const j = parseJson(text) || {};
   const problems = (Array.isArray(j.problemi) ? j.problemi : Array.isArray(j.problems) ? j.problems : []).map(String).filter(Boolean).slice(0, 8);
   return { ok: j.ok === true || j.ok === 'true', description: String(j.descrizione || j.description || '').slice(0, 400), problems, model };
+}
+
+/**
+ * Modello Ollama che descrive le immagini allegate quando quello della chat non le vede: { name, label } oppure null
+ * (allora resta Qwen3-VL su ComfyUI). Si usa config.vision.describeModel se è installato e legge le immagini,
+ * altrimenti il preferito della verifica visiva. Un modello che ha sbagliato la verifica non si usa.
+ */
+export async function describeModel() {
+  const want = config.vision.describeModel;
+  if (want === 'comfy') return null;
+  const models = await ollama.listModels().catch(() => []);
+  const failed = new Set((last?.results || []).filter((r) => r.declared && !r.ok).map((r) => r.model));
+  const usable = (name) => {
+    const m = name && models.find((x) => x.name === name || x.name.replace(/:latest$/, '') === name.replace(/:latest$/, ''));
+    return m && m.vision && !failed.has(m.name) ? { name: m.name, label: m.label } : null;
+  };
+  return usable(want) || (last?.chosen && last.chosen !== COMFY ? usable(last.chosen) : null);
+}
+
+/** Descrizione di un'immagine allegata con un modello Ollama (la GPU va presa da chi chiama). */
+export async function describeWithOllama(model, file, question) {
+  const b64 = (await fsp.readFile(path.join(config.paths.media, file))).toString('base64');
+  const text = (await askOllama(model, describePrompt(question), b64, { json: false, maxTokens: 900 })).trim();
+  if (!text) throw new Error('Il modello non ha descritto l\'immagine');
+  return text;
 }

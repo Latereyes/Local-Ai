@@ -428,6 +428,10 @@ app.post('/api/conversations/:id/media/:mediaId/cancel', wrap(async (req, res) =
   res.json({ ok: cancel(req.params.mediaId) });
 }));
 
+app.post('/api/conversations/:id/messages/:messageId/media/:mediaId/continue', wrap(async (req, res) => {
+  const { text, seconds, model } = req.body || {};
+  res.json(chat.continueVideo(ownConv(req), req.params.messageId, req.params.mediaId, { text, seconds, model }));
+}));
 app.post('/api/conversations/:id/messages/:messageId/media/:mediaId/regenerate', wrap(async (req, res) => {
   res.json(chat.regenerate(ownConv(req), req.params.messageId, req.params.mediaId, { prompt: req.body?.prompt }));
 }));

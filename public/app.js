@@ -658,7 +658,9 @@ function renderMedia(msg, md) {
     card.dataset.sig = sig;
     const isAudio = md.type === 'audio';
     card.style.maxWidth = `${isAudio ? 460 : Math.min(560, Math.round(460 * ratio))}px`;
-    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '',
+    // video lunghi: «parte 2/3 · 20 s» (ogni pezzo contiene il video intero fin lì)
+    const meta = [md.part?.total > 1 ? `parte ${md.part.index}/${md.part.total}` : md.mode === 'continue' ? 'continuazione' : '',
+      md.aspect, md.seconds ? `${md.totalSeconds || md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '', md.faceKept ? 'volto originale' : '',
       isAudio && md.mode !== 'sfx' ? [md.melodyFile ? 'dalla tua melodia' : '', md.bpm ? `${md.bpm} BPM` : '', md.keyscale, md.lyrics && md.lyrics !== '[Instrumental]' ? 'con voce' : 'strumentale'].filter(Boolean).join(' · ') : ''].filter(Boolean).join(' · ');
     let frame = '';
     if (md.status === 'done' && md.url) {
@@ -698,6 +700,7 @@ function mediaActions(md) {
     ${b('regenerate', 'refresh', md.status === 'done' ? 'Rigenera' : 'Riprova')}
     ${md.prompt ? b('prompt', 'text', 'Prompt') : ''}
     <span class="grow"></span>
+    ${md.status === 'done' && md.type === 'video' ? b('continue', 'video', 'Continua') : ''}
     ${md.status === 'done' && md.type === 'image' ? b('zoom', 'open', '') : ''}
   </div>`;
 }
@@ -730,6 +733,14 @@ async function mediaAction(btn) {
   const cid = state.conv.id;
   if (act === 'cancel') return api(`/api/conversations/${cid}/media/${md.id}/cancel`, { method: 'POST' });
   if (act === 'zoom') return openLightbox(md);
+  if (act === 'continue') {
+    const text = prompt('Cosa succede dopo? (facoltativo: lascia vuoto e decide l\'assistente)', '');
+    if (text === null) return;
+    const secs = prompt('Quanti secondi in più? (da 2 a 10)', '5');
+    if (secs === null) return;
+    return api(`/api/conversations/${cid}/messages/${msg.id}/media/${md.id}/continue`, { method: 'POST', body: { text, seconds: Number(secs) || 5, model: currentModel() } })
+      .catch((e) => alert(e.message));
+  }
   if (act === 'regenerate') {
     return api(`/api/conversations/${cid}/messages/${msg.id}/media/${md.id}/regenerate`, { method: 'POST', body: {} })
       .catch((e) => alert(e.message));
@@ -1173,6 +1184,8 @@ function renderOpts() {
     const d = v?.duration || { min: 2, max: 10 };
     const durs = [['auto', 'Durata auto']];
     for (let s = d.min; s <= d.max; s++) durs.push([s, `${s} s`]);
+    // oltre il massimo di un pezzo: video lunghi in pezzi che si continuano (con image to video)
+    if (wf.some((w) => w.type === 'video' && w.mode === 'img2video' && w.available !== false)) for (const s of [20, 25, 30]) if (s > d.max) durs.push([s, `${s} s (in pezzi)`]);
     html += sel('vaspect', [['auto', 'Formato auto'], ['16:9', '16:9'], ['9:16', '9:16'], ['1:1', '1:1']], 'Formato');
     html += sel('duration', durs, 'Durata');
   }
@@ -1678,7 +1691,7 @@ async function openUsers() {
   renderWorkflows(state.config?.workflows || []);
   await renderUsers();
 }
-const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini', music: 'testo → musica', sfx: 'effetti sonori' };
+const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', duo: 'due persone insieme', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini', music: 'testo → musica', sfx: 'effetti sonori' };
 function renderWorkflows(list) {
   $('#wf-list').innerHTML = list.map((w) => `<div class="wf-row ${w.available ? '' : 'off'}">
     <span class="wf-dot"></span><div><b>${esc(w.name)}</b> <small>${esc(MODE_LABEL[w.mode] || w.mode)}</small>
