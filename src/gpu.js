@@ -20,12 +20,13 @@ const BUSY = 'GPU occupata, attendere...';
 class GpuArbiter extends EventEmitter {
   owner = null;        // 'ollama' | 'comfy' | null (sconosciuto all'avvio)
   shared = false;      // l'ultimo passaggio l'ha fatto l'agent: owner può non essere più vero
-  active = null;       // { who, label }
+  active = null;       // { who, label, model }
+  ollamaModel = null;  // nome del modello Ollama dell'ultimo lavoro (per la pillola: «Qwen Coder al lavoro»)
   waiting = [];        // etichette in coda
   tail = Promise.resolve();
 
   state() {
-    return { owner: this.owner, active: this.active, queued: this.waiting.map((w) => w.label) };
+    return { owner: this.owner, ollamaModel: this.ollamaModel, active: this.active, queued: this.waiting.map((w) => w.label) };
   }
 
   #emit() { this.emit('state', this.state()); }
@@ -50,16 +51,19 @@ class GpuArbiter extends EventEmitter {
    * Esegue fn con la GPU riservata a `who`. onWait viene chiamato se si deve aspettare.
    * priority (per l'agent): 'high' per chi aspetta davanti allo schermo, 'normal' per le generazioni,
    * 'low' per i lavori in sottofondo, che passano dopo quelli delle altre app.
+   * model: nome da mostrare del modello Ollama che lavora (default: nessuno, la pillola dice «Ollama»).
    */
-  run(who, label, fn, { onWait, priority = 'high' } = {}) {
+  run(who, label, fn, { onWait, priority = 'high', model } = {}) {
     const ticket = { who, label };
+    const base = model ? { who, label, model } : { who, label };
     this.waiting.push(ticket);
     if (this.active) onWait?.(this.active);
     this.#emit();
 
     const job = this.tail.then(async () => {
       this.waiting.splice(this.waiting.indexOf(ticket), 1);
-      this.active = { who, label };
+      this.active = base;
+      if (who === 'ollama' && model) this.ollamaModel = model;
       this.#emit();
       let lease = null;
       try {
@@ -67,7 +71,7 @@ class GpuArbiter extends EventEmitter {
         lease = await agent.acquire({
           who, label, priority,
           onWait: () => {
-            this.active = { who, label, phase: BUSY };
+            this.active = { ...base, phase: BUSY };
             this.#emit();
             if (!notified) { notified = true; onWait?.({ who, label: BUSY }); }
           },
@@ -78,7 +82,7 @@ class GpuArbiter extends EventEmitter {
         } else {
           await this.#switchTo(who);
         }
-        this.active = { who, label };
+        this.active = base;
         this.#emit();
         return await fn();
       } finally {

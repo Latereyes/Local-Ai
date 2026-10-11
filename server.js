@@ -2,6 +2,7 @@ import express from 'express';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import config from './src/config.js';
 import * as auth from './src/auth.js';
@@ -13,6 +14,8 @@ import { gpu } from './src/gpu.js';
 import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
+import { checkMelody } from './src/melody.js';
+import * as snapshots from './src/snapshots.js';
 import * as workspace from './src/workspace.js';
 import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
@@ -86,9 +89,13 @@ app.post('/api/users/:id/reset-password', auth.requireAdmin, wrap(async (req, re
 }));
 
 // ---- Stato e configurazione ----
+// Versione del codice in esecuzione (commit git all'avvio): serve a capire se dopo un git pull LocalAI va riavviato
+let codeVersion = null;
+try { codeVersion = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: config.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim(); } catch {}
+
 app.get('/api/status', wrap(async (req, res) => {
   const [o, c] = await Promise.all([ollama.isUp(), comfy.isUp()]);
-  res.json({ ollama: o, comfy: c, gpu: gpu.state() });
+  res.json({ ollama: o, comfy: c, gpu: gpu.state(), version: codeVersion });
 }));
 
 app.get('/api/config', wrap(async (req, res) => {
@@ -99,13 +106,13 @@ app.get('/api/config', wrap(async (req, res) => {
     defaultModel: config.ollama.model,
     models,
     workflows: workflows().map(publicInfo),
-    workspace: { port: config.workspace.port, token: workspace.linkToken(req.user), canRun: req.user.role === 'admin' },
+    workspace: { port: config.workspace.port, httpsPort: config.workspace.httpsPort, token: workspace.linkToken(req.user), canRun: req.user.role === 'admin' },
   });
 }));
 
 app.post('/api/workflows/reload', auth.requireAdmin, wrap(async (req, res) => {
   loadWorkflows();
-  res.json((await checkAvailability(comfy.listModels)).map(publicInfo));
+  res.json((await checkAvailability(comfy.listModels, comfy.hasNode)).map(publicInfo));
 }));
 
 app.post('/api/gpu/release', wrap(async (req, res) => { await gpu.release(); res.json(gpu.state()); }));
@@ -118,12 +125,14 @@ app.get('/api/events', (req, res) => {
   const onEvent = (evt) => { if (store.get(evt.conversationId)?.ownerId === userId) send(evt); };
   const onGpu = (state) => send({ type: 'gpu', state });
   const onProject = (evt) => { if (evt.ownerId === userId) send({ type: 'project', project: evt.project }); };
+  const onNotify = (n) => { if (n.ownerId === userId) send({ type: 'notify', ...n }); };
   send({ type: 'gpu', state: gpu.state() });
   bus.on('event', onEvent);
   gpu.on('state', onGpu);
   projects.bus.on('project', onProject);
+  projects.bus.on('notify', onNotify);
   const ping = setInterval(() => res.write(': ping\n\n'), 20000);
-  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); projects.bus.off('project', onProject); });
+  req.on('close', () => { clearInterval(ping); bus.off('event', onEvent); gpu.off('state', onGpu); projects.bus.off('project', onProject); projects.bus.off('notify', onNotify); });
 });
 
 // ---- Conversazioni ----
@@ -195,12 +204,19 @@ const ownTask = (p, id) => {
 };
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
-  autoTest: p.autoTest, testCommand: p.testCommand, log: p.log.slice(-60),
+  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume,
+  maxAttempts: p.maxAttempts || null, defaultAttempts: config.projects.maxAttempts,
+  history: await snapshots.history(projects.dirOf(req.user, p), 15),
+  git: await snapshots.hasGit(), log: p.log.slice(-60),
   tasks: p.tasks.map((t) => ({ ...t, checks: t.checks.map((c) => ({ ...c, screenshotUrl: mediaUrl(c.screenshot) })) })),
   plan: await projects.readPlan(req.user, p),
   files: await workspace.listFiles(projects.scoped(req.user, p), '', { limit: 400 }).catch(() => []),
   current: runner.state(),
   types: projects.TYPES,
+  // chat del progetto (dalla più recente): domande, modifiche e nuovi task a voce
+  chats: (p.chats || []).map((id) => store.get(id)).filter((c) => c && c.ownerId === req.user.id)
+    .map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: c.messages.filter((m) => m.role === 'user').length, running: chat.isRunning(c.id) }))
+    .sort((a, b) => b.updatedAt - a.updatedAt),
   models: Object.fromEntries(await Promise.all(Object.keys(projects.TYPES).map(async (k) => [k, await projects.modelFor(k)]))),
 });
 
@@ -212,6 +228,9 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   const b = req.body || {};
   if (typeof b.name === 'string' && b.name.trim()) p.name = b.name.trim().slice(0, 80);
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
+  if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
+  if (typeof b.autoResume === 'boolean') p.autoResume = b.autoResume;
+  if (b.maxAttempts !== undefined) p.maxAttempts = Math.min(5, Math.max(0, Math.floor(Number(b.maxAttempts)) || 0)) || null;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
     p.testCommand = b.testCommand.trim().slice(0, 300);
@@ -271,7 +290,8 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
   switch (req.body?.action) {
     case 'retry':
       if (busy) throw httpError(409, 'Il task è in corso');
-      Object.assign(t, { status: 'queued', attempts: 0, error: null });
+      // rimesso in coda dall'utente: il coordinatore riparte da zero interventi
+      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0 });
       projects.addLog(p, `«${t.title}» di nuovo in coda`);
       break;
     case 'skip':
@@ -291,6 +311,17 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
       if (busy) throw httpError(409, 'Il task è in corso');
       t.type = req.body.type;
       break;
+    case 'undo': {
+      // annulla le modifiche del task: la cartella torna a prima del task (anche le modifiche successive spariscono,
+      // ma il ripristino stesso è una fotografia e si può annullare dalla storia)
+      if (busy) throw httpError(409, 'Il task è in corso');
+      if (!t.snapBefore) throw httpError(400, 'Per questo task non c\'è la fotografia di prima (serve Git)');
+      if (p.tasks.some((x) => x.status === 'running' || x.status === 'testing')) throw httpError(409, 'Un altro task sta lavorando: aspetta che finisca');
+      await snapshots.restore(projects.dirOf(req.user, p), t.snapBefore, `Annullato «${t.title}»`);
+      Object.assign(t, { status: 'cancelled', error: 'Modifiche annullate: la cartella è tornata a prima del task' });
+      projects.addLog(p, `Annullate le modifiche di «${t.title}»`);
+      break;
+    }
     case 'up': case 'down': {
       const i = p.tasks.indexOf(t), j = i + (req.body.action === 'up' ? -1 : 1);
       if (j >= 0 && j < p.tasks.length) [p.tasks[i], p.tasks[j]] = [p.tasks[j], p.tasks[i]];
@@ -298,6 +329,24 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
     }
     default: throw httpError(400, 'Azione sconosciuta');
   }
+  await projects.save(p);
+  res.json(await fullProject(req, p));
+}));
+// Chat del progetto: l'ultima (o una nuova con { new: true }). Lavora nella cartella del progetto,
+// conosce piano e task e può aggiungere task alla coda (chat.js, strumenti add_project_tasks e check_project).
+app.post('/api/projects/:id/chat', projectErr(async (req, res) => {
+  const c = await runner.projectChat(ownProject(req), req.user, { fresh: !!req.body?.new });
+  res.json({ id: c.id });
+}));
+// Ripristino di una versione della storia (fotografie git del progetto)
+app.post('/api/projects/:id/restore', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  if (p.tasks.some((x) => x.status === 'running' || x.status === 'testing')) throw httpError(409, 'Un task sta lavorando: mettilo in pausa o aspetta che finisca');
+  const commit = String(req.body?.commit || '');
+  const h = (await snapshots.history(projects.dirOf(req.user, p), 200)).find((x) => x.commit === commit);
+  if (!h) throw httpError(404, 'Versione non trovata');
+  await snapshots.restore(projects.dirOf(req.user, p), commit, `Ripristinata la versione «${h.message}»`);
+  projects.addLog(p, `Ripristinata la versione «${h.message}»`);
   await projects.save(p);
   res.json(await fullProject(req, p));
 }));
@@ -323,9 +372,13 @@ const looksLikeImage = (b) => (b[0] === 0xff && b[1] === 0xd8) // JPEG
 
 const DOC_TYPES = { 'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md' };
 
-app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Object.keys(DOC_TYPES)], limit: '60mb' }), wrap(async (req, res) => {
+// Melodie canticchiate: il browser converte la registrazione in WAV mono (src/melody.js)
+const AUDIO_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave'];
+
+app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Object.keys(DOC_TYPES), ...AUDIO_TYPES], limit: '60mb' }), wrap(async (req, res) => {
   const ctype = (req.headers['content-type'] || '').split(';')[0];
   if (DOC_TYPES[ctype]) return res.json(await saveDocument(req, DOC_TYPES[ctype]));
+  if (AUDIO_TYPES.includes(ctype)) return res.json(await saveMelody(req));
   if (req.body?.length > 15 * 1024 * 1024) throw httpError(413, 'Immagine troppo grande (max 15 MB)');
   const ext = IMAGE_TYPES[ctype];
   if (!ext || !Buffer.isBuffer(req.body) || req.body.length < 16 || !looksLikeImage(req.body)) {
@@ -336,6 +389,18 @@ app.post('/api/uploads', express.raw({ type: [...Object.keys(IMAGE_TYPES), ...Ob
   await fs.writeFile(path.join(config.paths.media, file), req.body);
   res.json({ file, url: mediaUrl(file), width: Number(req.query.w) || 0, height: Number(req.query.h) || 0 });
 }));
+
+/** Salva una melodia canticchiata dopo averla controllata (durata, voce intonata) e ne stima tonalità e tempo. */
+async function saveMelody(req) {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Registrazione vuota');
+  if (req.body.length > 20 * 1024 * 1024) throw httpError(413, 'Registrazione troppo grande');
+  let info;
+  try { info = checkMelody(req.body); } catch (e) { throw httpError(400, e.message); }
+  const file = `${req.user.id}/up-${randomUUID()}.wav`;
+  await fs.mkdir(path.join(config.paths.media, req.user.id), { recursive: true });
+  await fs.writeFile(path.join(config.paths.media, file), req.body);
+  return { kind: 'audio', file, url: mediaUrl(file), ...info };
+}
 
 /** Salva un documento e ne estrae subito il testo (pagina per pagina). */
 async function saveDocument(req, ext) {
@@ -363,6 +428,10 @@ app.post('/api/conversations/:id/media/:mediaId/cancel', wrap(async (req, res) =
   res.json({ ok: cancel(req.params.mediaId) });
 }));
 
+app.post('/api/conversations/:id/messages/:messageId/media/:mediaId/continue', wrap(async (req, res) => {
+  const { text, seconds, model } = req.body || {};
+  res.json(chat.continueVideo(ownConv(req), req.params.messageId, req.params.mediaId, { text, seconds, model }));
+}));
 app.post('/api/conversations/:id/messages/:messageId/media/:mediaId/regenerate', wrap(async (req, res) => {
   res.json(chat.regenerate(ownConv(req), req.params.messageId, req.params.mediaId, { prompt: req.body?.prompt }));
 }));
@@ -384,6 +453,8 @@ const adopted = store.adoptOwnerless(auth.adminUser().id);
 if (adopted) console.log(`  ${adopted} conversazioni esistenti assegnate all'utente ${auth.adminUser().displayName}`);
 recoverInterrupted();
 projects.recoverInterrupted();
+// code dei progetti con «riprendi dopo un riavvio»: ripartono appena il server è su
+setTimeout(() => runner.kick(), 5000);
 // File della cartella di lavoro su una porta a parte (origine diversa dall'app): pagine e giochi creati
 // dall'assistente girano liberi (anche localStorage) ma non possono leggere chat o dati dell'app.
 // L'accesso è con il codice dell'utente nell'URL, non con i cookie.
@@ -407,18 +478,20 @@ files.listen(config.workspace.port, config.host).on('error', (e) => console.warn
 
 const server = app.listen(config.port, config.host, () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i?.family === 'IPv4' && !i.internal).map((i) => i.address);
-  console.log(`\n  LocalAI pronto`);
+  console.log(`\n  LocalAI pronto${codeVersion ? ` (versione ${codeVersion.slice(0, 7)})` : ''}`);
   console.log(`  → su questo PC:     http://localhost:${config.port}`);
   for (const ip of ips) console.log(`  → telefono/tablet: http://${ip}:${config.port}   (stessa rete Wi-Fi)`);
+  if (config.notify.appUrl) console.log(`  → in HTTPS:        ${config.notify.appUrl}   (microfono e notifiche anche dal telefono)`);
+  else console.log('  (Microfono e notifiche dal telefono richiedono HTTPS: tools/attiva-https.ps1, vedi README)');
   console.log(`\n  Ollama:  ${config.ollama.url}  (${config.ollama.model})`);
   console.log(`  ComfyUI: ${config.comfy.url}`);
   console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
   // Workflow utilizzabili = quelli con tutti i modelli presenti su ComfyUI (ricontrollo ogni 5 minuti)
-  const refresh = () => checkAvailability(comfy.listModels).then((list) => {
+  const refresh = () => checkAvailability(comfy.listModels, comfy.hasNode).then((list) => {
     const off = list.filter((w) => w.available === false);
-    if (off.length) console.log(`  Workflow non disponibili (modelli mancanti): ${off.map((w) => `${w.name} → ${w.missing.join(', ')}`).join(' | ')}`);
+    if (off.length) console.log(`  Workflow non disponibili (modelli o nodi mancanti): ${off.map((w) => `${w.name} → ${w.missing.join(', ')}`).join(' | ')}`);
   });
   refresh();
   setInterval(refresh, 5 * 60 * 1000);

@@ -1,0 +1,20 @@
+{
+  "1": { "class_type": "UNETLoader", "_meta": { "title": "ACE-Step 1.5 Turbo" }, "inputs": { "unet_name": "acestep_v1.5_turbo.safetensors", "weight_dtype": "default" } },
+  "2": { "class_type": "DualCLIPLoader", "_meta": { "title": "Encoder ACE-Step (Qwen 0.6B + 1.7B)" }, "inputs": { "clip_name1": "qwen_0.6b_ace15.safetensors", "clip_name2": "qwen_1.7b_ace15.safetensors", "type": "ace", "device": "default" } },
+  "3": { "class_type": "VAELoader", "_meta": { "title": "VAE audio" }, "inputs": { "vae_name": "ace_1.5_vae.safetensors" } },
+  "4": { "class_type": "ModelSamplingAuraFlow", "_meta": { "title": "Shift" }, "inputs": { "model": ["1", 0], "shift": 3 } },
+  "5": { "class_type": "TextEncodeAceStepAudio1.5", "_meta": { "title": "Composizione (stile e testo)" }, "inputs": {
+    "clip": ["2", 0], "tags": "", "lyrics": "[Instrumental]", "seed": 0, "bpm": 120, "duration": 60,
+    "timesignature": "4", "language": "en", "keyscale": "C major", "generate_audio_codes": false,
+    "cfg_scale": 2.0, "temperature": 0.85, "top_p": 0.9, "top_k": 0, "min_p": 0.0 } },
+  "6": { "class_type": "ConditioningZeroOut", "inputs": { "conditioning": ["13", 0] } },
+  "7": { "class_type": "EmptyAceStep1.5LatentAudio", "inputs": { "seconds": 60, "batch_size": 1 } },
+  "8": { "class_type": "KSampler", "_meta": { "title": "Generazione musica" }, "inputs": {
+    "model": ["4", 0], "positive": ["13", 0], "negative": ["6", 0], "latent_image": ["7", 0],
+    "seed": 0, "steps": 8, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1 } },
+  "9": { "class_type": "VAEDecodeAudio", "_meta": { "title": "Decodifica audio" }, "inputs": { "samples": ["8", 0], "vae": ["3", 0] } },
+  "10": { "class_type": "SaveAudioMP3", "inputs": { "audio": ["9", 0], "filename_prefix": "localai/musica", "quality": "V0" } },
+  "11": { "class_type": "LoadAudio", "_meta": { "title": "Melodia canticchiata" }, "inputs": { "audio": "" } },
+  "12": { "class_type": "VAEEncodeAudio", "_meta": { "title": "Lettura della melodia" }, "inputs": { "audio": ["11", 0], "vae": ["3", 0] } },
+  "13": { "class_type": "ReferenceTimbreAudio", "_meta": { "title": "Melodia come guida (cover)" }, "inputs": { "conditioning": ["5", 0], "latent": ["12", 0] } }
+}

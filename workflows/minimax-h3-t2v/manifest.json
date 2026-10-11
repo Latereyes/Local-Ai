@@ -5,14 +5,14 @@
   "default": true,
   "description": "Video da testo con audio nativo (suoni, dialoghi, musica), 24 fps.",
   "resolution": {
-    "megapixels": 0.4,
+    "megapixels": 0.7,
     "multiple": 32,
     "maxShortEdge": 768
   },
   "duration": {
     "default": 5,
     "min": 2,
-    "max": 10,
+    "max": 15,
     "fps": 24,
     "frameStep": 17,
     "frameOffset": 5

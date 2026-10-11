@@ -5,8 +5,8 @@ A 6B diffusion transformer with a Qwen3 text encoder. It understands long natura
 ## How to write the prompt
 
 - One or two flowing paragraphs of descriptive English prose, 120–250 words. Never tag lists, never weights like `(word:1.2)`, never "masterpiece, best quality, 8k".
-- Order: medium / photographic style → main subject (appearance, age, build, clothing, pose, expression, hair) → action → environment and background with clear spatial positions → lighting and time of day → camera (shot size, angle, lens, depth of field) → mood and color palette.
-- For photos use concrete photographic language: "shot on a 50mm lens at f/1.8", "soft window light from the left", "natural skin texture with visible pores", "subtle film grain", "candid smartphone photo".
+- Order: medium / photographic style → main subject (appearance, age, build, clothing, pose, expression, hair) → action → environment and background with clear spatial positions → lighting and time of day → framing (shot size, angle) → mood.
+- For photos of people keep it a believable, ordinary photo: plain words for light and framing ("soft window light from the left", "close-up from slightly above", "natural skin texture with visible pores", "candid smartphone photo"). Name lenses, apertures or camera models only if the request asks for that look; otherwise the model drifts into an artistic, editorial style.
 - For other styles name the medium precisely: "watercolor illustration", "3D render in a Pixar-like style", "anime key visual", "oil painting with visible brushstrokes".
 - Visible text: write the exact words in double quotes and say where they appear and in what lettering.
 - State what should be clean positively ("plain light-grey background", "the image contains no text") instead of listing what to avoid.
