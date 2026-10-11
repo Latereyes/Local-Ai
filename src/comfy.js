@@ -201,9 +201,24 @@ export async function listModels(folder) {
   return api(`/models/${encodeURIComponent(folder)}`, { signal: AbortSignal.timeout(8000) });
 }
 
-/** Carica un'immagine nella cartella input di ComfyUI (sovrascrive se esiste). */
+/** Nodi installati su ComfyUI (per le funzioni che usano nodi recenti): { nome: true/false }, ricontrollati ogni 5 minuti. */
+const nodeCache = new Map();
+export async function hasNodes(names) {
+  const out = {};
+  for (const name of names) {
+    const hit = nodeCache.get(name);
+    if (hit && Date.now() - hit.at < 5 * 60 * 1000) { out[name] = hit.ok; continue; }
+    let ok = false;
+    try { ok = !!(await api(`/object_info/${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(8000) }))?.[name]; } catch {}
+    nodeCache.set(name, { ok, at: Date.now() });
+    out[name] = ok;
+  }
+  return out;
+}
+
+/** Carica un'immagine (o un video) nella cartella input di ComfyUI (sovrascrive se esiste). */
 export async function uploadImage(buffer, filename) {
-  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : 'image/jpeg';
+  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.mp4$/i.test(filename) ? 'video/mp4' : /\.webm$/i.test(filename) ? 'video/webm' : 'image/jpeg';
   const fd = new FormData();
   fd.append('image', new Blob([buffer], { type }), filename);
   fd.append('overwrite', 'true');

@@ -1,5 +1,6 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
+import { MAX as LONG_VIDEO } from './videochain.js';
 
 const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -166,26 +167,30 @@ export function tools({ forcedImageModel, web = true, images: recent = [] } = {}
     } });
   }
   const i2v = workflows('video', 'img2video');
+  // video lunghi: oltre il massimo di un pezzo servono i pezzi che si continuano (con il workflow image to video)
+  const longMax = (d) => (i2v.length ? Math.max(d.max, LONG_VIDEO) : d.max);
   if (source && i2v.length) {
     const d = i2v[0].duration || { min: 2, max: 10, default: 5 };
+    const long = longMax(d);
     out.push({ type: 'function', function: {
       name: 'animate_image',
       description: `Trasforma in video l'immagine più recente della conversazione (${source.origin}): il video parte esattamente da quell'immagine. Da usare quando l'utente chiede di animarla o di farne un video.`,
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'In inglese: cosa si muove e come, movimenti di camera, audio (suoni, eventuali dialoghi con lingua, musica).' },
-        duration: { type: 'integer', minimum: d.min, maximum: d.max, description: `Durata in secondi (default ${d.default}).` },
+        duration: { type: 'integer', minimum: d.min, maximum: long, description: `Durata in secondi (default ${d.default}).${long > d.max ? ` Oltre ${d.max} s il video si fa in più pezzi che si continuano: usalo solo se l'utente chiede un video lungo.` : ''}` },
         ...pick,
       }, required: ['description', 'duration'] },
     } });
   }
   if (videos.length) {
     const d = videos[0].duration || { min: 2, max: 10, default: 5 };
+    const long = longMax(d);
     out.push({ type: 'function', function: {
       name: 'generate_video',
       description: 'Genera un breve video con audio con ComfyUI. Da usare solo quando l\'utente chiede un video, un\'animazione o una clip.',
       parameters: { type: 'object', properties: {
         description: { type: 'string', description: 'Descrizione completa e fedele, in inglese: scena, soggetti, azioni nel tempo, movimenti di camera, audio.' },
-        duration: { type: 'integer', minimum: d.min, maximum: d.max, description: `Durata in secondi (default ${d.default}).` },
+        duration: { type: 'integer', minimum: d.min, maximum: long, description: `Durata in secondi (default ${d.default}).${long > d.max ? ` Oltre ${d.max} s il video si fa in più pezzi che si continuano: usalo solo se l'utente chiede un video lungo.` : ''}` },
         aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1', '4:3', '3:4'], description: 'Formato. Default 16:9; 9:16 per contenuti verticali.' },
       }, required: ['description', 'duration', 'aspect_ratio'] },
     } });

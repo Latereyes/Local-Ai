@@ -7,6 +7,7 @@ import * as store from './store.js';
 import { gpu } from './gpu.js';
 import { getWorkflow, buildGraph } from './workflows.js';
 import { applyKeepFace } from './faces.js';
+import { continueGraph, continueFrames, CONTINUE_NODES, GUIDE_NODE } from './videochain.js';
 
 /** Bus globale degli eventi verso il frontend (SSE). */
 export const bus = new EventEmitter();
@@ -14,6 +15,20 @@ bus.setMaxListeners(100);
 export const emit = (conversationId, evt) => bus.emit('event', { conversationId, ...evt });
 
 const controllers = new Map(); // mediaId -> AbortController
+
+/**
+ * Grafo «continua» (videochain.js, da ChatBz): il video da continuare va nella cartella input di ComfyUI; con
+ * MiniMaxH3AddGuide il pezzo nuovo parte dagli ultimi fotogrammi (e dall'audio), senza solo dall'ultimo fotogramma.
+ */
+async function continueGraphFor(w, media) {
+  const has = await comfy.hasNodes([...CONTINUE_NODES, GUIDE_NODE]);
+  const missing = CONTINUE_NODES.filter((n) => !has[n]);
+  if (missing.length) throw new Error(`Per continuare un video serve un ComfyUI più recente (mancano i nodi: ${missing.join(', ')})`);
+  const video = await comfy.uploadImage(await fs.readFile(path.join(config.paths.media, media.sourceFile)), `localai_${path.basename(media.sourceFile)}`);
+  media.continueGuide = !!has[GUIDE_NODE];
+  media.frames = continueFrames(media.seconds, media.continueGuide);
+  return continueGraph(w, { video, prompt: media.prompt, seed: media.seed, seconds: media.seconds, guide: media.continueGuide });
+}
 
 export function mediaUrl(file) { return file ? `/media/${file}` : null; }
 
@@ -29,7 +44,8 @@ export function enqueue(conv, msg, media) {
   emitMedia(conv, msg, media);
   store.save(conv);
 
-  const w = getWorkflow(media.workflow, media.type, media.mode);
+  // un pezzo che continua un video usa il workflow image to video (il grafo lo cambia videochain.js)
+  const w = getWorkflow(media.workflow, media.type, media.mode === 'continue' ? 'img2video' : media.mode);
   const label = media.type === 'video' ? 'Generazione video' : 'Generazione immagine';
 
   return gpu.run('comfy', label, async () => {
@@ -38,9 +54,17 @@ export function enqueue(conv, msg, media) {
     media.startedAt = Date.now();
     emitMedia(conv, msg, media);
 
+    // Pezzo di un video lungo: parte dal pezzo precedente dello stesso messaggio (la coda della GPU è in ordine)
+    if (media.continueOfId && !media.sourceFile) {
+      const src = msg.media.find((x) => x.id === media.continueOfId);
+      if (!src?.file || src.status !== 'done') throw new Error('La parte precedente del video non è riuscita');
+      media.sourceFile = src.file;
+      media.sourceUrl = mediaUrl(src.file);
+    }
+
     // Immagine di partenza (image to image / image to video): va caricata su ComfyUI
     const upload = async (file) => comfy.uploadImage(await fs.readFile(path.join(config.paths.media, file)), `localai_${path.basename(file)}`);
-    const image = media.sourceFile ? await upload(media.sourceFile) : undefined;
+    const image = media.sourceFile && media.mode !== 'continue' ? await upload(media.sourceFile) : undefined;
     const [image2, image3] = await Promise.all((media.extraSources || []).slice(0, 2).map(upload));
 
     const values = {
@@ -48,7 +72,7 @@ export function enqueue(conv, msg, media) {
       width: media.width, height: media.height, frames: media.frames,
       image, image2, image3, denoise: media.denoise,
     };
-    let graph = buildGraph(w, values);
+    let graph = media.mode === 'continue' ? await continueGraphFor(w, media) : buildGraph(w, values);
     const keepFace = media.keepFace && applyKeepFace(graph, w.keepFace);
 
     let lastPreview = 0;
