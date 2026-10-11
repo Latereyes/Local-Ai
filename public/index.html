@@ -19,6 +19,7 @@
       </div>
       <nav class="sidebar-nav">
         <button class="nav-item" id="btn-gallery"><span data-icon="gallery"></span>Galleria</button>
+        <button class="nav-item" id="btn-projects"><span data-icon="folder"></span>Progetti</button>
       </nav>
       <div class="conv-list" id="conv-list"></div>
       <div class="sidebar-foot">
@@ -75,6 +76,7 @@
                 <button type="button" class="chip" data-tool="web" title="Cerca sul web prima di rispondere"><span data-icon="globe"></span><span>Cerca</span></button>
                 <button type="button" class="chip" data-tool="image"><span data-icon="image"></span><span>Immagine</span></button>
                 <button type="button" class="chip" data-tool="video"><span data-icon="video"></span><span>Video</span></button>
+                <button type="button" class="chip" id="chip-computer" title="Modalità Computer: crea progetti nella cartella di lavoro ed esegue comandi sul PC"><span data-icon="terminal"></span><span>Computer</span></button>
                 <button type="button" class="chip" id="chip-think" title="Ragionamento esteso (più lento)"><span data-icon="brain"></span><span>Ragiona</span></button>
                 <div class="opts" id="opts"></div>
               </div>
@@ -83,6 +85,11 @@
           </form>
           <p class="disclaimer">Tutto gira in locale sulla tua GPU. Le risposte possono contenere errori.</p>
         </div>
+      </section>
+
+      <section class="view" id="view-projects" hidden>
+        <div class="gallery-head"><h2>Progetti</h2><p class="faint-note">Cartella di lavoro dell'assistente sul PC. Attiva <b>Computer</b> nella chat per fargli creare pagine web, giochi, script e documenti PDF o Word.</p></div>
+        <div class="projects" id="projects"></div>
       </section>
 
       <section class="view" id="view-gallery" hidden>

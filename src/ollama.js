@@ -35,7 +35,7 @@ export async function capabilities(model) {
 
 /**
  * Contesto (token) da usare con il modello: quello del suo Modelfile se lo fissa
- * (es. Qwen Coder a 16k, perché con 24k non starebbe tutto nei 16 GB), altrimenti OLLAMA_CTX.
+ * (es. Qwen Coder a 40k, misurato perché stia tutto nei 16 GB), altrimenti OLLAMA_CTX.
  */
 export async function contextSize(model) {
   const m = /^num_ctx\s+(\d+)/m.exec((await show(model || config.ollama.model)).parameters || '');

@@ -13,6 +13,7 @@ import { gpu } from './src/gpu.js';
 import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
+import * as workspace from './src/workspace.js';
 
 const app = express();
 app.set('trust proxy', false);
@@ -95,6 +96,7 @@ app.get('/api/config', wrap(async (req, res) => {
     defaultModel: config.ollama.model,
     models,
     workflows: workflows().map(publicInfo),
+    workspace: { port: config.workspace.port, token: workspace.linkToken(req.user), canRun: req.user.role === 'admin' },
   });
 }));
 
@@ -134,6 +136,7 @@ app.patch('/api/conversations/:id', wrap(async (req, res) => {
   const c = ownConv(req);
   if (typeof req.body.title === 'string') c.title = req.body.title.trim().slice(0, 80) || c.title;
   if (typeof req.body.pinned === 'boolean') c.pinned = req.body.pinned;
+  if (typeof req.body.computer === 'boolean') c.computer = req.body.computer;
   await store.save(c, { touch: false });
   res.json({ ok: true });
 }));
@@ -148,8 +151,26 @@ app.delete('/api/conversations/:id', wrap(async (req, res) => {
 
 app.post('/api/conversations/:id/messages', wrap(async (req, res) => {
   const c = ownConv(req);
-  const { text, tool, imageModel, aspect, duration, think, model, attachments } = req.body || {};
-  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments }));
+  const { text, tool, imageModel, aspect, duration, think, model, attachments, computer } = req.body || {};
+  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments, computer: typeof computer === 'boolean' ? computer : undefined }));
+}));
+
+// Conferma (o rifiuto) di un comando proposto dall'assistente in modalità Computer
+app.post('/api/conversations/:id/commands/:stepId', wrap(async (req, res) => {
+  const c = ownConv(req);
+  if (req.user.role !== 'admin') throw httpError(403, 'Solo per amministratori');
+  if (!chat.confirmCommand(c.id, req.params.stepId, req.body?.approve === true)) throw httpError(404, 'Nessun comando in attesa');
+  res.json({ ok: true });
+}));
+
+// ---- Cartella di lavoro (modalità Computer) ----
+app.get('/api/workspace', wrap(async (req, res) => {
+  res.json({ files: await workspace.listFiles(req.user, '', { limit: 1000 }) });
+}));
+
+app.delete('/api/workspace', wrap(async (req, res) => {
+  try { res.json(await workspace.deleteFile(req.user, String(req.query.path || ''))); }
+  catch (e) { throw httpError(e instanceof workspace.WorkspaceError ? 400 : 500, e.message); }
 }));
 
 app.post('/api/conversations/:id/stop', wrap(async (req, res) => { chat.stop(ownConv(req).id); res.json({ ok: true }); }));
@@ -222,6 +243,27 @@ app.get('/{*path}', (req, res) => res.sendFile(path.join(config.paths.public, 'i
 const adopted = store.adoptOwnerless(auth.adminUser().id);
 if (adopted) console.log(`  ${adopted} conversazioni esistenti assegnate all'utente ${auth.adminUser().displayName}`);
 recoverInterrupted();
+// File della cartella di lavoro su una porta a parte (origine diversa dall'app): pagine e giochi creati
+// dall'assistente girano liberi (anche localStorage) ma non possono leggere chat o dati dell'app.
+// L'accesso è con il codice dell'utente nell'URL, non con i cookie.
+const files = express();
+files.disable('x-powered-by');
+files.get('/:token/{*path}', (req, res) => {
+  const user = workspace.userByToken(auth.listUsers(), req.params.token);
+  if (!user) return res.sendStatus(404);
+  let target;
+  try { target = workspace.resolve(user, [].concat(req.params.path || []).join('/')); } catch { return res.sendStatus(404); }
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (req.query.download !== undefined) res.attachment(path.basename(target.abs));
+  res.sendFile(target.abs, { dotfiles: 'deny' }, (err) => {
+    if (!err) return;
+    // cartella: si apre index.html se c'è
+    if (!res.headersSent) res.sendFile(path.join(target.abs, 'index.html'), (e2) => { if (e2 && !res.headersSent) res.sendStatus(404); });
+  });
+});
+files.listen(config.workspace.port, config.host).on('error', (e) => console.warn(`  ⚠ Server dei file della cartella di lavoro non avviato (porta ${config.workspace.port}): ${e.message}`));
+
 const server = app.listen(config.port, config.host, () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i?.family === 'IPv4' && !i.internal).map((i) => i.address);
   console.log(`\n  LocalAI pronto`);
@@ -229,6 +271,7 @@ const server = app.listen(config.port, config.host, () => {
   for (const ip of ips) console.log(`  → telefono/tablet: http://${ip}:${config.port}   (stessa rete Wi-Fi)`);
   console.log(`\n  Ollama:  ${config.ollama.url}  (${config.ollama.model})`);
   console.log(`  ComfyUI: ${config.comfy.url}`);
+  console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
   // Workflow utilizzabili = quelli con tutti i modelli presenti su ComfyUI (ricontrollo ogni 5 minuti)
