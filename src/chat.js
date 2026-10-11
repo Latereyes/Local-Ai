@@ -273,8 +273,58 @@ function trackRead(msg, file, size, mtime) {
 /** Ciclo di riscrittura rilevato in questa conversazione (e azzera il conteggio), oppure null. */
 export function takeLoop(conversationId) {
   const loop = writeGuards.get(conversationId)?.loop || null;
-  writeGuards.delete(conversationId);
+  // senza ciclo il conteggio resta: nei task vale per tutti i tentativi
+  if (loop) writeGuards.delete(conversationId);
   return loop;
+}
+
+/** Fine di un task: via i conteggi e le letture ricordate della sua conversazione. */
+export function clearGuards(conversationId) {
+  writeGuards.delete(conversationId);
+  observed.delete(conversationId);
+}
+
+/**
+ * Leggi prima di scrivere (come fs-observation-policy di DeepSeek Harness): un file che esiste e non è vuoto si
+ * modifica o sovrascrive solo se il modello l'ha letto (o scritto) in questa conversazione e non è cambiato dopo.
+ * Così niente riscritture a memoria (Missile Command) né modifiche sopra il lavoro di un task (chat del progetto).
+ */
+const observed = new Map(); // conversationId -> Map(percorso -> mtime visto)
+
+function stat(user, rel) {
+  try {
+    const { abs, rel: r } = workspace.resolve(user, rel);
+    const st = fs.statSync(abs, { throwIfNoEntry: false });
+    return { rel: r, st: st?.isFile() ? st : null };
+  } catch { return { rel: String(rel || ''), st: null }; }
+}
+
+/** Il modello ha visto la versione attuale del file (dopo una lettura o una sua scrittura). */
+function observe(conv, user, rel) {
+  const { rel: r, st } = stat(user, rel);
+  if (!st) return;
+  if (!observed.has(conv.id)) observed.set(conv.id, new Map());
+  observed.get(conv.id).set(r, st.mtimeMs);
+}
+
+function requireObserved(conv, user, rel) {
+  const { rel: r, st } = stat(user, rel);
+  if (!st || !st.size) return;
+  const seen = observed.get(conv.id)?.get(r);
+  if (seen === undefined) throw new workspace.WorkspaceError(`Prima di modificare «${r}» leggilo con read_file: esiste già (${st.size} B) e in questa conversazione non l'hai ancora letto.`);
+  if (seen !== st.mtimeMs) throw new workspace.WorkspaceError(`«${r}» è cambiato da quando l'hai letto: rileggilo con read_file prima di modificarlo.`);
+}
+
+// Stessa chiamata con gli stessi argomenti di fila (come repeat-tool-reminder di DeepSeek Harness):
+// avviso dalla terza, dalla quinta il turno passa all'ultimo giro senza strumenti
+function repeatNote(msg, call) {
+  const g = turnGuard(msg);
+  const key = `${call.function?.name}|${JSON.stringify(parseArgs(call.function?.arguments))}`;
+  g.repeat = g.repeat?.key === key ? { key, n: g.repeat.n + 1 } : { key, n: 1 };
+  const n = g.repeat.n;
+  if (n >= 5) g.final = true;
+  return n >= 5 ? `\n\n[LocalAI: this is the ${n}th identical ${call.function.name} call in a row. Stop using tools now: write your final summary.]`
+    : n >= 3 ? `\n\n[LocalAI: you are repeating the exact same ${call.function.name} call (${n} times in a row). Look at the previous result: if the task is not done, try a different approach instead of repeating the call.]` : '';
 }
 
 /**
@@ -314,6 +364,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.readFile(user, step.path);
         step.path = r.path;
         step.size = r.size;
+        observe(conv, user, r.path);
         const n = trackRead(msg, r.path, r.size, r.mtime);
         const note = n >= 5 ? `[LocalAI: you read ${r.path} ${n} times in this turn and it has not changed. Stop using tools now: write your final summary.]\n`
           : n >= 3 ? `[LocalAI: you already read ${r.path} ${n - 1} times in this turn and it has not changed. Do not read it again: change it with edit_file or finish with your summary.]\n` : '';
@@ -322,14 +373,18 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         break;
       }
       case 'write_file': {
+        requireObserved(conv, user, step.path);
         const r = await workspace.writeFile(user, step.path, args.content);
+        observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
         output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}) });
         if (trackWrite(conv, name, r.path, args.content)) output = JSON.stringify({ error: 'Ciclo di riscrittura: il turno si ferma' });
         break;
       }
       case 'edit_file': {
+        requireObserved(conv, user, step.path);
         const r = await workspace.editFile(user, step.path, args.old_text, args.new_text, { all: args.replace_all === true || args.replace_all === 'true' });
+        observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size });
         output = JSON.stringify({ ok: true, path: r.path, replaced: r.replaced, lines: r.lines });
         if (trackWrite(conv, name, r.path, r.text)) output = JSON.stringify({ error: 'Ciclo di modifiche: il turno si ferma' });
@@ -356,7 +411,9 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         break;
       }
       case 'append_file': {
+        requireObserved(conv, user, step.path);
         const r = await workspace.appendFile(user, step.path, args.content);
+        observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size });
         output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size });
         break;
@@ -1196,7 +1253,7 @@ export async function send(conv, opts) {
             const content = COMPUTER_TOOLS.has(call.function.name)
               ? await runComputerTool(conv, msg, call, user, { canRun, signal: ac.signal })
               : await runWebTool(conv, msg, call, { maxChars, query: focusQuery });
-            convo.push({ role: 'tool', tool_name: call.function.name, content });
+            convo.push({ role: 'tool', tool_name: call.function.name, content: content + repeatNote(msg, call) });
           }
           store.save(conv, { touch: false });
         }

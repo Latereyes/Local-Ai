@@ -8,6 +8,8 @@ import http from 'node:http';
 // Ollama finto «testardo»: a ogni richiesta chiama read_file sullo stesso file, anche quando non gli si danno strumenti
 // (prova Space Invaders 2026-10-11: Qwen ha riletto game.js 70 volte in un turno di 33 minuti)
 const requests = [];
+// chiamate da restituire in ordine (poi read_file su game.js per sempre); una risposta vuota chiude il turno
+let script = [];
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -19,7 +21,9 @@ const fake = http.createServer((req, res) => {
     if (req.url !== '/api/chat') return res.end('{"version":"0.0.0"}');
     const j = JSON.parse(body);
     requests.push(j);
-    const call = { function: { name: 'read_file', arguments: { path: 'game.js' } } };
+    const next = script.length ? script.shift() : { name: 'read_file', arguments: { path: 'game.js' } };
+    if (next === 'fine') return res.end(`${JSON.stringify({ message: { role: 'assistant', content: 'Fatto.' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
+    const call = { function: next };
     res.end(`${JSON.stringify({ message: { role: 'assistant', content: '', tool_calls: [call] }, done: false })}\n${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
   });
 });
@@ -53,5 +57,33 @@ test('un modello che rilegge sempre lo stesso file: avviso alla terza lettura, u
   const toolTexts = requests[5].messages.filter((m) => m.role === 'tool').map((m) => m.content);
   assert.match(toolTexts[2], /already read game\.js 2 times/);
   assert.match(toolTexts[4], /Stop using tools now/);
+});
+
+test('leggi prima di scrivere: niente modifiche a file non letti o cambiati dopo la lettura', async () => {
+  const owner = adminUser();
+  const p = projects.get(owner, 'giri');
+  const user = projects.scoped(owner, p);
+  await workspace.writeFile(user, 'stato.js', 'let vite = 3;\n');
+  const conv = store.create(owner.id);
+  Object.assign(conv, { computer: true, project: { id: p.id, folder: p.folder, name: p.name }, taskId: 't2' });
+  script = [
+    { name: 'write_file', arguments: { path: 'stato.js', content: 'let vite = 5;\n' } },   // mai letto: rifiutato
+    { name: 'read_file', arguments: { path: 'stato.js' } },
+    { name: 'edit_file', arguments: { path: 'stato.js', old_text: 'vite = 3', new_text: 'vite = 4' } },  // ok
+    { name: 'edit_file', arguments: { path: 'stato.js', old_text: 'vite = 4', new_text: 'vite = 6' } },  // l'ha scritto lui: ok
+    { name: 'write_file', arguments: { path: 'nuovo.js', content: 'export {};\n' } },  // file nuovo: ok
+    'fine',
+  ];
+  const msg = await (await chat.send(conv, { text: 'Fai il task', model: 'testardo:latest', computer: true, priority: 'low' })).finished;
+  const steps = msg.steps.map((st) => `${st.action} ${st.status}`);
+  assert.deepEqual(steps, ['write error', 'read done', 'edit done', 'edit done', 'write done']);
+  assert.match(msg.steps[0].error, /leggilo con read_file/);
+  assert.equal(fs.readFileSync(workspace.resolve(user, 'stato.js').abs, 'utf8'), 'let vite = 6;\n');
+  // cambiato da fuori (un altro task, l'utente): va riletto
+  await new Promise((r) => setTimeout(r, 20));
+  fs.writeFileSync(workspace.resolve(user, 'stato.js').abs, 'let vite = 9;\n');
+  script = [{ name: 'edit_file', arguments: { path: 'stato.js', old_text: 'vite = 9', new_text: 'vite = 1' } }, 'fine'];
+  const msg2 = await (await chat.send(conv, { text: 'Ancora', model: 'testardo:latest', computer: true, priority: 'low' })).finished;
+  assert.match(msg2.steps[0].error, /è cambiato da quando l'hai letto/);
   fake.close();
 });
