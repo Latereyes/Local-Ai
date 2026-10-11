@@ -374,7 +374,8 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
             break;
           }
           case 'done':
-            Object.assign(t, { status: 'done', skipped: true, error: null });
+            // fatto dalla chat del progetto o dal coordinatore (non dalla coda): si ricorda chi l'ha chiuso
+            Object.assign(t, { status: 'done', skipped: true, doneBy: conv.messages.findLast((m) => m.role === 'user')?.autoLabel?.startsWith('Coordinatore') ? 'coordinator' : 'chat', error: null });
             what = `«${t.title}» segnato come fatto`;
             break;
           case 'delete':

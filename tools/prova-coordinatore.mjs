@@ -196,7 +196,7 @@ for (const s of SCENARIOS) {
   const mark = result.ok === null ? '⚠️' : result.ok ? '✅' : '❌';
   lines.push(`## ${mark} ${s.id}`, '', `**Problema:** ${s.what}`, '', `**Atteso:** ${s.expect}`, '',
     `**Esito:** ${result.note}`, '',
-    `- Task: ${p.tasks.map((t) => `«${t.title}» → ${t.status}${t.skipped ? ' (segnato a mano)' : ''}${t.attempts ? `, ${t.attempts} tentativi` : ''}${t.error ? ` — ${t.error}` : ''}`).join('; ')}`,
+    `- Task: ${p.tasks.map((t) => `«${t.title}» → ${t.status}${t.doneBy === 'coordinator' ? ' (chiuso dal coordinatore)' : t.doneBy === 'chat' ? ' (chiuso dalla chat)' : t.skipped ? ' (segnato a mano)' : ''}${t.attempts ? `, ${t.attempts} tentativi` : ''}${t.error ? ` — ${t.error}` : ''}`).join('; ')}`,
     `- Interventi del coordinatore: ${interventions}`,
     `- Coda alla fine: ${p.active ? 'attiva' : 'in pausa'}`, '',
     '<details><summary>Cronologia</summary>', '', ...p.log.map((l) => `- ${new Date(l.at).toLocaleTimeString('it-IT')} ${l.text}`), '', '</details>', '',

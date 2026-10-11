@@ -136,6 +136,7 @@ function taskPrompt(p, task, plan, owner) {
   const canTest = owner.role === 'admin' && p.autoTest;
   const rules = {
     code: canTest ? `- Scrivi anche i test automatici, brevi e mirati: Python con unittest in tests/test_*.py (aggiungi la cartella del progetto a sys.path nei test); JavaScript con node:test in tests/*.test.js.${p.testCommand ? ` I test si lanciano con: ${p.testCommand}` : ''} Alla fine del tuo turno LocalAI li esegue e, se falliscono, ti manda l'errore da correggere.
+- Se scrivi package.json, lo script di test è "node --test tests/*.test.js": con una cartella («node --test tests/») su Windows non funziona.
 - Usa solo librerie che esistono davvero (meglio la libreria standard). Nei test non simulare (mock) librerie mancanti o inesistenti per farli passare: LocalAI controlla che ogni libreria importata sia installata o esista su PyPI/npm.` : '',
     page: `- La pagina principale è index.html (se il task non dice altro). Alla fine del tuo turno LocalAI la apre in un browser, raccoglie gli errori JavaScript e guarda uno screenshot: niente errori in console, e la pagina deve mostrare subito qualcosa di sensato (non un riquadro vuoto).`,
     read: '- Leggi i file con read_file (quelli lunghi a pezzi) e scrivi il risultato in un file del progetto (es. report.md o dati.json) oltre a riassumerlo nella risposta.',

@@ -1356,7 +1356,7 @@ function renderTask(t, i, p) {
       <span class="pj-num">${i + 1}</span>
       <select data-task-type="${t.id}" ${busy ? 'disabled' : ''} title="Tipo: decide il modello">${Object.entries(p.types).map(([k, v]) => `<option value="${k}" ${k === t.type ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <button class="pj-title" data-toggle="${t.id}">${esc(t.title)}</button>
-      <span class="pj-status">${busy ? '<span class="spin"></span>' : ''}${TASK_STATUS[t.status] || t.status}${t.attempts > 1 || (t.attempts && t.status !== 'done') ? ` · ${t.attempts} tent.` : ''}</span>
+      <span class="pj-status">${busy ? '<span class="spin"></span>' : ''}${t.status === 'done' && t.doneBy ? (t.doneBy === 'coordinator' ? 'Fatto dal coordinatore' : 'Fatto dalla chat') : TASK_STATUS[t.status] || t.status}${t.attempts > 1 || (t.attempts && t.status !== 'done') ? ` · ${t.attempts} tent.` : ''}</span>
       <span class="pj-acts">${busy ? btn('stop', 'stop', 'Ferma') : `${btn('up', 'chevron', 'Su')}${['done', 'queued'].includes(t.status) ? '' : btn('retry', 'refresh', 'Rimetti in coda')}${t.status === 'done' ? btn('retry', 'refresh', 'Rifai') : ''}${btn('delete', 'trash', 'Elimina')}`}</span>
     </div>
     ${open ? `<div class="pj-task-body">
