@@ -350,7 +350,7 @@ function renderMessage(m) {
   const showStatus = live && !m.content && !m.thinking && !(m.media || []).length && !(m.steps || []).some((s) => !WS_STEP.has(s.type) || s.status === 'running');
   st.hidden = !showStatus;
   if (showStatus) {
-    const txt = m.status === 'waiting' ? `In attesa della GPU (${esc(m.waitReason || 'occupata')})…` : '';
+    const txt = m.status === 'waiting' ? 'GPU occupata, attendere...' : '';
     st.innerHTML = `<span class="typing"><i></i><i></i><i></i></span>${txt ? `<span>${txt}</span>` : ''}`;
   }
 
@@ -706,7 +706,7 @@ function onEvent(evt) {
     }
     case 'status': {
       const m = findMsg(evt.messageId); if (!m) break;
-      m.status = evt.status; m.waitReason = evt.reason;
+      m.status = evt.status;
       renderMessage(m);
       break;
     }

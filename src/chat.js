@@ -620,7 +620,7 @@ export async function send(conv, opts) {
             step.finishedAt = Date.now();
             emit(conv.id, { type: 'step', messageId: msg.id, step });
           }
-        }, { onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+        }, { onWait: () => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting' }) });
         store.save(conv, { touch: false });
         if (ac.signal.aborted) throw new Error('Interrotto');
       }
@@ -796,7 +796,7 @@ export async function send(conv, opts) {
           md.prompt = byCall.get(md.callIndex);
           emitMedia(conv, msg, md);
         }
-      }, { priority: opts.priority || 'high', onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+      }, { priority: opts.priority || 'high', onWait: () => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting' }) });
 
       msg.status = 'done';
     } catch (e) {

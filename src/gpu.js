@@ -3,7 +3,8 @@ import * as ollama from './ollama.js';
 import * as comfy from './comfy.js';
 import * as agent from './gpu-agent.js';
 
-const APP_NAMES = { chatbz: 'ChatBz', localai: 'LocalAI', agent: 'agent del PC' };
+// Mentre un'altra app usa la GPU non si dice quale né per cosa
+const BUSY = 'GPU occupata, attendere...';
 
 /**
  * Arbitro della VRAM condivisa (RTX 4070 Ti Super, 16 GB).
@@ -65,11 +66,10 @@ class GpuArbiter extends EventEmitter {
         let notified = false;
         lease = await agent.acquire({
           who, label, priority,
-          onWait: (r) => {
-            const other = r.active ? `${APP_NAMES[r.active.app] || r.active.app}: ${r.active.label}` : 'altre app in coda';
-            this.active = { who, label, phase: `In attesa della GPU (${other})` };
+          onWait: () => {
+            this.active = { who, label, phase: BUSY };
             this.#emit();
-            if (!notified) { notified = true; onWait?.({ who, label: other }); }
+            if (!notified) { notified = true; onWait?.({ who, label: BUSY }); }
           },
         });
         if (lease) {
