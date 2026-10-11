@@ -188,7 +188,7 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
   const files = [];
   const texts = [];
   for (const out of Object.values(outputs)) {
-    for (const key of ['images', 'gifs', 'videos', 'video']) {
+    for (const key of ['images', 'gifs', 'videos', 'video', 'audio']) {
       for (const f of out[key] || []) if (f?.filename && f.type === 'output') files.push(f);
     }
     for (const t of out.text || []) if (typeof t === 'string') texts.push(t);
@@ -199,6 +199,12 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
 /** File presenti in una cartella modelli di ComfyUI (es. 'diffusion_models'). */
 export async function listModels(folder) {
   return api(`/models/${encodeURIComponent(folder)}`, { signal: AbortSignal.timeout(8000) });
+}
+
+/** true se ComfyUI ha il nodo (classe), false se manca; errore se ComfyUI non risponde. */
+export async function hasNode(name) {
+  const info = await api(`/object_info/${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(8000) });
+  return !!info?.[name];
 }
 
 /** Nodi installati su ComfyUI (per le funzioni che usano nodi recenti): { nome: true/false }, ricontrollati ogni 5 minuti. */
@@ -216,9 +222,9 @@ export async function hasNodes(names) {
   return out;
 }
 
-/** Carica un'immagine (o un video) nella cartella input di ComfyUI (sovrascrive se esiste). */
+/** Carica un file (immagine, video o audio) nella cartella input di ComfyUI (sovrascrive se esiste). */
 export async function uploadImage(buffer, filename) {
-  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.mp4$/i.test(filename) ? 'video/mp4' : /\.webm$/i.test(filename) ? 'video/webm' : 'image/jpeg';
+  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.wav$/i.test(filename) ? 'audio/wav' : /\.mp4$/i.test(filename) ? 'video/mp4' : /\.webm$/i.test(filename) ? 'video/webm' : 'image/jpeg';
   const fd = new FormData();
   fd.append('image', new Blob([buffer], { type }), filename);
   fd.append('overwrite', 'true');

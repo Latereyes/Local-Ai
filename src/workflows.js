@@ -121,14 +121,20 @@ function pruneNode(graph, id) {
 /**
  * Segna come disponibili solo i workflow i cui file (manifest "requires") esistono su ComfyUI.
  * listModels(folder) → elenco file della cartella modelli di ComfyUI.
+ * hasNode(classe) → true se ComfyUI ha quel nodo (manifest "nodes": nodi recenti o sperimentali); senza, non si controlla.
  */
-export async function checkAvailability(listModels) {
+export async function checkAvailability(listModels, hasNode) {
   const list = cache || loadWorkflows();
   const folders = new Map();
+  const nodes = new Map();
   for (const wf of list) {
-    if (!wf.requires?.length) { wf.available = true; continue; }
+    if (!wf.requires?.length && !wf.nodes?.length) { wf.available = true; continue; }
     const missing = [];
-    for (const { folder, file } of wf.requires) {
+    for (const name of hasNode ? wf.nodes || [] : []) {
+      if (!nodes.has(name)) nodes.set(name, await hasNode(name).catch(() => null));
+      if (nodes.get(name) === false) missing.push(`nodo ${name} (aggiorna ComfyUI)`);
+    }
+    for (const { folder, file } of wf.requires || []) {
       if (!folders.has(folder)) folders.set(folder, await listModels(folder).catch(() => null));
       const files = folders.get(folder);
       // ComfyUI su Windows elenca le sottocartelle con \ (es. bbox\face_yolov8m.pt)

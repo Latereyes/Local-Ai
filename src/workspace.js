@@ -58,6 +58,8 @@ export function resolve(user, rel = '') {
   if (/^[a-zA-Z]:/.test(clean) || clean.split('/').includes('..') || clean.includes('\0')) {
     throw new WorkspaceError(`Percorso non consentito: «${rel}». Usa percorsi relativi alla cartella di lavoro, es. tetris/index.html`);
   }
+  // .git è la storia dei progetti (snapshots.js): né il modello né il server dei file ci entrano
+  if (clean.split('/').some((s) => s.toLowerCase() === '.git')) throw new WorkspaceError(`Percorso non consentito: «${rel}» (storia del progetto)`);
   const abs = path.resolve(root, clean);
   const realRoot = fs.realpathSync(root);
   // l'antenato più vicino che esiste deve stare dentro la cartella (niente collegamenti verso l'esterno)
