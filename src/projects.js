@@ -61,7 +61,12 @@ export const stripTag = (text) => String(text || '').replace(/^\s*\[[a-zA-Zà-ù
 export function parsePlan(text) {
   const tasks = [];
   let current = null;
+  let rules = false;
   for (const raw of String(text || '').split(/\r?\n/)) {
+    // la sezione «Regole» (meccaniche del gioco, criteri di riuscita) è riferimento per tutti i task, non un elenco di task
+    const h = /^#{1,6}\s+(.*)$/.exec(raw);
+    if (h) { rules = /\b(regole|criteri|rules|requisiti)\b/i.test(h[1]); current = null; continue; }
+    if (rules) continue;
     const m = /^(\s*)(?:[-*+]|\d+[.)])\s+(?:\[([ xX])\]\s*)?(.+)$/.exec(raw);
     if (m && m[1].length < 2) {
       current = m[2] && m[2] !== ' ' ? null : { text: m[3].trim() };
@@ -249,7 +254,11 @@ una o due frasi
   eventuali dettagli rientrati di due spazi
 
 Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi, niente librerie esterne); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README e testi.
-Da 3 a 8 task, in ordine di esecuzione. Il primo crea qualcosa che funziona già; i successivi aggiungono una cosa alla volta.` },
+Da 3 a 8 task, in ordine di esecuzione. Il primo crea qualcosa che funziona già; i successivi aggiungono una cosa alla volta.
+
+Prima dei task, dopo l'obiettivo, scrivi una sezione «# Regole» con le regole concrete che il risultato deve rispettare, una per riga di elenco: chi esegue i task non può chiedere. Se l'obiettivo è il clone di un gioco o di un programma noto, elenca le sue meccaniche essenziali come nell'originale (es. per Space Invaders: alieni in formazione a griglia che si muove in blocco di lato, scende di un passo a ogni bordo e accelera quando ne restano pochi; gli alieni sparano; ripari che si consumano; si perde se la formazione arriva in basso). Usa numeri concreti dove servono (righe, colonne, velocità, vite).
+In ogni task aggiungi una riga rientrata «Fatto quando: …» con il comportamento da verificare (anche nei test).
+Dopo le regole scrivi «# Task» e poi l'elenco dei task.` },
     { role: 'user', content: `Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
   ];
 }

@@ -90,3 +90,8 @@ test('coordinatore: spento o oltre il limite di interventi non apre turni e lasc
 });
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+test('piano: la sezione «Regole» è riferimento per i task, non un elenco di task', () => {
+  const plan = '# Obiettivo\nClone di Space Invaders\n\n# Regole\n- alieni in griglia 5x11 che si muove in blocco\n- scendono a ogni bordo\n\n# Task\n- [pagina] index.html con il canvas\n  Fatto quando: si vede la formazione\n- [codice] logica in game.js';
+  assert.deepEqual(projects.parsePlan(plan).map((t) => t.text), ['[pagina] index.html con il canvas\nFatto quando: si vede la formazione', '[codice] logica in game.js']);
+});

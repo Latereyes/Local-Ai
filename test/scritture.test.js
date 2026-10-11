@@ -80,18 +80,30 @@ test('ciclo di riscrittura: segnaposto ripetuto, stesso contenuto o troppe riscr
   chat.trackWrite(c2, 'write_file', 'synth_gen.py', 'B');
   chat.trackWrite(c2, 'write_file', 'synth_gen.py', 'A');
   assert.equal(chat.trackWrite(c2, 'write_file', 'synth_gen.py', 'B'), null);
-  assert.match(chat.trackWrite(c2, 'write_file', 'synth_gen.py', 'A').reason, /3 volte lo stesso contenuto/);
+  assert.match(chat.trackWrite(c2, 'write_file', 'synth_gen.py', 'A').reason, /3 volte synth_gen\.py allo stesso contenuto/);
   chat.takeLoop('c-uguale');
 
   const c3 = { id: 'c-tante' };
   let loop = null;
   for (let i = 0; i < 12 && !loop; i++) loop = chat.trackWrite(c3, 'write_file', 'index.html', `v${i}`);
   assert.match(loop.reason, /riscritto da capo index\.html 11 volte/);
-  // append ed edit non sono riscritture intere
+  // modifiche fatte e disfatte con edit_file (prova Space Invaders: game.js avanti e indietro)
+  const c5 = { id: 'c-avanti-indietro' };
+  for (const v of ['A', 'B', 'A', 'B']) assert.equal(chat.trackWrite(c5, 'edit_file', 'game.js', v), null);
+  assert.match(chat.trackWrite(c5, 'edit_file', 'game.js', 'A').reason, /modifiche fatte e disfatte/);
+  chat.takeLoop('c-avanti-indietro');
+  // append non è una riscrittura intera
   const c4 = { id: 'c-blocchi' };
   for (let i = 0; i < 20; i++) assert.equal(chat.trackWrite(c4, 'append_file', 'index.html', `blocco ${i}`), null);
   chat.takeLoop('c-tante');
   chat.takeLoop('c-blocchi');
+});
+
+test('edit_file: una modifica già fatta lo dice, invece di «non c\'è»', async () => {
+  await ws.writeFile(user, 'gia.js', 'const a = 2;\nconst b = 3;\n');
+  await ws.editFile(user, 'gia.js', 'const a = 2;', 'const a = 20;');
+  await assert.rejects(ws.editFile(user, 'gia.js', 'const a = 2;', 'const a = 20;'), /sembra già fatta/);
+  await assert.rejects(ws.editFile(user, 'gia.js', 'const c = 2;', 'const c = 5;'), /rileggi il file/);
 });
 
 test('librerie mancanti lette dall\'output di test e script', () => {

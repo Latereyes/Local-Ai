@@ -114,11 +114,11 @@ export async function readFile(user, rel) {
   if (!st?.isFile()) throw new WorkspaceError(`Il file «${r}» non esiste`);
   if (st.size > MAX_FILE) throw new WorkspaceError(`Il file «${r}» è troppo grande (${human(st.size)})`);
   const buf = await fsp.readFile(abs);
-  if (buf.subarray(0, 8000).includes(0)) return { path: r, size: st.size, text: null };
+  if (buf.subarray(0, 8000).includes(0)) return { path: r, size: st.size, mtime: st.mtimeMs, text: null };
   let text = buf.toString('utf8');
   const truncated = text.length > MAX_READ_CHARS;
   if (truncated) text = text.slice(0, MAX_READ_CHARS);
-  return { path: r, size: st.size, text, truncated };
+  return { path: r, size: st.size, mtime: st.mtimeMs, text, truncated };
 }
 
 // ---- Scritture protette ----
@@ -225,7 +225,11 @@ export async function editFile(user, rel, oldText, newText, { all = false } = {}
   const crlf = text.includes('\r\n');
   const needle = crlf && !find.includes('\r\n') && !text.includes(find) ? find.replace(/\n/g, '\r\n') : find;
   const count = text.split(needle).length - 1;
-  if (!count) throw new WorkspaceError(`Il testo da sostituire non c'è in «${r}» (deve essere identico, spazi compresi): rileggi il file con read_file e copia il pezzo esatto.`);
+  if (!count) {
+    // prova Space Invaders 2026-10-11: il modello ripeteva una modifica già fatta e riceveva sei volte «non c'è»
+    if (repl.trim() && text.includes(repl)) throw new WorkspaceError(`Il testo da sostituire non c'è in «${r}», ma new_text c'è già: la modifica sembra già fatta. Non ripeterla: passa alla prossima o chiudi con il riepilogo.`);
+    throw new WorkspaceError(`Il testo da sostituire non c'è in «${r}» (deve essere identico, spazi compresi): rileggi il file con read_file e copia il pezzo esatto.`);
+  }
   if (count > 1 && !all) throw new WorkspaceError(`Il testo da sostituire compare ${count} volte in «${r}»: allarga old_text con le righe vicine perché sia unico, oppure usa replace_all.`);
   const value = crlf && needle !== find ? repl.replace(/\r?\n/g, '\r\n') : repl;
   const next = all ? text.split(needle).join(value) : text.replace(needle, () => value);
@@ -233,7 +237,7 @@ export async function editFile(user, rel, oldText, newText, { all = false } = {}
   if (!next.trim()) throw new WorkspaceError(`La modifica svuoterebbe «${r}»: per eliminarlo usa delete_file.`);
   await backup(user, abs, r);
   await fsp.writeFile(abs, next, 'utf8');
-  return { path: r, size: Buffer.byteLength(next), replaced: all ? count : 1, lines: lines(next) };
+  return { path: r, size: Buffer.byteLength(next), replaced: all ? count : 1, lines: lines(next), text: next };
 }
 
 /** Copie salvate di un file, dalla più recente: { id, at, size }. */

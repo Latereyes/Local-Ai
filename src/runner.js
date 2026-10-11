@@ -151,6 +151,7 @@ ${task.text}
 
 Rules:
 - Do only this task, complete and working; first read the existing files you need.
+- Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
 - Files that already exist: change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
 ${rules}
 - Code, comments and test names in English; texts shown to the user (interface, messages) in Italian unless the task says otherwise.
