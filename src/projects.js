@@ -153,6 +153,7 @@ export function summary(p) {
     id: p.id, name: p.name, folder: p.folder, active: p.active, updatedAt: p.updatedAt,
     total: p.tasks.length, done: count('done'), queued: count('queued'), failed: count('failed') + count('error'),
     running: p.tasks.find((t) => t.status === 'running' || t.status === 'testing')?.title || null,
+    waiting: p.waitingService || null,
   };
 }
 
@@ -348,6 +349,11 @@ export function recoverInterrupted() {
       save(p, { touch: false });
     }
   }
+}
+
+/** Tutti i progetti già letti dal disco (all'avvio recoverInterrupted li legge tutti). */
+export function loadedProjects() {
+  return [...cache.values()];
 }
 
 /** Tutti i progetti in memoria con coda attiva (per la coda globale). */

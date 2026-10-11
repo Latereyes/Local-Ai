@@ -556,7 +556,7 @@ async function renderConvProject(pj) {
     pj = (await api('/api/projects').catch(() => [])).find((x) => x.id === c.project.id);
     if (!pj || state.conv !== c) return;
   }
-  const status = [pj.total ? `${pj.done} di ${pj.total} task fatti` : 'nessun task', pj.queued ? `${pj.queued} in coda` : '', pj.running ? `ora: ${pj.running}` : '', pj.active ? 'coda attiva' : pj.queued ? 'coda in pausa' : ''].filter(Boolean).join(' · ');
+  const status = [pj.total ? `${pj.done} di ${pj.total} task fatti` : 'nessun task', pj.queued ? `${pj.queued} in coda` : '', pj.running ? `ora: ${pj.running}` : '', pj.waiting ? 'in attesa di Ollama' : pj.active ? 'coda attiva' : pj.queued ? 'coda in pausa' : ''].filter(Boolean).join(' · ');
   bar.innerHTML = `${icon('folder', 15)}<span>Chat del progetto <b>${esc(c.project.name)}</b> <span class="faint">· ${esc(status)}</span></span><span class="grow"></span><button class="btn ghost" data-open-project="${esc(c.project.id)}">Apri il progetto</button>`;
 }
 
@@ -1301,7 +1301,7 @@ async function openProjects(push = true) {
     <p class="faint-note" style="margin:0">Ogni progetto ha la sua cartella sul PC, un piano e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici. Le cartelle create in chat con <b>Computer</b> compaiono qui.</p>
     <div class="pj-new"><input id="pj-name" placeholder="Nome del nuovo progetto (es. Tetris, Sito ristorante)" maxlength="80"><button class="btn primary" id="pj-create">Crea progetto</button></div>
     ${list.length ? list.map((p) => `<button class="project pj-row" data-open="${esc(p.id)}">
-      <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}</h3>
+      <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait">in attesa di Ollama</span>' : ''}</h3>
       <div class="faint-note" style="margin:0">${p.total ? `${p.done} di ${p.total} task fatti${p.queued ? ` · ${p.queued} in coda` : ''}${p.failed ? ` · ${p.failed} non riusciti` : ''}` : 'Nessun task'}${p.running ? ` · ora: ${esc(p.running)}` : ''} · ${when(p.updatedAt)}</div>
     </button>`).join('') : '<div class="empty">Ancora nessun progetto. Creane uno qui sopra, oppure in una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>'}`;
   const create = async () => {
@@ -1382,7 +1382,7 @@ function renderProject() {
     <div class="pj-head">
       <button class="btn ghost" data-back>${icon('right', 14)}Progetti</button>
       <h2>${esc(p.name)}</h2>
-      ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}
+      ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait" title="Ollama non risponde: la coda riparte da sola quando torna">in attesa di Ollama</span>' : ''}
       <span class="spacer"></span>
       ${hasIndex ? `<a class="btn" href="${esc(wsUrl(`${p.folder}/index.html`))}" target="_blank" rel="noopener">${icon('play', 14)}Apri</a>` : ''}
       ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}

@@ -113,11 +113,18 @@ const { user } = await api('/api/auth/login', { body: { username: USER, password
 if (user.mustChangePassword) { console.error('Prima cambia la password temporanea dall\'interfaccia.'); process.exit(1); }
 if (user.role !== 'admin') console.warn('⚠ L\'utente non è amministratore: i test non girano e la prova dice poco.');
 
+// Senza Ollama i task falliscono subito e la prova non dice niente del coordinatore
+const status = await api('/api/status');
+if (!status.ollama) { console.error('✖ Ollama non risponde: avvialo (o controlla OLLAMA_URL di LocalAI) e rilancia la prova.'); process.exit(1); }
+const { models } = await api('/api/config');
+console.log(`Modelli con strumenti installati: ${models.map((m) => m.name.replace(/:latest$/, '')).join(', ') || 'nessuno'}`);
+
 const projectsList = await api('/api/projects');
 for (const s of SCENARIOS) {
   const name = `prova-coord-${s.id}`;
   if (projectsList.some((p) => p.id === name)) await api(`/api/projects/${name}`, { method: 'DELETE' });
-  const p = await api('/api/projects', { body: { name } });
+  const created = await api('/api/projects', { body: { name } });
+  const p = await api(`/api/projects/${created.id}`);
   s.project = p.id;
   s.dir = userRoot({ ...user, project: p.folder });
   for (const [f, text] of Object.entries(s.files)) {
@@ -127,6 +134,7 @@ for (const s of SCENARIOS) {
   await api(`/api/projects/${p.id}`, { method: 'PATCH', body: { coordinator: true, autoTest: true } });
   for (const t of s.tasks) await api(`/api/projects/${p.id}/tasks`, { body: { text: t } });
   await api(`/api/projects/${p.id}/start`, { method: 'POST' });
+  if (s === SCENARIOS[0]) console.log(`Modelli dei task: codice e pagine → ${p.models?.code || '?'}, lettura → ${p.models?.read || '?'}`);
   console.log(`▶ ${name}: avviato`);
 }
 
@@ -149,29 +157,38 @@ while (Date.now() - t0 < MAX_MIN * 60000) {
 }
 console.log('\n');
 
-const lines = [`# Prova del coordinatore — ${new Date().toLocaleString('it-IT')}`, '', `LocalAI: ${BASE} · durata ${Math.round((Date.now() - t0) / 60000)} minuti`, ''];
-let passed = 0;
+const minutes = Math.max(1, Math.round((Date.now() - t0) / 60000));
+const lines = [`# Prova del coordinatore — ${new Date().toLocaleString('it-IT')}`, '', `LocalAI: ${BASE} · durata ${minutes} ${minutes === 1 ? 'minuto' : 'minuti'}`, ''];
+let passed = 0, unclear = 0;
+// errori di collegamento (Ollama spento o caduto a metà): lo scenario non dice niente sul coordinatore
+const SERVICE = /fetch failed|ECONNREFUSED|ECONNRESET|socket hang up|Ollama non risponde/i;
 for (const s of SCENARIOS) {
   const p = state.get(s.id) || await api(`/api/projects/${s.project}`);
   const interventions = p.log.filter((l) => /^Coordinatore: analizzo/.test(l.text)).length;
   const result = s.check(s.dir);
+  if (p.waiting || p.tasks.some((t) => SERVICE.test(t.error || '')) || p.log.some((l) => SERVICE.test(l.text))) {
+    result.ok = null;
+    result.note = `NON VALUTABILE: Ollama non ha risposto durante la prova (${result.note})`;
+  }
   if (result.ok) passed++;
+  if (result.ok === null) unclear++;
   let reply = '';
   const chat = p.chats[0];
   if (chat) {
     const c = await api(`/api/conversations/${chat.id}`);
     reply = c.messages.filter((m) => m.role === 'assistant' && m.content).map((m) => m.content.trim()).join('\n\n---\n\n');
   }
-  lines.push(`## ${result.ok ? '✅' : '❌'} ${s.id}`, '', `**Problema:** ${s.what}`, '', `**Atteso:** ${s.expect}`, '',
+  const mark = result.ok === null ? '⚠️' : result.ok ? '✅' : '❌';
+  lines.push(`## ${mark} ${s.id}`, '', `**Problema:** ${s.what}`, '', `**Atteso:** ${s.expect}`, '',
     `**Esito:** ${result.note}`, '',
     `- Task: ${p.tasks.map((t) => `«${t.title}» → ${t.status}${t.skipped ? ' (segnato a mano)' : ''}${t.attempts ? `, ${t.attempts} tentativi` : ''}${t.error ? ` — ${t.error}` : ''}`).join('; ')}`,
     `- Interventi del coordinatore: ${interventions}`,
     `- Coda alla fine: ${p.active ? 'attiva' : 'in pausa'}`, '',
     '<details><summary>Cronologia</summary>', '', ...p.log.map((l) => `- ${new Date(l.at).toLocaleTimeString('it-IT')} ${l.text}`), '', '</details>', '',
     ...(reply ? ['<details><summary>Risposte nella chat del progetto</summary>', '', reply, '', '</details>', ''] : []));
-  console.log(`${result.ok ? '✅' : '❌'} ${s.id}: ${result.note} (interventi: ${interventions})`);
+  console.log(`${mark} ${s.id}: ${result.note} (interventi: ${interventions})`);
 }
-lines.splice(3, 0, `**Riusciti: ${passed} di ${SCENARIOS.length}**`, '');
+lines.splice(3, 0, `**Riusciti: ${passed} di ${SCENARIOS.length}**${unclear ? ` · ${unclear} non valutabili (Ollama non ha risposto)` : ''}`, '');
 const out = `prova-coordinatore-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`;
 fs.writeFileSync(out, lines.join('\n'));
 console.log(`\nResoconto: ${path.resolve(out)}`);

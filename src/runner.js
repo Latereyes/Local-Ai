@@ -12,6 +12,49 @@ import { getUser } from './auth.js';
 import { checkPage } from './browser.js';
 import { bus as chatBus } from './jobs.js';
 import * as snapshots from './snapshots.js';
+import * as ollama from './ollama.js';
+
+// Errori di collegamento (Ollama spento, riavviato o irraggiungibile): non sono colpa del task e il coordinatore
+// non può farci niente. La coda del progetto aspetta Ollama e riparte da sola quando torna (watchServices).
+const SERVICE_ERROR = /fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|socket hang up|UND_ERR|other side closed/i;
+export const isServiceError = (msg) => SERVICE_ERROR.test(String(msg || ''));
+
+/** Mette il progetto in attesa di Ollama: il task torna in coda così com'è, senza consumare tentativi. */
+function waitForOllama(p, task) {
+  if (task) Object.assign(task, { status: 'queued', attempts: 0, error: null });
+  p.active = false;
+  const already = p.waitingService === 'ollama';
+  p.waitingService = 'ollama';
+  if (!already) {
+    projects.addLog(p, 'Ollama non risponde: la coda aspetta e riparte da sola quando torna raggiungibile');
+    projects.notify(p, { title: 'Ollama non risponde', body: 'La coda è in attesa: riparte da sola appena Ollama torna raggiungibile.', level: 'warn' });
+  }
+  projects.save(p);
+}
+
+/** Ogni minuto: i progetti in attesa di Ollama ripartono appena risponde. */
+async function watchServices() {
+  const waiting = projects.loadedProjects().filter((p) => p.waitingService === 'ollama');
+  if (!waiting.length || !(await ollama.isUp())) return;
+  for (const p of waiting) {
+    p.waitingService = null;
+    // un intervento del coordinatore rimasto a metà riparte prima della coda (sarà lui a farla ripartire)
+    const pending = p.tasks.find((t) => t.pendingCoordinator || ((t.status === 'failed' || t.status === 'error') && !t.coordinated && p.coordinator !== false && !t.skipped));
+    if (pending) {
+      delete pending.pendingCoordinator;
+      projects.addLog(p, 'Ollama di nuovo raggiungibile: il coordinatore riprende');
+      projects.save(p);
+      coordinate(p, pending).catch((e) => console.error('[coordinatore]', e.message));
+      continue;
+    }
+    projects.addLog(p, 'Ollama di nuovo raggiungibile: la coda riparte');
+    projects.notify(p, { title: 'la coda riparte', body: 'Ollama è di nuovo raggiungibile.', level: 'ok' });
+    if (p.tasks.some((t) => t.status === 'queued')) setActive(p, true);
+    else projects.save(p);
+  }
+}
+setInterval(() => watchServices().catch(() => {}), 60000).unref();
+export { watchServices };
 
 /**
  * Coda dei task dei progetti. Un task alla volta per tutto LocalAI: nei 16 GB di VRAM sta un solo modello,
@@ -201,6 +244,8 @@ async function runTask(p, task) {
     projects.save(p);
   };
   if (!owner) return finish('error', `«${task.title}»: utente non trovato`);
+  // Ollama spento: inutile partire (il task fallirebbe subito); la coda aspetta che torni
+  if (!(await ollama.isUp())) return waitForOllama(p, task);
 
   // fotografia prima del task (comprende anche le modifiche fatte a mano nel frattempo)
   task.snapBefore = (await projects.snap(owner, p, `Prima di «${task.title}»`))?.commit || null;
@@ -252,6 +297,7 @@ async function runTask(p, task) {
       const out = await chat.send(conv, { text, model: task.model, computer: true, priority: 'low' });
       msg = await out.finished;
     } catch (e) {
+      if (isServiceError(e.message)) return waitForOllama(p, task);
       task.error = e.message;
       return finish('error', `«${task.title}»: ${e.message}`);
     }
@@ -263,6 +309,7 @@ async function runTask(p, task) {
     }
     if (current.cancelled || msg.status === 'stopped') return finish('cancelled', `«${task.title}» fermato`);
     if (msg.status !== 'done') {
+      if (isServiceError(msg.error)) return waitForOllama(p, task);
       task.error = msg.error || 'Risposta non riuscita';
       return finish('error', `«${task.title}»: ${task.error}`);
     }
@@ -338,6 +385,8 @@ export async function coordinate(p, task) {
     projects.notify(p, { title: 'serve il tuo aiuto', body: `Il task «${task.title}» non riesce neanche dopo ${task.coordinated - 1} interventi del coordinatore. La coda è in pausa.`, level: 'warn' });
     return projects.save(p);
   }
+  // con Ollama spento il coordinatore non può lavorare: si aspetta che torni, senza contare l'intervento
+  if (!(await ollama.isUp())) { task.coordinated--; return waitForOllama(p); }
   const conv = await projectChat(p, owner);
   // se l'utente sta usando la chat del progetto si aspetta che finisca (massimo 15 minuti)
   for (let i = 0; chat.isRunning(conv.id) && i < 180; i++) await new Promise((r) => setTimeout(r, 5000));
@@ -349,6 +398,12 @@ export async function coordinate(p, task) {
     autoLabel: `Coordinatore: «${task.title}» ${task.status === 'failed' ? 'non ha superato la verifica' : 'si è fermato'}, controllo`,
   });
   const msg = await out.finished;
+  if (msg.status !== 'done' && isServiceError(msg.error)) {
+    // Ollama è caduto durante l'intervento: non conta, il coordinatore riprova quando Ollama torna
+    task.coordinated--;
+    task.pendingCoordinator = true;
+    return waitForOllama(p);
+  }
   projects.addLog(p, msg.status === 'done'
     ? `Coordinatore: intervento finito, ${p.active ? 'coda ripartita' : 'coda in pausa'}`
     : `Coordinatore non riuscito: ${msg.error || msg.status}`);
@@ -364,6 +419,7 @@ export async function coordinate(p, task) {
 export function setActive(p, on) {
   if (on) {
     if (!p.tasks.some((t) => t.status === 'queued')) throw new projects.ProjectError('Nessun task in coda');
+    p.waitingService = null;
     p.active = true;
     p.startedAt = Date.now();
     projects.addLog(p, 'Coda avviata');
