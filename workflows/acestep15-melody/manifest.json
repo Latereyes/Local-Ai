@@ -1,0 +1,26 @@
+{
+  "id": "acestep15-melody",
+  "name": "ACE-Step 1.5 (dalla melodia)",
+  "type": "audio",
+  "mode": "melody",
+  "default": true,
+  "description": "Musica da una melodia canticchiata: ACE-Step ne prende melodia e ritmo (modalità cover) e la arrangia nello stile chiesto, anche con voce e testo.",
+  "duration": { "default": 30, "min": 10, "max": 240 },
+  "params": {
+    "prompt": [{ "node": "5", "input": "tags" }],
+    "lyrics": [{ "node": "5", "input": "lyrics" }],
+    "seed": [{ "node": "5", "input": "seed" }, { "node": "8", "input": "seed" }],
+    "seconds": [{ "node": "5", "input": "duration" }, { "node": "7", "input": "seconds" }],
+    "bpm": [{ "node": "5", "input": "bpm" }],
+    "keyscale": [{ "node": "5", "input": "keyscale" }],
+    "language": [{ "node": "5", "input": "language" }],
+    "melody": [{ "node": "11", "input": "audio" }]
+  },
+  "requires": [
+    { "folder": "diffusion_models", "file": "acestep_v1.5_turbo.safetensors" },
+    { "folder": "text_encoders", "file": "qwen_0.6b_ace15.safetensors" },
+    { "folder": "text_encoders", "file": "qwen_1.7b_ace15.safetensors" },
+    { "folder": "vae", "file": "ace_1.5_vae.safetensors" }
+  ],
+  "nodes": ["LoadAudio", "VAEEncodeAudio", "ReferenceTimbreAudio"]
+}

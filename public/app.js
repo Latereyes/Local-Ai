@@ -21,6 +21,7 @@ const P = {
   close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
   trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
@@ -43,6 +44,9 @@ const P = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   terminal: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><path d="M12 15h5"/>',
   play: '<path d="M7 4v16l13-8z"/>',
+  audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
 const icon = (n, s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[n] || ''}</svg>`;
@@ -238,6 +242,7 @@ function newChat(push = true) {
   state.conv = null;
   state.computer = false;
   renderOpts();
+  renderConvProject();
   showView('chat');
   el.thread.innerHTML = '';
   el.welcome.hidden = false;
@@ -256,6 +261,7 @@ async function openConv(id, push = true) {
   state.conv = c;
   state.computer = !!c.computer;
   renderOpts();
+  renderConvProject();
   el.welcome.hidden = true;
   el.thread.innerHTML = '';
   for (const m of c.messages) renderMessage(m);
@@ -303,7 +309,10 @@ function renderMessage(m) {
   if (m.role === 'user') {
     if (node) return;
     if (m.auto) {
-      el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
+      // messaggi automatici: ripresa dopo le immagini, o il coordinatore della coda (con il dettaglio apribile)
+      el.thread.insertAdjacentHTML('beforeend', m.autoLabel
+        ? `<details class="msg msg-auto" id="m-${m.id}"><summary>${icon('refresh', 13)}${esc(m.autoLabel)}</summary><pre>${esc(m.content)}</pre></details>`
+        : `<div class="msg msg-auto" id="m-${m.id}">${icon('refresh', 13)}Immagini pronte: continuo il lavoro</div>`);
       return;
     }
     const TOOL_LABEL = { image: ['image', 'Immagine'], video: ['video', 'Video'], web: ['globe', 'Ricerca web'] };
@@ -311,7 +320,9 @@ function renderMessage(m) {
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
     const imgs = (m.attachments || []).map((a, i) => a.kind === 'document'
       ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : ''}</small></span></a>`
-      : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
+      : a.kind === 'audio'
+        ? `<div class="doc-chip tune-chip">${icon('mic', 18)}<span><b>Melodia canticchiata</b><small>${esc(melodyFacts(a))}</small></span><audio src="${esc(a.url)}" controls preload="none"></audio></div>`
+        : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
     el.thread.insertAdjacentHTML('beforeend', `<div class="msg msg-user" id="m-${m.id}">${imgs ? `<div class="user-images">${imgs}</div>` : ''}${m.content || tag ? `<div class="bubble">${tag}${esc(m.content)}</div>` : ''}</div>`);
     return;
   }
@@ -429,18 +440,20 @@ function wsUrl(p, download = false) {
   const ws = state.config?.workspace;
   if (!ws) return '#';
   const enc = String(p).split('/').map(encodeURIComponent).join('/');
-  return `${location.protocol}//${location.hostname}:${ws.port}/${ws.token}/${enc}${download ? '?download' : ''}`;
+  // in HTTPS (tailscale serve) i file passano da una porta HTTPS a parte: il browser non mescola http e https
+  const port = location.protocol === 'https:' && ws.httpsPort ? ws.httpsPort : ws.port;
+  return `${location.protocol}//${location.hostname}:${port}/${ws.token}/${enc}${download ? '?download' : ''}`;
 }
 function wsLinks(p, { dir = false, bare = false } = {}) {
   if (!p) return '';
-  const viewable = dir || /\.(html?|txt|md|json|css|js|py|ps1|bat|csv|svg|png|jpe?g|gif|webp|pdf)$/i.test(p);
+  const viewable = dir || /\.(html?|txt|md|json|css|js|py|ps1|bat|csv|svg|png|jpe?g|gif|webp|pdf|mp3|wav|ogg)$/i.test(p);
   const web = dir || /\.html?$/i.test(p);
   const links = `${viewable ? `<a href="${esc(wsUrl(dir ? `${p}/` : p))}" target="_blank" rel="noopener">${icon(web ? 'play' : 'open', 13)}${web ? 'Apri' : 'Vedi'}</a>` : ''}${dir ? '' : `<a href="${esc(wsUrl(p, true))}">${icon('download', 13)}Scarica</a>`}`;
   return bare ? links : `<span class="ws-links">${links}</span>`;
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -456,6 +469,36 @@ function renderComputer(node, m) {
     const spin = s.status === 'running' ? '<span class="spin"></span>' : '';
     const err = s.status === 'error' ? `<div class="step-err">${esc(s.error || 'non riuscito')}</div>` : '';
     if (s.type === 'file') {
+      if (s.action === 'audio') {
+        // musica ed effetti creati nella cartella di lavoro: generati a fine turno, poi si ascoltano qui
+        const what = s.kind === 'sfx' ? 'effetto sonoro' : 'musica';
+        const head = s.status === 'done' ? `Audio creato (${what})` : s.status === 'error' ? `Audio non creato (${what})` : `Genero ${s.kind === 'sfx' ? 'l\'effetto sonoro' : 'la musica'}…${s.progress ? ` ${s.progress}%` : ''}`;
+        const player = s.status === 'done' ? `<audio class="ws-audio" src="${esc(wsUrl(stepPath(s)))}" controls preload="none"></audio>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('audio', 14)}<span>${head}</span><b>${esc(s.path || '')}</b>${s.status === 'done' ? `<span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}` : spin}</div>${player}${err}</div>`;
+      }
+      if (s.action === 'tasks') {
+        // chat del progetto: task messi in coda
+        const head = s.status === 'error' ? 'Task non aggiunti' : s.status === 'done' ? `${s.tasks.length === 1 ? 'Task aggiunto' : `${s.tasks.length} task aggiunti`} alla coda${s.started ? ' · coda avviata' : s.active ? '' : ' · coda in pausa'}` : 'Aggiungo i task…';
+        const list = (s.tasks || []).map((t) => `<li>${esc(t.title)}</li>`).join('');
+        const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
+      }
+      if (s.action === 'history') {
+        const head = s.status === 'error' ? 'Storia del progetto non disponibile' : s.status === 'done' ? `Storia: ${esc(s.what || '')}` : 'Consulto la storia del progetto…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('refresh', 14)}<span>${head}</span>${spin}</div>${err}</div>`;
+      }
+      if (s.action === 'queue') {
+        const head = s.status === 'error' ? 'Coda non modificata' : s.status === 'done' ? `Coda: ${esc(s.what || '')}` : 'Gestisco la coda…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : ''}</div>${err}</div>`;
+      }
+      if (s.action === 'check') {
+        // chat del progetto: test e pagina nel browser, come la verifica della coda
+        const checks = (s.checks || []).map((c) => `<div class="${c.ok === true ? 'ws-ok' : c.ok === false ? 'step-err' : 'faint'}">${c.ok === true ? '✓' : c.ok === false ? '✗' : '–'} ${esc(c.summary)}</div>`).join('');
+        const head = s.status === 'done' ? 'Verifica del progetto' : s.status === 'error' ? 'Verifica non riuscita' : `Verifico il progetto${s.command ? ` (${esc(s.command)})` : ''}…`;
+        const judging = s.judging ? `<div class="faint"><span class="spin"></span> Un modello che legge le immagini guarda lo screenshot…</div>` : '';
+        const shot = s.shot ? `<a href="/media/${esc(s.shot)}" target="_blank" rel="noopener"><img class="ws-shot" src="/media/${esc(s.shot)}" alt="Screenshot" loading="lazy"></a>` : '';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('search', 14)}<span>${head}</span>${spin}</div>${checks || (s.status === 'done' ? '<div class="faint">Niente da verificare (nessun test e nessuna pagina)</div>' : '')}${judging}${shot}${err}</div>`;
+      }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
       const extra = s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
@@ -471,6 +514,50 @@ function renderComputer(node, m) {
     const out = s.output ? `<pre>${esc(s.output)}</pre>` : '';
     return `<div class="ws-act${s.status === 'confirm' ? ' confirm' : ''}"><div class="ws-act-head">${icon('terminal', 14)}<code>${esc(s.command)}</code>${where}${spin}${res}</div>${confirm}${out}${err}</div>`;
   }).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const op = e.target.closest('[data-open-project]');
+  if (op) { e.preventDefault(); openProject(op.dataset.openProject); }
+});
+
+/**
+ * Notifiche dei progetti: un avviso nell'app (clic = apri il progetto) e, se la scheda non è in primo piano
+ * e l'utente le ha permesse, una notifica di sistema.
+ */
+function showNotice(n) {
+  const box = $('#notices') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'notices', className: 'notices' }));
+  const el2 = document.createElement('button');
+  el2.className = `notice ${n.level || 'info'}`;
+  el2.innerHTML = `${icon(n.level === 'warn' ? 'alert' : n.level === 'ok' ? 'check' : 'folder', 16)}<span><b>${esc(n.project)}: ${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}</span>`;
+  const close = () => el2.remove();
+  el2.onclick = () => { close(); openProject(n.projectId); };
+  box.prepend(el2);
+  setTimeout(close, n.level === 'warn' ? 30000 : 10000);
+  if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const sys = new Notification(`${n.project}: ${n.title}`, { body: n.body || '', tag: `pj-${n.projectId}-${n.at}` });
+      sys.onclick = () => { window.focus(); openProject(n.projectId); sys.close(); };
+    } catch {}
+  }
+}
+
+/**
+ * Barra in cima alle chat dei progetti: di che progetto è, stato della coda e link al progetto.
+ * pj = riepilogo arrivato dagli eventi (altrimenti si chiede la lista dei progetti).
+ */
+async function renderConvProject(pj) {
+  const bar = $('#conv-project');
+  const c = state.conv;
+  if (!c?.projectChat || !c.project) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+  if (!pj) {
+    bar.innerHTML = `${icon('folder', 15)}<span>Chat del progetto <b>${esc(c.project.name)}</b></span><span class="grow"></span><button class="btn ghost" data-open-project="${esc(c.project.id)}">Apri il progetto</button>`;
+    pj = (await api('/api/projects').catch(() => [])).find((x) => x.id === c.project.id);
+    if (!pj || state.conv !== c) return;
+  }
+  const status = [pj.total ? `${pj.done} di ${pj.total} task fatti` : 'nessun task', pj.queued ? `${pj.queued} in coda` : '', pj.running ? `ora: ${pj.running}` : '', pj.waiting ? 'in attesa di Ollama' : pj.active ? 'coda attiva' : pj.queued ? 'coda in pausa' : ''].filter(Boolean).join(' · ');
+  bar.innerHTML = `${icon('folder', 15)}<span>Chat del progetto <b>${esc(c.project.name)}</b> <span class="faint">· ${esc(status)}</span></span><span class="grow"></span><button class="btn ghost" data-open-project="${esc(c.project.id)}">Apri il progetto</button>`;
 }
 
 document.addEventListener('click', async (e) => {
@@ -569,13 +656,16 @@ function renderMedia(msg, md) {
   }
   if (card.dataset.sig !== sig) {
     card.dataset.sig = sig;
-    card.style.maxWidth = `${Math.min(560, Math.round(460 * ratio))}px`;
-    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : ''].filter(Boolean).join(' · ');
+    const isAudio = md.type === 'audio';
+    card.style.maxWidth = `${isAudio ? 460 : Math.min(560, Math.round(460 * ratio))}px`;
+    const meta = [md.aspect, md.seconds ? `${md.seconds} s` : '', md.width && md.height ? `${md.width}×${md.height}` : '',
+      isAudio && md.mode !== 'sfx' ? [md.melodyFile ? 'dalla tua melodia' : '', md.bpm ? `${md.bpm} BPM` : '', md.keyscale, md.lyrics && md.lyrics !== '[Instrumental]' ? 'con voce' : 'strumentale'].filter(Boolean).join(' · ') : ''].filter(Boolean).join(' · ');
     let frame = '';
     if (md.status === 'done' && md.url) {
       frame = md.type === 'video'
         ? `<video src="${md.url}" controls playsinline preload="metadata" loop></video>`
-        : `<img class="result" src="${md.url}" alt="" loading="lazy">`;
+        : isAudio ? `<div class="audio-frame">${icon('audio', 22)}<audio src="${md.url}" controls preload="metadata"></audio></div>`
+          : `<img class="result" src="${md.url}" alt="" loading="lazy">`;
     } else if (['engineering', 'queued', 'running'].includes(md.status)) {
       const label = md.status === 'engineering' ? `Preparo il prompt per ${esc(md.workflowName)}…`
         : md.status === 'queued' ? 'In coda: attendo la GPU…' : '';
@@ -585,8 +675,9 @@ function renderMedia(msg, md) {
     }
     const showPrompt = md.status === 'engineering' || card.dataset.promptOpen === '1';
     card.innerHTML = `
-      <div class="media-head">${md.sourceUrl ? `<img class="src-thumb" src="${esc(md.sourceUrl)}" alt="" title="Immagine di partenza">` : icon(md.type, 15)}<span class="name">${esc(md.workflowName || '')}</span><span class="sep">·</span><span class="meta">${esc(meta)}</span><span class="grow"></span><span class="st">${statusText(md)}</span></div>
-      ${frame ? `<div class="media-frame" style="aspect-ratio:${md.width}/${md.height}">${frame}</div>` : ''}
+      <div class="media-head">${md.sourceUrl ? `<img class="src-thumb" src="${esc(md.sourceUrl)}" alt="" title="Immagine di partenza">` : icon(md.melodyFile ? 'mic' : md.type, 15)}<span class="name">${esc(md.workflowName || '')}</span><span class="sep">·</span><span class="meta">${esc(meta)}</span><span class="grow"></span><span class="st">${statusText(md)}</span></div>
+      ${frame ? `<div class="media-frame${isAudio ? ' audio' : ''}" style="${isAudio ? '' : `aspect-ratio:${md.width}/${md.height}`}">${frame}</div>` : ''}
+      ${isAudio && md.status === 'done' && md.lyrics && md.lyrics !== '[Instrumental]' ? `<details class="media-lyrics"><summary>Testo</summary><pre>${esc(md.lyrics)}</pre></details>` : ''}
       ${md.status === 'error' ? `<div class="media-error">${esc(md.error || 'Errore sconosciuto')}</div>` : ''}
       <div class="media-prompt" ${showPrompt ? '' : 'hidden'}><pre>${esc(md.prompt || md._draft || '')}</pre></div>
       ${mediaActions(md)}`;
@@ -601,7 +692,7 @@ function mediaActions(md) {
   const b = (act, ic, label) => `<button type="button" data-media-act="${act}">${icon(ic, 15)}${label}</button>`;
   if (md.status === 'engineering') return '';
   if (md.status === 'queued' || md.status === 'running') return `<div class="media-actions"><span class="grow"></span>${b('cancel', 'x', 'Annulla')}</div>`;
-  const ext = md.type === 'video' ? 'mp4' : 'png';
+  const ext = md.type === 'video' ? 'mp4' : md.type === 'audio' ? 'mp3' : 'png';
   return `<div class="media-actions">
     ${md.status === 'done' ? `<a href="${md.url}" download="localai-${md.id.slice(0, 8)}.${ext}">${icon('download', 15)}Scarica</a>` : ''}
     ${b('regenerate', 'refresh', md.status === 'done' ? 'Rigenera' : 'Riprova')}
@@ -682,8 +773,10 @@ function connectEvents() {
 
 function onEvent(evt) {
   if (evt.type === 'gpu') return renderGpu(evt.state);
+  if (evt.type === 'notify') return showNotice(evt);
   if (evt.type === 'project') {
     if (state.view === 'projects' && (!state.project || state.project.id === evt.project.id)) refreshProject();
+    if (state.conv?.projectChat && state.conv.project?.id === evt.project.id) renderConvProject(evt.project);
     return;
   }
   if (evt.type === 'title') {
@@ -786,8 +879,8 @@ function renderGpu(s) {
   let label;
   if (s.active) {
     pill.classList.add('busy', s.active.who === 'comfy' ? 'comfy' : 'ollama');
-    label = s.active.phase || (s.active.who === 'comfy' ? 'ComfyUI al lavoro' : 'Gemma al lavoro');
-  } else if (s.owner === 'ollama') { pill.classList.add('ollama'); label = 'Gemma in VRAM'; }
+    label = s.active.phase || (s.active.who === 'comfy' ? 'ComfyUI al lavoro' : `${s.active.model || 'Ollama'} al lavoro`);
+  } else if (s.owner === 'ollama') { pill.classList.add('ollama'); label = `${s.ollamaModel || 'Ollama'} in VRAM`; }
   else if (s.owner === 'comfy') { pill.classList.add('comfy'); label = 'ComfyUI in VRAM'; }
   else label = 'GPU libera';
   if (s.queued?.length) label += ` · +${s.queued.length} in coda`;
@@ -797,7 +890,7 @@ function renderGpu(s) {
 
 function renderGpuMenu() {
   const s = state.gpu || {};
-  const who = { ollama: 'Ollama (Gemma)', comfy: 'ComfyUI', none: '—' };
+  const who = { ollama: s.ollamaModel ? `Ollama (${s.ollamaModel})` : 'Ollama', comfy: 'ComfyUI', none: '—' };
   el.gpuMenu.innerHTML = `
     <div class="menu-note"><b>VRAM condivisa</b><br>Ollama e ComfyUI si alternano sulla GPU: quando uno serve, l'altro viene scaricato.</div>
     <div class="menu-sep"></div>
@@ -875,10 +968,13 @@ async function prepareImage(file) {
 const docType = (f) => (/\.pdf$/i.test(f.name) || f.type === 'application/pdf' ? 'application/pdf'
   : /\.(md|markdown)$/i.test(f.name) ? 'text/markdown' : /\.txt$/i.test(f.name) || f.type === 'text/plain' ? 'text/plain' : null);
 
+const isAudioFile = (f) => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|oga|opus|webm|flac|3gp|amr)$/i.test(f.name);
+
 async function addFiles(files) {
-  const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name) || docType(f));
+  const list = [...files].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name) || docType(f) || isAudioFile(f));
   for (const f of list) {
     if (state.attachments.length >= MAX_ATT) { alert(`Massimo ${MAX_ATT} allegati per messaggio`); break; }
+    if (isAudioFile(f) && !docType(f)) { await addMelody(f); continue; }
     const dt = docType(f);
     const att = { key: Math.random().toString(36).slice(2), preview: dt ? null : URL.createObjectURL(f), kind: dt ? 'document' : 'image', name: f.name };
     state.attachments.push(att);
@@ -913,25 +1009,134 @@ async function addFiles(files) {
 }
 
 function renderAttachments() {
-  attBox.hidden = !state.attachments.length;
-  attBox.innerHTML = state.attachments.map((a) => a.kind === 'document'
+  attBox.hidden = !state.attachments.length && !rec;
+  attBox.innerHTML = (rec ? `<div class="att att-doc att-rec">${icon('mic', 22)}<div class="att-doc-info"><b>Registro la melodia…</b><small class="rec-time">0:00 / ${clock(MELODY_MAX)}</small></div>
+      <button type="button" class="att-stop" data-rec-stop title="Ferma la registrazione">${icon('stop', 14)}</button></div>` : '')
+    + state.attachments.map((a) => a.kind === 'audio'
+    ? `<div class="att att-doc ${a.file ? '' : 'loading'}" data-key="${a.key}">${icon('mic', 22)}<div class="att-doc-info"><b>Melodia</b><small>${a.file ? esc(melodyFacts(a)) : 'analisi…'}</small></div>${a.file ? '' : '<span class="spin"></span>'}
+      <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`
+    : a.kind === 'document'
     ? `<div class="att att-doc ${a.file ? '' : 'loading'}" data-key="${a.key}">${icon('doc', 22)}<div class="att-doc-info"><b>${esc(a.name)}</b><small>${a.file ? `${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}` : 'lettura…'}</small></div>${a.file ? '' : '<span class="spin"></span>'}
       <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`
     : `<div class="att ${a.file ? '' : 'loading'}" data-key="${a.key}">
     <img src="${a.preview}" alt="">${a.file ? '' : '<span class="spin"></span>'}
     <button type="button" class="att-x" data-remove="${a.key}" title="Rimuovi">${icon('close', 12)}</button></div>`).join('');
   const hasDoc = state.attachments.some((a) => a.kind === 'document');
-  const hasImg = state.attachments.some((a) => a.kind !== 'document');
-  el.input.placeholder = hasDoc && !hasImg ? 'Chiedi di riassumerlo, analizzarlo o verificarlo sul web…'
+  const hasImg = state.attachments.some((a) => a.kind === 'image');
+  const hasTune = state.attachments.some((a) => a.kind === 'audio');
+  el.input.placeholder = hasTune && !hasImg && !hasDoc ? 'Che brano ne faccio? (es. rock con chitarre, piano malinconico, canzone pop con testo…)'
+    : hasDoc && !hasImg ? 'Chiedi di riassumerlo, analizzarlo o verificarlo sul web…'
     : hasImg ? 'Chiedi qualcosa sull\'immagine, o chiedi di modificarla o animarla…' : 'Scrivi un messaggio…';
   updateSend();
 }
 attBox.addEventListener('click', (e) => {
+  if (e.target.closest('[data-rec-stop]')) return stopRecording();
   const k = e.target.closest('[data-remove]')?.dataset.remove;
   if (!k) return;
   state.attachments = state.attachments.filter((a) => a.key !== k);
   renderAttachments();
 });
+// ---------- Melodia canticchiata ----------
+// Registrata nel browser (o scelta tra i file audio), convertita in WAV mono e analizzata dal server
+// (src/melody.js: tonalità e tempo). ACE-Step la usa come melodia del brano (workflow acestep15-melody).
+const MELODY_MAX = 60;
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const melodyFacts = (a) => [clock(a.seconds || 0), a.key, a.bpm ? `~${a.bpm} BPM` : ''].filter(Boolean).join(' · ');
+const humInput = $('#hum-input');
+let rec = null; // { recorder, stream, chunks, t0, timer }
+
+/** WAV mono a 16 bit dall'audio decodificato dal browser (massimo MELODY_MAX secondi). */
+function toWav(buf) {
+  const n = Math.min(buf.length, Math.floor(MELODY_MAX * buf.sampleRate));
+  const mono = new Float32Array(n);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += d[i] / buf.numberOfChannels;
+  }
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, s) => [...s].forEach((ch, i) => out.setUint8(o + i, ch.charCodeAt(0)));
+  str(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, buf.sampleRate, true); out.setUint32(28, buf.sampleRate * 2, true);
+  out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, 'data'); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, mono[i])) * 32767, true);
+  return new Blob([out], { type: 'audio/wav' });
+}
+
+/** Aggiunge una melodia (registrazione o file audio): una sola per messaggio, la nuova sostituisce la vecchia. */
+async function addMelody(blob) {
+  state.attachments = state.attachments.filter((a) => a.kind !== 'audio');
+  if (state.attachments.length >= MAX_ATT) { alert(`Massimo ${MAX_ATT} allegati per messaggio`); return; }
+  const att = { key: Math.random().toString(36).slice(2), kind: 'audio', name: 'Melodia' };
+  state.attachments.push(att);
+  renderAttachments();
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    let decoded;
+    try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+    catch { throw new Error('Formato audio non supportato dal browser'); }
+    finally { ctx.close?.(); }
+    const res = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: toWav(decoded) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Caricamento non riuscito');
+    Object.assign(att, data);
+  } catch (err) {
+    state.attachments = state.attachments.filter((a) => a !== att);
+    alert(err.message);
+  }
+  renderAttachments();
+}
+
+async function startRecording() {
+  let stream;
+  try {
+    // senza cancellazione dell'eco e riduzione del rumore: tendono a cancellare le note tenute
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+  } catch (err) {
+    alert(err.name === 'NotAllowedError' ? 'Permesso del microfono negato: consentilo dalle impostazioni del sito.' : `Microfono non disponibile (${err.message})`);
+    return;
+  }
+  const recorder = new MediaRecorder(stream);
+  rec = { recorder, stream, chunks: [], t0: Date.now() };
+  recorder.ondataavailable = (e) => { if (e.data.size) rec?.chunks.push(e.data); };
+  recorder.onstop = () => {
+    const { chunks, stream: s, timer } = rec;
+    clearInterval(timer);
+    s.getTracks().forEach((t) => t.stop());
+    rec = null;
+    $('#btn-hum').classList.remove('on');
+    renderAttachments();
+    if (chunks.length) addMelody(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+  };
+  recorder.start(250);
+  $('#btn-hum').classList.add('on');
+  renderAttachments();
+  rec.timer = setInterval(() => {
+    const s = (Date.now() - rec.t0) / 1000;
+    const t = attBox.querySelector('.rec-time');
+    if (t) t.textContent = `${clock(s)} / ${clock(MELODY_MAX)}`;
+    if (s >= MELODY_MAX) stopRecording();
+  }, 250);
+}
+
+function stopRecording() {
+  if (rec?.recorder.state === 'recording') rec.recorder.stop();
+}
+
+// Il microfono nel browser richiede HTTPS (o localhost): altrimenti si apre il registratore del telefono o la scelta di un file
+$('#btn-hum').onclick = () => {
+  if (rec) return stopRecording();
+  if (window.isSecureContext && navigator.mediaDevices?.getUserMedia && window.MediaRecorder) return startRecording();
+  humInput.click();
+};
+humInput.onchange = () => { if (humInput.files[0]) addMelody(humInput.files[0]); humInput.value = ''; };
+
+/** Il tasto melodia compare solo se su ComfyUI c'è il workflow che la usa. */
+function updateHum() {
+  $('#btn-hum').hidden = !(state.config?.workflows || []).some((w) => w.type === 'audio' && w.mode === 'melody' && w.available !== false);
+}
+
 $('#btn-attach').onclick = () => fileInput.click();
 $('#btn-camera').onclick = () => cameraInput.click();
 for (const inp of [fileInput, cameraInput]) inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
@@ -950,6 +1155,9 @@ dropZone.addEventListener('drop', (e) => {
 });
 
 function renderOpts() {
+  updateHum();
+  // le chat dei progetti lavorano sempre nella cartella del progetto: niente interruttore Computer
+  $('#chip-computer').hidden = !!state.conv?.projectChat;
   $$('.chip[data-tool]').forEach((c) => c.classList.toggle('on', c.dataset.tool === state.tool));
   $('#chip-think').classList.toggle('on', state.think);
   $('#chip-computer').classList.toggle('on', state.computer);
@@ -1060,7 +1268,7 @@ async function openGallery(push = true) {
   renderConvList();
   if (push) history.pushState(null, '', '/galleria');
   document.title = 'Galleria · LocalAI';
-  const items = await api('/api/media').catch(() => []);
+  const items = (await api('/api/media').catch(() => [])).filter((m) => m.type !== 'audio');
   state.gallery = items;
   el.gallery.innerHTML = items.length
     ? items.map((m, i) => `<div class="tile" data-i="${i}">${m.type === 'video'
@@ -1093,7 +1301,7 @@ async function openProjects(push = true) {
     <p class="faint-note" style="margin:0">Ogni progetto ha la sua cartella sul PC, un piano e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici. Le cartelle create in chat con <b>Computer</b> compaiono qui.</p>
     <div class="pj-new"><input id="pj-name" placeholder="Nome del nuovo progetto (es. Tetris, Sito ristorante)" maxlength="80"><button class="btn primary" id="pj-create">Crea progetto</button></div>
     ${list.length ? list.map((p) => `<button class="project pj-row" data-open="${esc(p.id)}">
-      <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}</h3>
+      <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait">in attesa di Ollama</span>' : ''}</h3>
       <div class="faint-note" style="margin:0">${p.total ? `${p.done} di ${p.total} task fatti${p.queued ? ` · ${p.queued} in coda` : ''}${p.failed ? ` · ${p.failed} non riusciti` : ''}` : 'Nessun task'}${p.running ? ` · ora: ${esc(p.running)}` : ''} · ${when(p.updatedAt)}</div>
     </button>`).join('') : '<div class="empty">Ancora nessun progetto. Creane uno qui sopra, oppure in una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>'}`;
   const create = async () => {
@@ -1132,7 +1340,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
@@ -1148,12 +1356,12 @@ function renderTask(t, i, p) {
       <span class="pj-num">${i + 1}</span>
       <select data-task-type="${t.id}" ${busy ? 'disabled' : ''} title="Tipo: decide il modello">${Object.entries(p.types).map(([k, v]) => `<option value="${k}" ${k === t.type ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <button class="pj-title" data-toggle="${t.id}">${esc(t.title)}</button>
-      <span class="pj-status">${busy ? '<span class="spin"></span>' : ''}${TASK_STATUS[t.status] || t.status}${t.attempts > 1 || (t.attempts && t.status !== 'done') ? ` · ${t.attempts} tent.` : ''}</span>
+      <span class="pj-status">${busy ? '<span class="spin"></span>' : ''}${t.status === 'done' && t.doneBy ? 'Fatto dalla chat' : t.status === 'done' && t.fixedBy ? `Fatto · sistemato ${t.fixedBy === 'coordinator' ? 'dal coordinatore' : 'dalla chat'}` : TASK_STATUS[t.status] || t.status}${t.attempts > 1 || (t.attempts && t.status !== 'done') ? ` · ${t.attempts} tent.` : ''}</span>
       <span class="pj-acts">${busy ? btn('stop', 'stop', 'Ferma') : `${btn('up', 'chevron', 'Su')}${['done', 'queued'].includes(t.status) ? '' : btn('retry', 'refresh', 'Rimetti in coda')}${t.status === 'done' ? btn('retry', 'refresh', 'Rifai') : ''}${btn('delete', 'trash', 'Elimina')}`}</span>
     </div>
     ${open ? `<div class="pj-task-body">
       <div class="pj-text">${esc(t.text)}</div>
-      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}</div>
+      <div class="faint">${t.model ? `Modello: ${esc(modelLabel(t.model))}` : `Modello previsto: ${esc(modelLabel(p.models[t.type]))}`}${t.conversationId ? ` · <a href="/c/${t.conversationId}" data-conv="${t.conversationId}">apri la chat del task</a>` : ''}${t.fromChat ? ` · <a href="/c/${t.fromChat}" data-conv="${t.fromChat}">chiesto in chat</a>` : ''}${!busy && !['done'].includes(t.status) ? ` · <button class="linkish" data-task="${t.id}" data-act="skip">segna come fatto</button>` : ''}${!busy && t.snapBefore && t.snapAfter && t.snapBefore !== t.snapAfter && !/annullate/.test(t.error || '') ? ` · <button class="linkish" data-task="${t.id}" data-act="undo">annulla le modifiche di questo task</button>` : ''}</div>
       ${t.error ? `<div class="step-err">${esc(t.error)}</div>` : ''}
       ${t.summary ? `<div class="pj-summary">${esc(t.summary)}</div>` : ''}
       ${(t.checks || []).map(renderCheck).join('')}
@@ -1174,12 +1382,21 @@ function renderProject() {
     <div class="pj-head">
       <button class="btn ghost" data-back>${icon('right', 14)}Progetti</button>
       <h2>${esc(p.name)}</h2>
-      ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}
+      ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait" title="Ollama non risponde: la coda riparte da sola quando torna">in attesa di Ollama</span>' : ''}
       <span class="spacer"></span>
       ${hasIndex ? `<a class="btn" href="${esc(wsUrl(`${p.folder}/index.html`))}" target="_blank" rel="noopener">${icon('play', 14)}Apri</a>` : ''}
       ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}
       <button class="btn ghost" data-pj="delete" title="Elimina progetto e cartella">${icon('trash', 14)}</button>
     </div>
+    <section class="pj-card pj-talk">
+      <div class="pj-card-head"><h3>Parla con il progetto</h3><span class="faint">domande, modifiche e nuove funzioni: le piccole le fa subito, le grandi diventano task della coda</span></div>
+      <div class="pj-add">
+        <textarea id="pj-ask" rows="2" placeholder="Es. «aggiungi un tasto pausa», «il punteggio non sale quando completo una riga», «come funziona il salvataggio?»"></textarea>
+        <button class="btn primary" data-pj="ask">Invia</button>
+      </div>
+      ${(p.chats || []).length ? `<div class="pj-chats">${p.chats.slice(0, 5).map((c, i) => `<a href="/c/${c.id}" data-conv="${c.id}">${icon('chat', 13)}${esc(c.title)}<span class="faint">${c.running ? 'risponde…' : when(c.updatedAt)}${i === 0 ? ' · i nuovi messaggi vanno qui' : ''}</span></a>`).join('')}<button class="linkish" data-pj="new-chat">Nuova chat del progetto</button></div>` : ''}
+    </section>
+
     <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge.</p>
 
     <section class="pj-card">
@@ -1201,6 +1418,10 @@ function renderProject() {
     <section class="pj-card">
       <div class="pj-card-head"><h3>Verifica</h3></div>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
+      <label class="pj-check-opt">Tentativi per task prima di fermarsi (o di chiamare il coordinatore): <select id="pj-attempts">${[['', `predefinito (${p.defaultAttempts})`], ...[1, 2, 3, 4, 5].map((n) => [n, n])].map(([v, l]) => `<option value="${v}" ${String(p.maxAttempts || '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
       <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
     </section>
@@ -1208,6 +1429,13 @@ function renderProject() {
     <section class="pj-card">
       <div class="pj-card-head"><h3>File</h3><span class="faint">${files.length}</span></div>
       ${files.length ? files.map((f) => `<div class="project-file"><span class="name">${esc(f.path)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(`${p.folder}/${f.path}`)}</div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
+    </section>
+
+    <section class="pj-card">
+      <div class="pj-card-head"><h3>Storia della cartella</h3><span class="faint">fotografie prima e dopo ogni task e ogni modifica dalla chat</span></div>
+      ${!p.git ? '<div class="faint-note" style="margin:0">Git non è installato sul PC: senza, i task non si possono annullare. Installalo da git-scm.com e riavvia LocalAI.</div>'
+        : p.history.length ? p.history.map((h, i) => `<div class="pj-ver"><span class="faint">${when(h.at)}</span><span class="name">${esc(h.message)}</span><span class="faint">${h.files} file</span>${i ? `<button class="linkish" data-restore="${h.commit}" data-label="${esc(h.message)}">ripristina</button>` : '<span class="faint">attuale</span>'}</div>`).join('')
+        : '<div class="faint-note" style="margin:0">La prima fotografia si fa al primo task o al primo messaggio nella chat del progetto.</div>'}
     </section>
 
     <section class="pj-card">
@@ -1249,9 +1477,15 @@ el.projects.addEventListener('click', async (e) => {
   if (!p) return;
   const base = `/api/projects/${encodeURIComponent(p.id)}`;
   const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } } catch (err) { alert(err.message); } };
+  const rs = e.target.closest('[data-restore]');
+  if (rs) {
+    if (!confirm(`Riportare la cartella alla versione «${rs.dataset.label}»? Lo stato attuale resta nella storia e si può ripristinare.`)) return;
+    return run(() => api(`${base}/restore`, { body: { commit: rs.dataset.restore } }));
+  }
   const tb = e.target.closest('[data-task]');
   if (tb) {
     if (tb.dataset.act === 'delete' && !confirm('Eliminare questo task?')) return;
+    if (tb.dataset.act === 'undo' && !confirm('Riportare la cartella a com\'era prima di questo task? Spariscono anche le modifiche fatte dopo (restano nella storia e si possono ripristinare).')) return;
     return run(() => api(`${base}/tasks/${tb.dataset.task}`, { body: { action: tb.dataset.act } }));
   }
   const b = e.target.closest('[data-pj]');
@@ -1279,11 +1513,26 @@ el.projects.addEventListener('click', async (e) => {
       if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
       return;
     }
+    case 'ask': case 'new-chat': {
+      // la richiesta va nella chat del progetto (l'ultima, o una nuova): lì l'AI lavora nella cartella e aggiunge i task
+      const text = b.dataset.pj === 'ask' ? $('#pj-ask').value.trim() : '';
+      if (b.dataset.pj === 'ask' && !text) return $('#pj-ask').focus();
+      try {
+        const { id } = await api(`${base}/chat`, { body: { new: b.dataset.pj === 'new-chat' } });
+        await openConv(id);
+        if (text) await sendMessage(text, null);
+        else el.input.focus();
+      } catch (err) { alert(err.message); }
+      return;
+    }
     case 'add-task': {
       const text = $('#pj-task-text').value.trim();
       if (!text) return $('#pj-task-text').focus();
       return run(() => api(`${base}/tasks`, { body: { text, type: $('#pj-task-type').value || undefined } }));
     }
+    case 'notify':
+      try { await Notification.requestPermission(); } catch {}
+      return renderProject();
     case 'save-test': return run(() => api(base, { method: 'PATCH', body: { testCommand: $('#pj-testcmd').value } }));
     case 'vision':
       b.disabled = true;
@@ -1302,6 +1551,9 @@ el.projects.addEventListener('change', (e) => {
   const sel = e.target.closest('[data-task-type]');
   if (sel) api(`${base}/tasks/${sel.dataset.taskType}`, { body: { action: 'type', type: sel.value } }).then((out) => { state.project = out; renderProject(); }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autotest') api(base, { method: 'PATCH', body: { autoTest: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-attempts') api(base, { method: 'PATCH', body: { maxAttempts: e.target.value || 0 } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
 });
 
 // ---------- Lightbox ----------
@@ -1426,7 +1678,7 @@ async function openUsers() {
   renderWorkflows(state.config?.workflows || []);
   await renderUsers();
 }
-const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini' };
+const MODE_LABEL = { text2img: 'testo → immagine', img2img: 'rielaborazione', edit: 'editing', identity: 'volto di riferimento', scene: 'stessa persona, nuova scena', upscale: 'upscale', text2video: 'testo → video', img2video: 'immagine → video', vision: 'lettura immagini', music: 'testo → musica', sfx: 'effetti sonori' };
 function renderWorkflows(list) {
   $('#wf-list').innerHTML = list.map((w) => `<div class="wf-row ${w.available ? '' : 'off'}">
     <span class="wf-dot"></span><div><b>${esc(w.name)}</b> <small>${esc(MODE_LABEL[w.mode] || w.mode)}</small>

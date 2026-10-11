@@ -182,7 +182,7 @@ export async function run(graph, { onEvent = () => {}, signal } = {}) {
   const files = [];
   const texts = [];
   for (const out of Object.values(outputs)) {
-    for (const key of ['images', 'gifs', 'videos', 'video']) {
+    for (const key of ['images', 'gifs', 'videos', 'video', 'audio']) {
       for (const f of out[key] || []) if (f?.filename && f.type === 'output') files.push(f);
     }
     for (const t of out.text || []) if (typeof t === 'string') texts.push(t);
@@ -195,9 +195,15 @@ export async function listModels(folder) {
   return api(`/models/${encodeURIComponent(folder)}`, { signal: AbortSignal.timeout(8000) });
 }
 
-/** Carica un'immagine nella cartella input di ComfyUI (sovrascrive se esiste). */
+/** true se ComfyUI ha il nodo (classe), false se manca; errore se ComfyUI non risponde. */
+export async function hasNode(name) {
+  const info = await api(`/object_info/${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(8000) });
+  return !!info?.[name];
+}
+
+/** Carica un file (immagine o audio) nella cartella input di ComfyUI (sovrascrive se esiste). */
 export async function uploadImage(buffer, filename) {
-  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : 'image/jpeg';
+  const type = /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.wav$/i.test(filename) ? 'audio/wav' : 'image/jpeg';
   const fd = new FormData();
   fd.append('image', new Blob([buffer], { type }), filename);
   fd.append('overwrite', 'true');

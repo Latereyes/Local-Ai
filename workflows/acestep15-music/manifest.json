@@ -1,0 +1,24 @@
+{
+  "id": "acestep15-music",
+  "name": "ACE-Step 1.5 (musica)",
+  "type": "audio",
+  "mode": "music",
+  "default": true,
+  "description": "Musica da testo: brani strumentali o canzoni con voce e testo, con BPM e tonalità a scelta. Basi per giochi, video, sottofondi, jingle.",
+  "duration": { "default": 60, "min": 10, "max": 240 },
+  "params": {
+    "prompt": [{ "node": "5", "input": "tags" }],
+    "lyrics": [{ "node": "5", "input": "lyrics" }],
+    "seed": [{ "node": "5", "input": "seed" }, { "node": "8", "input": "seed" }],
+    "seconds": [{ "node": "5", "input": "duration" }, { "node": "7", "input": "seconds" }],
+    "bpm": [{ "node": "5", "input": "bpm" }],
+    "keyscale": [{ "node": "5", "input": "keyscale" }],
+    "language": [{ "node": "5", "input": "language" }]
+  },
+  "requires": [
+    { "folder": "diffusion_models", "file": "acestep_v1.5_turbo.safetensors" },
+    { "folder": "text_encoders", "file": "qwen_0.6b_ace15.safetensors" },
+    { "folder": "text_encoders", "file": "qwen_1.7b_ace15.safetensors" },
+    { "folder": "vae", "file": "ace_1.5_vae.safetensors" }
+  ]
+}
