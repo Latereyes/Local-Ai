@@ -825,7 +825,7 @@ export async function send(conv, opts) {
           md.prompt = byCall.get(md.callIndex);
           emitMedia(conv, msg, md);
         }
-      }, { priority: opts.priority || 'high', onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
+      }, { priority: opts.priority || 'high', model: assistantName, onWait: (active) => emit(conv.id, { type: 'status', messageId: msg.id, status: 'waiting', reason: active.label }) });
 
       // Audio chiesti con create_audio_file: si generano ora che la chat ha lasciato la GPU (nei progetti
       // la verifica del task parte dopo, con i file già nella cartella)

@@ -798,8 +798,8 @@ function renderGpu(s) {
   let label;
   if (s.active) {
     pill.classList.add('busy', s.active.who === 'comfy' ? 'comfy' : 'ollama');
-    label = s.active.phase || (s.active.who === 'comfy' ? 'ComfyUI al lavoro' : 'Gemma al lavoro');
-  } else if (s.owner === 'ollama') { pill.classList.add('ollama'); label = 'Gemma in VRAM'; }
+    label = s.active.phase || (s.active.who === 'comfy' ? 'ComfyUI al lavoro' : `${s.active.model || 'Ollama'} al lavoro`);
+  } else if (s.owner === 'ollama') { pill.classList.add('ollama'); label = `${s.ollamaModel || 'Ollama'} in VRAM`; }
   else if (s.owner === 'comfy') { pill.classList.add('comfy'); label = 'ComfyUI in VRAM'; }
   else label = 'GPU libera';
   if (s.queued?.length) label += ` · +${s.queued.length} in coda`;
@@ -809,7 +809,7 @@ function renderGpu(s) {
 
 function renderGpuMenu() {
   const s = state.gpu || {};
-  const who = { ollama: 'Ollama (Gemma)', comfy: 'ComfyUI', none: '—' };
+  const who = { ollama: s.ollamaModel ? `Ollama (${s.ollamaModel})` : 'Ollama', comfy: 'ComfyUI', none: '—' };
   el.gpuMenu.innerHTML = `
     <div class="menu-note"><b>VRAM condivisa</b><br>Ollama e ComfyUI si alternano sulla GPU: quando uno serve, l'altro viene scaricato.</div>
     <div class="menu-sep"></div>
