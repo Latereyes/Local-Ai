@@ -706,8 +706,11 @@ async function judgeProjectPage(conv, msg, step, owner, request) {
   return followup;
 }
 
+/** Chiamata come l'ha scritta il modello (argomenti già letti). */
+const fullCall = (c) => ({ function: { name: c.function.name, arguments: parseArgs(c.function.arguments) } });
+
 /** Argomenti della chiamata da tenere nella cronologia del turno: il contenuto dei file scritti è già su disco. */
-function compactCall(c) {
+export function compactCall(c) {
   const a = { ...parseArgs(c.function.arguments) };
   if ((c.function.name === 'write_file' || c.function.name === 'append_file') && typeof a.content === 'string' && a.content.length > 400) {
     // non è contenuto da copiare: se il modello lo riscrive in un file, workspace.writeFile lo rifiuta
@@ -1243,7 +1246,11 @@ export async function send(conv, opts) {
             msg.content = msg.content.slice(0, contentStart);
             emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
           }
-          convo.push({ role: 'assistant', content: result.content || '', tool_calls: webCalls.map(compactCall) });
+          // Le scritture dei giri precedenti si accorciano; quelle dell'ultimo giro restano intere. Libro mindfulness
+          // (2026-10-12): scrivendo più capitoli di fila, Gemma vedeva la propria scrittura precedente ridotta al
+          // segnaposto «omessi N caratteri…» e la imitava nel capitolo successivo, finché il task si fermava.
+          for (const m of convo) if (m.role === 'assistant' && m.tool_calls) m.tool_calls = m.tool_calls.map(compactCall);
+          convo.push({ role: 'assistant', content: result.content || '', tool_calls: webCalls.map(fullCall) });
           const searches = webCalls.filter((c) => c.function.name === 'web_search').map((c) => parseArgs(c.function.arguments).query).filter(Boolean);
           if (searches.length) focusQuery = `${text} ${searches.join(' ')}`;
           const reads = webCalls.filter((c) => c.function.name === 'read_webpage').length;

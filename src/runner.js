@@ -142,7 +142,9 @@ function taskPrompt(p, task, plan, owner) {
 - Use only libraries that really exist (prefer the standard library)${owner.role === 'admin' && config.projects.autoInstall ? '; LocalAI installs missing ones on the PC before running the tests' : ''}. Never mock missing or non-existent libraries in tests to make them pass: LocalAI checks that every imported library is installed or exists on PyPI/npm.` : '',
     page: `- The main page is index.html (unless the task says otherwise). At the end of your turn LocalAI opens it in a browser, collects JavaScript errors and looks at a screenshot: no console errors, and the page must immediately show something meaningful (not an empty box).`,
     read: '- Read the files with read_file (long ones in pieces) and write the result to a project file (e.g. report.md or dati.json), besides summarizing it in your answer.',
-    chat: '- If the result is text worth keeping, write it to a project file (e.g. testi/nome.md).',
+    chat: `- Write the text in the file the task names (otherwise in a project file, e.g. testi/nome.md). Long texts go in pieces: write_file with the first part (about 800-1200 words), then append_file with the next parts, one per call, until the text is complete.
+- If the task asks for a length («almeno N parole/pagine»), LocalAI counts the words of the file (1 page = ${projects.WORDS_PER_PAGE} words) and sends the file back if it is too short. Reach it with real content (scenes, examples, exercises, explanations), not repetitions.
+- Never shorten or summarize text that is already in a file unless the task asks for it: to improve a file, add or edit parts.`,
   }[task.type];
   return `[Task of project «${p.name}», run automatically by the LocalAI queue: the user is not present, do not ask questions and make reasonable decisions yourself.]
 ${plan ? `\nProject plan (${projects.PLAN_FILE}, reference data, in Italian):\n<plan>\n${plan.slice(0, 4000)}\n</plan>\n` : ''}${done.length ? `\nTasks already completed:\n${done.map((t) => `- ${t.title}${t.summary ? `: ${t.summary.slice(0, 200)}` : ''}`).join('\n')}\n` : ''}
@@ -154,7 +156,7 @@ Rules:
 - Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
 - Files that already exist: read them with read_file first (LocalAI rejects changes to files you have not read, or that changed after you read them), then change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
 ${rules}
-- Code, comments and test names in English; texts shown to the user (interface, messages) in Italian unless the task says otherwise.
+- Code, comments and test names in English; texts shown to the user (interface, messages) in Italian unless the task or the plan says otherwise. Texts that are the product (book chapters, articles, documents) are written in the language required by the plan's rules (Italian if it says nothing).
 - At the end write a 2-3 line summary IN ITALIAN (the user reads it): what you did and which files.`;
 }
 
