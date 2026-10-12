@@ -407,6 +407,16 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       }
       case 'write_file': {
         requireObserved(conv, user, step.path);
+        // testi dei task: write_file non sostituisce un testo lungo con uno molto più corto (libro mindfulness 2026-10-12:
+        // Gemma riscriveva da capo le conclusioni, da 14.700 a 5.300 byte). Per continuare c'è append_file.
+        if (conv.project && !conv.projectChat && /\.(md|markdown|txt)$/i.test(step.path)) {
+          const old = await workspace.readFile(user, step.path).catch(() => null);
+          const before = projects.countWords(old?.text || '');
+          const after = projects.countWords(args.content);
+          if (before >= 300 && after < before * 0.7) {
+            throw new workspace.WorkspaceError(`${step.path} already has ${before} words: this write_file would replace it with ${after} words and lose text. To continue the text use append_file; to change one part use edit_file. If the file is complete, finish with your summary.`);
+          }
+        }
         const r = await workspace.writeFile(user, step.path, args.content);
         observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
@@ -737,6 +747,23 @@ async function judgeProjectPage(conv, msg, step, owner, request) {
   delete step.judging;
   emit(conv.id, { type: 'step', messageId: msg.id, step });
   return followup;
+}
+
+/**
+ * Accorcia le scritture (write_file, append_file) nella cronologia, dalla più vecchia, finché il loro contenuto intero
+ * sta in budget caratteri. Le chiamate dell'ultimo messaggio dell'assistente restano intere.
+ */
+export function compactWrites(convo, budget) {
+  const calls = convo.filter((m) => m.role === 'assistant' && m.tool_calls).flatMap((m, i, all) => m.tool_calls.map((c, j) => ({ m, j, last: i === all.length - 1 })));
+  const size = (c) => { const a = c.m.tool_calls[c.j].function.arguments; return typeof a?.content === 'string' ? a.content.length : 0; };
+  let total = calls.reduce((n, c) => n + size(c), 0);
+  for (const c of calls) {
+    if (total <= budget) break;
+    if (c.last) continue;
+    const before = size(c);
+    c.m.tool_calls[c.j] = compactCall(c.m.tool_calls[c.j]);
+    total -= before - size(c);
+  }
 }
 
 /** Chiamata come l'ha scritta il modello (argomenti già letti). */
@@ -1293,11 +1320,12 @@ ${mem.text}`;
             msg.content = msg.content.slice(0, contentStart);
             emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
           }
-          // Le scritture dei giri precedenti si accorciano; quelle dell'ultimo giro restano intere. Libro mindfulness
-          // (2026-10-12): scrivendo più capitoli di fila, Gemma vedeva la propria scrittura precedente ridotta al
-          // segnaposto «omessi N caratteri…» e la imitava nel capitolo successivo, finché il task si fermava.
-          for (const m of convo) if (m.role === 'assistant' && m.tool_calls) m.tool_calls = m.tool_calls.map(compactCall);
+          // Le scritture del turno restano intere finché stanno in un quarto della finestra di contesto; oltre, si accorciano
+          // le più vecchie (l'ultima resta sempre intera). Libro mindfulness (2026-10-12): vedendo le proprie scritture
+          // ridotte al segnaposto «omessi N caratteri…», Gemma (12B e anche 26B) lo imitava nel file successivo o
+          // nell'append_file seguente, finché il task si fermava.
           convo.push({ role: 'assistant', content: result.content || '', tool_calls: webCalls.map(fullCall) });
+          compactWrites(convo, ctx.charsFor(numCtx * 0.25, model));
           const searches = webCalls.filter((c) => c.function.name === 'web_search').map((c) => parseArgs(c.function.arguments).query).filter(Boolean);
           if (searches.length) focusQuery = `${text} ${searches.join(' ')}`;
           const reads = webCalls.filter((c) => c.function.name === 'read_webpage').length;

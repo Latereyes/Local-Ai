@@ -209,3 +209,21 @@ test('textCheck: il solo file nominato dal task si controlla anche se lo ha scri
   assert.equal(r.checks[0].ok, false);
   assert.match(r.problems[0], /1374 words/);
 });
+
+test('compactWrites: le scritture restano intere finché stanno nel budget, poi si accorciano le più vecchie', () => {
+  const w = (path, n) => ({ function: { name: 'write_file', arguments: { path, content: 'x'.repeat(n) } } });
+  const convo = [
+    { role: 'user', content: 'scrivi' },
+    { role: 'assistant', content: '', tool_calls: [w('a.md', 3000)] },
+    { role: 'tool', content: 'ok' },
+    { role: 'assistant', content: '', tool_calls: [w('b.md', 3000)] },
+    { role: 'tool', content: 'ok' },
+    { role: 'assistant', content: '', tool_calls: [w('c.md', 3000)] },
+  ];
+  chat.compactWrites(convo, 10000);
+  assert.ok(convo.every((m) => !m.tool_calls || m.tool_calls[0].function.arguments.content.length === 3000), 'nel budget: tutto intero');
+  chat.compactWrites(convo, 5000);
+  assert.match(convo[1].tool_calls[0].function.arguments.content, /^«omessi 3000 caratteri/);
+  assert.match(convo[3].tool_calls[0].function.arguments.content, /^«omessi 3000 caratteri/);
+  assert.equal(convo[5].tool_calls[0].function.arguments.content.length, 3000, 'l\'ultima resta intera');
+});
