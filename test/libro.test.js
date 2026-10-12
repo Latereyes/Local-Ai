@@ -201,3 +201,11 @@ test('singleFile: il file da scrivere di un task, se è uno solo (Gemma manda wr
   assert.equal(chat.singleFile('Scrivi cap_01.md e cap_02.md'), null);
   assert.equal(chat.singleFile('Scrivi un capitolo'), null);
 });
+
+test('textCheck: il solo file nominato dal task si controlla anche se lo ha scritto la chat del progetto', () => {
+  const read = (f) => (f === '03_relationships.md' ? 'word '.repeat(1374) : null);
+  const r = projects.textCheck('Scrivere il Capitolo 3 in `03_relationships.md` (almeno 2000 parole)', [], read);
+  assert.equal(r.checks.length, 1);
+  assert.equal(r.checks[0].ok, false);
+  assert.match(r.problems[0], /1374 words/);
+});

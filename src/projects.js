@@ -89,7 +89,11 @@ export function textCheck(taskText, written, read) {
   const target = wordTarget(taskText);
   const notPlan = (f) => f.toUpperCase() !== PLAN_FILE.toUpperCase();
   const mentioned = textFiles(taskText).filter(notPlan);
-  const files = [...new Set([...written.filter(notPlan), ...mentioned.filter((f) => read(f) == null)])];
+  // un solo file nominato è il file del task: si controlla sempre, anche se l'ha scritto qualcun altro (il coordinatore
+  // dalla chat del progetto: libro mindfulness, capitolo 3 di 1374 parole su 2000 risultato fatto). Con più file
+  // nominati quelli già presenti possono essere letture (struttura_libro.md) e contano solo se il task li scrive.
+  const own = mentioned.length === 1 ? mentioned : mentioned.filter((f) => read(f) == null);
+  const files = [...new Set([...written.filter(notPlan), ...own])];
   const checks = [];
   const problems = [];
   for (const file of files) {
