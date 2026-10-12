@@ -236,6 +236,17 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
 | `APP_URL` | vuoto (indirizzo HTTPS dell'app, per il link nelle notifiche) |
 | `VISION_MODEL` | vuoto = scelto dalla verifica (es. `gemma4-12b-uncensored:latest`, oppure `comfy:qwen3-vl`) |
 
+## Memoria: note che l'assistente ricorda
+
+Dalla voce **Memoria** nella barra laterale si scrivono note brevi che l'assistente usa quando c'entrano con la domanda: **preferenze** («preferisco risposte brevi con un esempio»), **fatti** («il NAS di casa è su 192.168.1.20»), **procedure** e **correzioni**. Ogni utente vede solo le proprie.
+
+- A ogni messaggio si cercano le note pertinenti per parole chiave (SQLite FTS5, nessun modello in più) e se ne aggiungono poche al prompt, al massimo ~1500 caratteri, con il numero della nota e la fonte. Se nessuna nota c'entra non si aggiunge niente. Nella risposta compare «N note dalla memoria» con le note usate.
+- Ambito: **generale** (tutte le chat) oppure **un progetto** (solo nella chat, nei task e nella bozza del piano di quel progetto).
+- Le note si cercano, modificano, disattivano (restano salvate ma non vengono usate) ed eliminano dalla pagina.
+- Chiavi API, token, password e credenziali negli URL vengono tolti prima di salvare (`[rimosso]`).
+- Interruttori: «Usa la memoria nelle risposte» nella pagina Memoria (per utente) e «Usa la memoria in questo progetto» nella sezione Verifica del progetto.
+- Per ora le note si scrivono solo a mano: niente raccolta automatica dalle chat. Il database è `data/memory.sqlite`.
+
 ## HTTPS con Tailscale (microfono e notifiche dal telefono)
 
 Il browser concede microfono e notifiche solo alle pagine in HTTPS (o su `localhost`). Con Tailscale l'app ha un indirizzo HTTPS vero, `https://<nome-pc>.<tailnet>.ts.net`, raggiungibile dal telefono anche fuori casa e senza avvisi di certificato:
@@ -267,6 +278,7 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `WORKSPACE_HTTPS_PORT` | vuoto (porta HTTPS dei file quando l'app è in HTTPS: `8443` con `tools/attiva-https.ps1`) |
 | `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni, progetti) |
 | `ASSISTANT_NAME` | `Gemma` |
+| `MEMORY_PACK_CHARS` | `1500` (caratteri massimi di note della memoria per messaggio) |
 
 ## Come funziona
 
@@ -358,6 +370,7 @@ src/
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
+  memory.js          memoria: note dell'utente su SQLite, ricerca FTS5, filtro dei segreti, pacchetto per il prompt
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
   workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word

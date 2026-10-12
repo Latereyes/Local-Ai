@@ -302,8 +302,8 @@ export function newTask(text, type) {
   };
 }
 
-/** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo. */
-export function planPrompt(goal, files) {
+/** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo (notes: pacchetto della memoria, se c'è). */
+export function planPrompt(goal, files, notes = '') {
   return [
     { role: 'system', content: `Scrivi il piano di lavoro di un progetto software che verrà eseguito da modelli AI locali, un task alla volta, in una cartella del PC (Windows). Ogni task deve essere piccolo, autonomo e verificabile: chi lo esegue vede solo il piano, i task già fatti e i file della cartella.
 Formato (Markdown, in italiano, niente altro):
@@ -322,7 +322,7 @@ Lingua: il piano è in italiano, ma se l'obiettivo chiede il risultato in un'alt
 Prima dei task, dopo l'obiettivo, scrivi una sezione «# Regole» con le regole concrete che il risultato deve rispettare, una per riga di elenco: chi esegue i task non può chiedere. Se l'obiettivo è il clone di un gioco o di un programma noto, elenca le sue meccaniche essenziali come nell'originale (es. per Space Invaders: alieni in formazione a griglia che si muove in blocco di lato, scende di un passo a ogni bordo e accelera quando ne restano pochi; gli alieni sparano; ripari che si consumano; si perde se la formazione arriva in basso). Usa numeri concreti dove servono (righe, colonne, velocità, vite).
 In ogni task aggiungi una riga rientrata «Fatto quando: …» con il comportamento da verificare (anche nei test).
 Dopo le regole scrivi «# Task» e poi l'elenco dei task.` },
-    { role: 'user', content: `Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
+    { role: 'user', content: `${notes ? `${notes}\n\n` : ''}Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
   ];
 }
 

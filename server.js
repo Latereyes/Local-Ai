@@ -20,6 +20,7 @@ import * as workspace from './src/workspace.js';
 import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
 import * as vision from './src/vision.js';
+import * as memory from './src/memory.js';
 
 const app = express();
 app.set('trust proxy', false);
@@ -205,7 +206,7 @@ const ownTask = (p, id) => {
 };
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
-  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume,
+  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume, memory: p.memory !== false,
   maxAttempts: p.maxAttempts || null, defaultAttempts: config.projects.maxAttempts,
   history: await snapshots.history(projects.dirOf(req.user, p), 15),
   git: await snapshots.hasGit(), log: p.log.slice(-60),
@@ -231,6 +232,7 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
   if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
   if (typeof b.autoResume === 'boolean') p.autoResume = b.autoResume;
+  if (typeof b.memory === 'boolean') p.memory = b.memory;
   if (b.maxAttempts !== undefined) p.maxAttempts = Math.min(5, Math.max(0, Math.floor(Number(b.maxAttempts)) || 0)) || null;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
@@ -257,8 +259,9 @@ app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
   if (!goal) throw httpError(400, 'Scrivi l\'obiettivo del progetto nel riquadro del piano');
   const model = await projects.modelFor('read');
   const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
+  const notes = memory.pack(req.user.id, goal, { project: p.id, projectOn: p.memory !== false }).text;
   const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
-    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 5000 },
+    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files, notes), timeout: 300000, options: { temperature: 0.3, num_predict: 5000 },
   }));
   const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
   if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
@@ -357,6 +360,39 @@ app.post('/api/projects/:id/pause', projectErr(async (req, res) => {
   runner.setActive(p, false);
   if (req.body?.stop) runner.stopProject(p);
   res.json(await fullProject(req, p));
+}));
+
+// ---- Memoria: note scritte dall'utente, aggiunte al prompt quando sono pertinenti (src/memory.js) ----
+const memoryErr = (fn) => wrap(async (req, res) => {
+  try { await fn(req, res); }
+  catch (e) { throw e.status ? e : httpError(500, e.message); }
+});
+const scopeOf = (v) => (v === undefined || v === 'tutte' ? undefined : String(v));
+app.get('/api/memory', memoryErr(async (req, res) => {
+  const { q = '', scope, status } = req.query;
+  res.json({
+    enabled: memory.isEnabled(req.user.id),
+    types: memory.TYPES,
+    notes: memory.list(req.user.id, { q: String(q), scope: scopeOf(scope), status: memory.STATUSES.includes(status) ? status : undefined }),
+    projects: (await projects.list(req.user).catch(() => [])).map((p) => ({ id: p.id, name: p.name })),
+  });
+}));
+app.post('/api/memory', memoryErr(async (req, res) => {
+  const { text, type, scope } = req.body || {};
+  res.json(memory.add(req.user.id, { text, type, scope }));
+}));
+app.put('/api/memory/settings', memoryErr(async (req, res) => {
+  res.json({ enabled: memory.setEnabled(req.user.id, req.body?.enabled !== false) });
+}));
+app.patch('/api/memory/:id', memoryErr(async (req, res) => {
+  const { text, type, scope, status } = req.body || {};
+  const n = memory.update(req.user.id, req.params.id, { text, type, scope, status });
+  if (!n) throw httpError(404, 'Nota non trovata');
+  res.json(n);
+}));
+app.delete('/api/memory/:id', memoryErr(async (req, res) => {
+  if (!memory.remove(req.user.id, req.params.id)) throw httpError(404, 'Nota non trovata');
+  res.json({ ok: true });
 }));
 
 // ---- Verifica dei modelli che leggono le immagini (giudizio degli screenshot) ----
