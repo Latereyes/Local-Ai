@@ -111,6 +111,17 @@ export function textCheck(taskText, written, read) {
   return { target, checks, problems };
 }
 
+/**
+ * Output di un comando da mostrare al modello: senza byte binari. Libro mindfulness (2026-10-12): i test stampavano il
+ * contenuto del PDF e l'errore arrivava a Qwen e al coordinatore come caratteri illeggibili, quindi nessuno lo correggeva.
+ */
+export function printable(s) {
+  const text = String(s ?? '');
+  const bad = (text.match(/[^\t\n\r\x20-\x7e -ɏ -⁯←-⇿─-◿]/g) || []).length;
+  const clean = text.replace(/[^\t\n\r\x20-\x7e -ɏ -⁯←-⇿─-◿]+/g, '·').replace(/(?:·\s*){4,}/g, ' [byte binari omessi] ');
+  return bad > text.length * 0.1 ? `${clean}\n[Nota di LocalAI: gran parte di questo output erano byte binari (per esempio un PDF stampato nel terminale): fai stampare ai test e allo script solo testo]` : clean;
+}
+
 /** Toglie il tag iniziale dal testo del task. */
 export const stripTag = (text) => String(text || '').replace(/^\s*\[[a-zA-Zà-ù]+\]\s*/, '').trim();
 

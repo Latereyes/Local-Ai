@@ -233,3 +233,13 @@ test('missingFromOutput: fpdf vecchio al posto di fpdf2 si riconosce dall\'error
   assert.deepEqual(r, [{ lang: 'python', name: 'fpdf', pkg: 'fpdf2', replaces: 'fpdf' }]);
   assert.deepEqual(missingFromOutput('tutto ok'), []);
 });
+
+test('printable: l\'output dei test senza byte binari, con una nota se era quasi tutto binario', () => {
+  assert.equal(projects.printable('FAILED (errors=1) — città'), 'FAILED (errors=1) — città');
+  const bin = 'Ran 3 tests\n' + '\x15=\x8fX\x0f\xcc\x9d\x08\x8bZ\xca\x91W\x10l\xd7\x044\x01\xc2|P'.repeat(20) + '\nFAILED';
+  const out = projects.printable(bin);
+  assert.match(out, /Ran 3 tests/);
+  assert.match(out, /FAILED/);
+  assert.match(out, /byte binari/);
+  assert.ok(!/[\x00-\x08\x0e-\x1f]/.test(out));
+});

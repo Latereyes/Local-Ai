@@ -71,7 +71,7 @@ let lastModel = null;
 let current = null; // { project, task, convId, cancelled }
 
 const MAX_FEEDBACK = 3500;
-const tail = (s, n = MAX_FEEDBACK) => (s.length > n ? `…${s.slice(-n)}` : s);
+const tail = (s, n = MAX_FEEDBACK) => { s = projects.printable(s); return s.length > n ? `…${s.slice(-n)}` : s; };
 
 /** Avvia la coda se c'è lavoro e nessun task in corso. */
 export function kick() {
