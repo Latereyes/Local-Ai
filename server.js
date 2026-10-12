@@ -258,7 +258,7 @@ app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
   const model = await projects.modelFor('read');
   const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
   const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
-    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 2000 },
+    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 5000 },
   }));
   const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
   if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
