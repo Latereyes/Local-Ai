@@ -308,7 +308,7 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       path: p(project ? 'Percorso del file .mp3 nel progetto, es. audio/musica.mp3, audio/riga.mp3' : 'Percorso del file .mp3, es. tetris/audio/musica.mp3'),
       ...computerAudioProps(),
     }, ['kind', 'path', 'description', 'duration'])] : []),
-    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF (formato A4), con la grafica della pagina.', {
+    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF con la grafica della pagina: formato A4, oppure quello del CSS @page (es. @page { size: A5; margin: 20mm }); i salti pagina seguono break-before: page. È il modo più semplice per impaginare libri e documenti: niente librerie PDF.', {
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),

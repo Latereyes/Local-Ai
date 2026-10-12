@@ -139,6 +139,9 @@ test('planPrompt: genera il prompt di pianificazione corretto', () => {
   // la lunghezza totale e tutte le parti chieste (il primo piano in inglese era di 6 file da 2000 parole, senza copertina)
   assert.match(systemContent, /lunghezza totale/);
   assert.match(systemContent, /copertina/);
+  // impaginazione con gli strumenti di LocalAI (HTML + html_to_pdf), non con librerie PDF da installare
+  assert.match(systemContent, /html_to_pdf/);
+  assert.match(systemContent, /niente librerie PDF/);
 
   // Il user content deve contenere l'obiettivo
   const userContent = prompts[1].content;
