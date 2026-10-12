@@ -56,6 +56,56 @@ export function classify(text) {
   return 'chat';
 }
 
+// ---------------- Verifica dei task di testo ----------------
+// Libro mindfulness (2026-10-12): i task di testo non avevano nessuna verifica. Il piano chiedeva capitoli di almeno
+// 10 pagine, i modelli ne scrivevano 3-4 (1000-2500 parole) e il task risultava fatto. Ora la lunghezza chiesta nel
+// task («almeno 3000 parole», «almeno 10 pagine») si controlla sui file di testo scritti dal task.
+export const WORDS_PER_PAGE = 250;
+const NUM = (s) => Number(String(s).replace(/[.,'’\s]/g, ''));
+
+/** Parole minime chieste dal task («almeno 3000 parole», «at least 12 pages»), 0 se non c'è una lunghezza. */
+export function wordTarget(text) {
+  let best = 0;
+  const re = /\b(?:almeno|minimo|non meno di|at least|minimum(?: of)?)\s+(\d{1,3}(?:[.,'’ ]\d{3})+|\d+)\s*(parole|words|pagine|pages)\b/gi;
+  for (const m of String(text || '').matchAll(re)) {
+    const n = NUM(m[1]) * (/^pag/i.test(m[2]) ? WORDS_PER_PAGE : 1);
+    if (n > best) best = n;
+  }
+  return best;
+}
+
+/** File di testo nominati nel task (cap_03.md, testi/intro.txt). */
+export function textFiles(text) {
+  return [...new Set((String(text || '').match(/[\w./-]*\w\.(?:md|markdown|txt)\b/gi) || []).map((f) => f.replace(/^\.\//, '')))];
+}
+
+export const countWords = (s) => (String(s || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || []).length;
+
+/**
+ * Controllo dei file di testo di un task. written: file di testo scritti dal task; read(path) → contenuto o null.
+ * Restituisce { checks: [{ file, words, ok }], problems: [testo per il modello] }.
+ */
+export function textCheck(taskText, written, read) {
+  const target = wordTarget(taskText);
+  const mentioned = textFiles(taskText).filter((f) => f.toUpperCase() !== PLAN_FILE.toUpperCase());
+  const files = [...new Set([...written, ...mentioned.filter((f) => read(f) == null)])];
+  const checks = [];
+  const problems = [];
+  for (const file of files) {
+    const content = read(file);
+    if (content == null) {
+      checks.push({ file, words: 0, ok: false });
+      problems.push(`${file} was not created. Write it with write_file (the first part) and append_file (the rest).`);
+      continue;
+    }
+    const words = countWords(content);
+    const ok = !target || words >= target * 0.9;
+    checks.push({ file, words, ok });
+    if (!ok) problems.push(`${file} has ${words} words, the task asks for at least ${target}. Continue it: read the end of the file, then add new sections with append_file (about 800-1200 words per call) until it reaches the length. Do not rewrite, summarize or shorten what is already there.`);
+  }
+  return { target, checks, problems };
+}
+
 /** Toglie il tag iniziale dal testo del task. */
 export const stripTag = (text) => String(text || '').replace(/^\s*\[[a-zA-Zà-ù]+\]\s*/, '').trim();
 

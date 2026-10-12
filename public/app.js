@@ -1353,7 +1353,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', text: 'Testo' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}

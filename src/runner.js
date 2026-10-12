@@ -158,6 +158,12 @@ ${rules}
 - At the end write a 2-3 line summary IN ITALIAN (the user reads it): what you did and which files.`;
 }
 
+/** File scritti (o modificati) dal task, in tutti i tentativi. */
+function writtenFiles(conv) {
+  return [...new Set(conv.messages.flatMap((m) => m.steps || [])
+    .filter((s) => s.type === 'file' && ['write', 'append', 'edit', 'restore'].includes(s.action) && s.status === 'done' && s.path).map((s) => s.path))];
+}
+
 /** Pagina da controllare: l'html scritto in questo task (index.html se c'è), altrimenti index.html del progetto. */
 function entryPage(user, conv) {
   const written = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append'].includes(s.action) && s.status === 'done' && /\.html?$/i.test(s.path)).map((s) => s.path);
@@ -214,8 +220,13 @@ async function verify(p, task, conv, owner) {
     }
   }
 
-  // 2. Test automatici (codice, e pagine che ne hanno)
-  if (p.autoTest && (task.type === 'code' || task.type === 'page')) {
+  // 2. Test automatici (codice, e pagine che ne hanno). Una pagina che non ha toccato codice (solo HTML/CSS) non
+  // risponde dei test degli altri task: la copertina del libro mindfulness falliva per i test rotti dello script del PDF
+  // e il modello passava i tentativi a riscrivere quello script.
+  const touchedCode = writtenFiles(conv).some((f) => /\.(js|mjs|cjs|ts|py)$/i.test(f));
+  if (p.autoTest && task.type === 'page' && !touchedCode) {
+    add({ kind: 'test', ok: null, summary: 'Test non eseguiti: il task ha cambiato solo pagine (HTML/CSS), non codice' });
+  } else if (p.autoTest && (task.type === 'code' || task.type === 'page')) {
     const cmd = canRun ? await projects.testCommand(user, p) : null;
     if (!canRun) add({ kind: 'test', ok: null, summary: 'Test non eseguiti: solo l\'amministratore può far girare il codice' });
     else if (!cmd && task.type === 'code') {
@@ -239,7 +250,19 @@ async function verify(p, task, conv, owner) {
     }
   }
 
-  // 3. Pagina nel browser: errori JavaScript e screenshot
+  // 3. Testi (capitoli, articoli, report): i file ci sono e hanno la lunghezza chiesta dal task
+  if (task.type === 'chat' || task.type === 'read') {
+    const read = (f) => { try { return fs.readFileSync(workspace.resolve(user, f).abs, 'utf8'); } catch { return null; } };
+    const written = writtenFiles(conv).filter((f) => /\.(md|markdown|txt)$/i.test(f) && f.toUpperCase() !== projects.PLAN_FILE.toUpperCase());
+    const r = projects.textCheck(task.text, written, read);
+    if (r.checks.length) {
+      const ok = r.checks.every((c) => c.ok);
+      add({ kind: 'text', ok, summary: `${r.checks.map((c) => `${c.file}: ${c.words ? `${c.words} parole` : 'mancante'}`).join(' · ')}${r.target ? ` (richieste almeno ${r.target})` : ''}` });
+      problems.push(...r.problems);
+    }
+  }
+
+  // 4. Pagina nel browser: errori JavaScript e screenshot
   if (task.type === 'page') {
     const page = entryPage(user, conv);
     if (!page) {
