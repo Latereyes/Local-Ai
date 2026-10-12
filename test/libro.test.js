@@ -136,7 +136,10 @@ test('planPrompt: genera il prompt di pianificazione corretto', () => {
   assert.match(systemContent, /almeno N parole/);
   assert.match(systemContent, /un task \[testo\] per ogni capitolo/);
   assert.match(systemContent, /Lingua/);
-  
+  // la lunghezza totale e tutte le parti chieste (il primo piano in inglese era di 6 file da 2000 parole, senza copertina)
+  assert.match(systemContent, /lunghezza totale/);
+  assert.match(systemContent, /copertina/);
+
   // Il user content deve contenere l'obiettivo
   const userContent = prompts[1].content;
   assert.match(userContent, /Libro sulla mindfulness in inglese, 125 pagine/);
