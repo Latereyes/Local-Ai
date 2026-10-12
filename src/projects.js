@@ -45,6 +45,11 @@ export function classify(text) {
   if (tag && TAGS[tag[1]]) return TAGS[tag[1]];
   // chi comincia con un verbo di lettura è un'analisi anche se parla di codice («analizza il log di app.js»)
   if (/^\s*(riassumi|riassunto|analizza|estrai|leggi|classifica|elenca|confronta|sintetizza|trova nei log)\b/.test(t)) return 'read';
+  // testi da scrivere (capitoli, articoli, racconti) in file .md/.txt: niente codice né test anche se nominano «funzioni»
+  // o la verifica (libro mindfulness 2026-10-12: «Scrivi i capitoli 3 e 4…» era finito a Qwen Coder con i test del PDF)
+  if (/^\s*(scrivi|riscrivi|completa|allunga|amplia|traduci|write|rewrite|translate)\b/.test(t)
+    && /\b(capitol[oi]|chapters?|libro|book|articol[oi]|racconto|storia|testo|testi|introduzione|prefazione|conclusione|epilogo|poesi[ae])\b/.test(t)
+    && !/\.(py|js|mjs|ts|html?|css|ps1|bat)\b|\b(script|codice|python|javascript|programma|pdf|html)\b/.test(t)) return 'chat';
   if (/\b(pagin[ae]|html|sito|gioc[ho]i?|videogioco|game|canvas|css|landing|interfaccia web)\b/.test(t)) return 'page';
   if (/\b(codice|script|funzion[ei]|test|python|javascript|typescript|node|programma|implementa|bug|refactor|classe|modulo|libreria|api|cli)\b|\.(py|js|ts|ps1|bat)\b/.test(t)) return 'code';
   if (/\b(riassum|riassunt|sintesi|analizz|log|estra[ei]|json|classific|elenc|confront|report|document[oi])/.test(t)) return 'read';

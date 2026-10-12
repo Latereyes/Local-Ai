@@ -19,6 +19,9 @@ const PYPI_ALIAS = {
   dateutil: 'python-dateutil', dotenv: 'python-dotenv', serial: 'pyserial', usb: 'pyusb', win32api: 'pywin32',
   win32con: 'pywin32', win32gui: 'pywin32', pythoncom: 'pywin32', Crypto: 'pycryptodome', jwt: 'pyjwt',
   magic: 'python-magic', docx: 'python-docx', pptx: 'python-pptx', fitz: 'pymupdf', attr: 'attrs', google: 'google-api-core',
+  // «import fpdf» è anche fpdf2, l'unico mantenuto: il pacchetto «fpdf» (1.7.2, del 2017) non ha new_x/new_y, FontFace,
+  // fpdf.enums… (libro mindfulness 2026-10-12: installato fpdf, lo script scritto per fpdf2 falliva a ogni tentativo)
+  fpdf: 'fpdf2',
 };
 
 async function sourceFiles(dir, exts, max = 400) {
