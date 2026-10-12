@@ -255,7 +255,7 @@ async function verify(p, task, conv, owner) {
   // 3. Testi (capitoli, articoli, report): i file ci sono e hanno la lunghezza chiesta dal task
   if (task.type === 'chat' || task.type === 'read') {
     const read = (f) => { try { return fs.readFileSync(workspace.resolve(user, f).abs, 'utf8'); } catch { return null; } };
-    const written = writtenFiles(conv).filter((f) => /\.(md|markdown|txt)$/i.test(f) && f.toUpperCase() !== projects.PLAN_FILE.toUpperCase());
+    const written = writtenFiles(conv).filter((f) => /\.(md|markdown|txt)$/i.test(f));
     const r = projects.textCheck(task.text, written, read);
     if (r.checks.length) {
       const ok = r.checks.every((c) => c.ok);

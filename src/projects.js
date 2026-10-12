@@ -87,8 +87,9 @@ export const countWords = (s) => (String(s || '').match(/[\p{L}\p{N}][\p{L}\p{N}
  */
 export function textCheck(taskText, written, read) {
   const target = wordTarget(taskText);
-  const mentioned = textFiles(taskText).filter((f) => f.toUpperCase() !== PLAN_FILE.toUpperCase());
-  const files = [...new Set([...written, ...mentioned.filter((f) => read(f) == null)])];
+  const notPlan = (f) => f.toUpperCase() !== PLAN_FILE.toUpperCase();
+  const mentioned = textFiles(taskText).filter(notPlan);
+  const files = [...new Set([...written.filter(notPlan), ...mentioned.filter((f) => read(f) == null)])];
   const checks = [];
   const problems = [];
   for (const file of files) {
