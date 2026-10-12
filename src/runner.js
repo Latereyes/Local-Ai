@@ -395,7 +395,7 @@ async function runTask(p, task) {
     projects.save(p, { touch: false });
     let msg;
     try {
-      const out = await chat.send(conv, { text, model: task.model, computer: true, priority: 'low' });
+      const out = await chat.send(conv, { text, model: task.model, exactModel: true, computer: true, priority: 'low' });
       msg = await out.finished;
     } catch (e) {
       if (isServiceError(e.message)) return waitForOllama(p, task);

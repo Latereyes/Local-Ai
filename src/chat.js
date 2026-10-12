@@ -1039,8 +1039,9 @@ export async function send(conv, opts) {
   const computerOn = !!(conv.computer && user);
   const canRun = computerOn && user.role === 'admin' && !projectTask;
   let model = opts.model || config.ollama.model;
-  // Con il modello predefinito, in modalità Computer si usa quello per il codice (se installato)
-  if (computerOn && model === config.ollama.model && config.workspace.model) {
+  // Con il modello predefinito, in modalità Computer si usa quello per il codice (se installato). Non nei task della
+  // coda: il modello l'ha già scelto il tipo di task (libro mindfulness 2026-10-12: i task di testo per Gemma finivano a Qwen Coder)
+  if (computerOn && !opts.exactModel && model === config.ollama.model && config.workspace.model) {
     const installed = await ollama.listModels().catch(() => []);
     const want = config.workspace.model.replace(/:latest$/, '');
     const found = installed.find((m) => m.tools && m.name.replace(/:latest$/, '') === want);
