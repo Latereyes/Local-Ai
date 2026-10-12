@@ -195,3 +195,9 @@ test('missingFromOutput: identifica i pacchetti mancanti', () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].pkg, 'fpdf2');
 });
+test('singleFile: il file da scrivere di un task, se è uno solo (Gemma manda write_file senza path)', () => {
+  assert.equal(chat.singleFile('[testo] Scrivere il Capitolo 3 in `03_relationships.md` (almeno 2000 parole)\n  Fatto quando: il file `03_relationships.md` è presente'), '03_relationships.md');
+  assert.equal(chat.singleFile('Leggi PIANO.md e scrivi ./intro.md'), 'intro.md');
+  assert.equal(chat.singleFile('Scrivi cap_01.md e cap_02.md'), null);
+  assert.equal(chat.singleFile('Scrivi un capitolo'), null);
+});

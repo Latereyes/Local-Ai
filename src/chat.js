@@ -327,6 +327,21 @@ function repeatNote(msg, call) {
     : n >= 3 ? `\n\n[LocalAI: you are repeating the exact same ${call.function.name} call (${n} times in a row). Look at the previous result: if the task is not done, try a different approach instead of repeating the call.]` : '';
 }
 
+const MISSING_PATH_NOTE = 'The call had no "path": LocalAI used the file named in the task. Always pass both "path" and "content".';
+
+/** File da scrivere di un task della coda, se il task ne nomina uno solo (oltre al piano). */
+export function taskFile(conv) {
+  if (!conv.project || conv.projectChat) return null;
+  const t = projects.get(getUser(conv.ownerId), conv.project.id)?.tasks.find((x) => x.conversationId === conv.id);
+  return singleFile(t?.text);
+}
+
+export function singleFile(text) {
+  const files = [...new Set((String(text || '').match(/[\w./-]*\w\.(?:md|markdown|txt|html?|css|js|mjs|py|json|csv)\b/gi) || [])
+    .map((f) => f.replace(/^\.\//, '')).filter((f) => f.toUpperCase() !== projects.PLAN_FILE.toUpperCase()))];
+  return files.length === 1 ? files[0] : null;
+}
+
 /**
  * Esegue uno strumento della modalità Computer, registra il passaggio (visibile nella UI)
  * e restituisce il risultato per il modello.
@@ -337,7 +352,13 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
-    : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
+    : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.file_path ?? args.filename ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
+  // Gemma 4 12B a volte scrive un capitolo con write_file senza «path», solo il contenuto (libro mindfulness 2026-10-12:
+  // 03_relationships.md mai creato in tre tentativi). In un task che nomina un solo file si usa quello.
+  if (!step.path && (name === 'write_file' || name === 'append_file') && typeof args.content === 'string') {
+    step.path = taskFile(conv) || '';
+    step.inferred = !!step.path;
+  }
   // In un progetto i percorsi sono relativi alla sua cartella: base serve all'interfaccia per i link
   if (user.project) step.base = user.project;
   msg.steps.push(step);
@@ -352,6 +373,9 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       if (p?.tasks.some((t) => t.status === 'running' || t.status === 'testing')) {
         throw new workspace.WorkspaceError('Un task della coda sta lavorando sui file del progetto: non modificarli adesso. Aggiungi la modifica come task con add_project_tasks, oppure aspetta che il task finisca.');
       }
+    }
+    if (!step.path && (name === 'write_file' || name === 'append_file')) {
+      throw new workspace.WorkspaceError(`The call has no "path" argument. Call ${name} again with both "path" (the file name, e.g. "notes.md") and "content".`);
     }
     switch (name) {
       case 'list_files': {
@@ -385,7 +409,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.writeFile(user, step.path, args.content);
         observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
-        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}) });
+        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}), ...(step.inferred ? { note: MISSING_PATH_NOTE } : {}) });
         if (trackWrite(conv, name, r.path, args.content)) output = JSON.stringify({ error: 'Ciclo di riscrittura: il turno si ferma' });
         break;
       }
@@ -423,7 +447,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.appendFile(user, step.path, args.content);
         observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size });
-        output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size, ...(step.inferred ? { note: MISSING_PATH_NOTE } : {}) });
         break;
       }
       case 'delete_file': {
