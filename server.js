@@ -295,7 +295,7 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
     case 'retry':
       if (busy) throw httpError(409, 'Il task è in corso');
       // rimesso in coda dall'utente: il coordinatore riparte da zero interventi
-      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0 });
+      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0, modelsTried: [] });
       projects.addLog(p, `«${t.title}» di nuovo in coda`);
       break;
     case 'skip':

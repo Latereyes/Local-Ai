@@ -160,6 +160,23 @@ export async function modelFor(type) {
   return found ? found.name : config.ollama.model;
 }
 
+/**
+ * L'altro modello locale per un task che non riesce: Qwen Coder ↔ Gemma 26B (i modelli per codice e lettura).
+ * null se non è installato o se è lo stesso.
+ */
+export async function otherModel(current) {
+  const norm = (n) => String(n || '').replace(/:latest$/, '');
+  const installed = await ollama.listModels().catch(() => []);
+  for (const want of [config.projects.models.code, config.projects.models.read]) {
+    const found = installed.find((m) => m.tools && norm(m.name) === norm(want));
+    if (found && norm(found.name) !== norm(current)) return found.name;
+  }
+  return null;
+}
+
+/** Modelli diversi con cui il task ha già lavorato. */
+export const modelsTried = (task) => [...new Set((task.modelsTried || []).map((m) => String(m).replace(/:latest$/, '')))];
+
 function blank(ownerId, folder, name) {
   const now = Date.now();
   return { id: folder, ownerId, name: name || folder, folder, createdAt: now, updatedAt: now, active: false, autoTest: true, testCommand: '', tasks: [], log: [], chats: [] };

@@ -243,3 +243,9 @@ test('printable: l\'output dei test senza byte binari, con una nota se era quasi
   assert.match(out, /byte binari/);
   assert.ok(!/[\x00-\x08\x0e-\x1f]/.test(out));
 });
+
+test('modelsTried: i modelli diversi con cui un task ha lavorato (per passare all\'altro modello e poi dividere il task)', () => {
+  assert.deepEqual(projects.modelsTried({}), []);
+  assert.deepEqual(projects.modelsTried({ modelsTried: ['qwen3.8-coder:latest', 'qwen3.8-coder'] }), ['qwen3.8-coder']);
+  assert.equal(projects.modelsTried({ modelsTried: ['qwen3.8-coder:latest', 'hf.co/x/gemma:IQ4'] }).length, 2);
+});
