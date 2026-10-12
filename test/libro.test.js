@@ -227,3 +227,9 @@ test('compactWrites: le scritture restano intere finché stanno nel budget, poi 
   assert.match(convo[3].tool_calls[0].function.arguments.content, /^«omessi 3000 caratteri/);
   assert.equal(convo[5].tool_calls[0].function.arguments.content.length, 3000, 'l\'ultima resta intera');
 });
+
+test('missingFromOutput: fpdf vecchio al posto di fpdf2 si riconosce dall\'errore e si sostituisce', () => {
+  const r = missingFromOutput("TypeError: FPDF.cell() got an unexpected keyword argument 'new_x'");
+  assert.deepEqual(r, [{ lang: 'python', name: 'fpdf', pkg: 'fpdf2', replaces: 'fpdf' }]);
+  assert.deepEqual(missingFromOutput('tutto ok'), []);
+});

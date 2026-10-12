@@ -162,8 +162,15 @@ export function missingFromOutput(text) {
     const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
     if (!builtinModules.includes(name)) out.set(`js:${name}`, { lang: 'js', name, pkg: name });
   }
+  // pacchetto vecchio con lo stesso nome di import: «import fpdf» riesce con fpdf 1.x, ma mancano le API di fpdf2
+  // (libro mindfulness 2026-10-12: fpdf 1.7.2 rimasto sul PC, «unexpected keyword argument 'new_x'» a ogni tentativo)
+  for (const [re, fix] of OUTDATED) if (re.test(s)) out.set(`python:${fix.name}`, { lang: 'python', ...fix });
   return [...out.values()];
 }
+
+const OUTDATED = [
+  [/unexpected keyword argument '(new_x|new_y)'|No module named ['"]fpdf\.\w+|cannot import name '\w+' from 'fpdf'/, { name: 'fpdf', pkg: 'fpdf2', replaces: 'fpdf' }],
+];
 
 // nomi accettati: quelli dei registri (niente opzioni, percorsi o URL che pip e npm interpreterebbero)
 const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
@@ -182,6 +189,7 @@ function runOut(cmd, args, cwd, timeout) {
 export async function installPackages(dir, packages, { timeout = 300000 } = {}) {
   const skipped = [];
   const ok = { python: [], js: [] };
+  const replaces = [];
   const seen = new Set();
   for (const p of packages) {
     const lang = p.lang === 'js' ? 'js' : 'python';
@@ -193,12 +201,19 @@ export async function installPackages(dir, packages, { timeout = 300000 } = {}) 
     if (exists === false) { skipped.push({ pkg, why: `non esiste su ${lang === 'js' ? 'npm' : 'PyPI'}` }); continue; }
     if (exists === null) { skipped.push({ pkg, why: 'registro non raggiungibile' }); continue; }
     ok[lang].push(pkg);
+    if (lang === 'python' && p.replaces && PYPI_NAME.test(p.replaces)) replaces.push(p.replaces);
   }
   const outputs = [];
   const installed = [];
   if (ok.python.length) {
     let r = null;
     for (const py of process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']) {
+      // il pacchetto vecchio con lo stesso nome di import va tolto prima, altrimenti i due si mescolano
+      if (replaces.length) {
+        const u = await runOut(py, ['-m', 'pip', 'uninstall', '-y', ...replaces], dir, timeout);
+        if (u.missing) continue;
+        outputs.push(u.output.slice(-1000));
+      }
       r = await runOut(py, ['-m', 'pip', 'install', ...ok.python], dir, timeout);
       if (!r.missing) break;
     }
