@@ -260,3 +260,15 @@ test('run_script: offerto solo ai task della coda (scripts), non alle chat norma
   assert.ok(!names({ project: true }).includes('run_script'));
   assert.ok(!names({ canRun: true }).includes('run_script'));
 });
+
+test('stateText: STATO.md con fatto (riassunto e file), problemi aperti e da fare', () => {
+  const p = { name: 'Prova', tasks: [
+    { type: 'chat', title: 'Capitolo 1', status: 'done', summary: 'Scritto il capitolo 1.', files: ['01.md'] },
+    { type: 'code', title: 'Script PDF', status: 'failed', error: 'test falliti' },
+    { type: 'page', title: 'Copertina', status: 'queued' },
+  ] };
+  const s = projects.stateText(p);
+  assert.match(s, /## Fatto\n- \[testo\] Capitolo 1\n  Scritto il capitolo 1\.\n  File: 01\.md/);
+  assert.match(s, /## Problemi aperti\n- \[codice\] Script PDF: test falliti/);
+  assert.match(s, /## Da fare\n- \[pagina\] Copertina/);
+});

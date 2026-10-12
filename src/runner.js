@@ -147,7 +147,7 @@ function taskPrompt(p, task, plan, owner) {
 - Never shorten or summarize text that is already in a file unless the task asks for it: to improve a file, add or edit parts.`,
   }[task.type];
   return `[Task of project «${p.name}», run automatically by the LocalAI queue: the user is not present, do not ask questions and make reasonable decisions yourself.]
-${plan ? `\nProject plan (${projects.PLAN_FILE}, reference data, in Italian):\n<plan>\n${plan.slice(0, 4000)}\n</plan>\n` : ''}${done.length ? `\nTasks already completed:\n${done.map((t) => `- ${t.title}${t.summary ? `: ${t.summary.slice(0, 200)}` : ''}`).join('\n')}\n` : ''}
+${plan ? `\nProject plan (${projects.PLAN_FILE}, reference data, in Italian):\n<plan>\n${plan.slice(0, 4000)}\n</plan>\n` : ''}${done.length ? `\nProject state (${projects.STATE_FILE}, written by LocalAI after every task: what is done, with which files, what is left). Use it instead of re-reading every file: open only the files you need for this task.\n<state>\n${projects.stateText(p).slice(-3500)}\n</state>\n` : ''}
 Task to do now (${idx + 1} of ${p.tasks.length}, written by the user in Italian):
 ${task.text}
 
@@ -318,14 +318,17 @@ async function runTask(p, task) {
   const owner = getUser(p.ownerId);
   current = { project: p, task, cancelled: false };
   const finish = async (status, text) => {
+    task.status = status;
+    task.finishedAt = Date.now();
+    // STATO.md: cosa è fatto, con quali file, cosa manca (lo scrive LocalAI, lo leggono i task successivi)
+    if (task.conversationId) task.files = writtenFiles(store.get(task.conversationId) || { messages: [] }).slice(0, 30);
+    if (owner) await projects.writeState(owner, p).catch((e) => console.warn('[coda] STATO.md:', e.message));
     // fotografia dopo il task: con quella prima, il task si può annullare e il coordinatore vede il diff
     if (owner && task.snapBefore) {
       const after = await projects.snap(owner, p, `«${task.title}»: ${{ done: 'fatto', failed: 'non riuscito', error: 'errore', cancelled: 'fermato' }[status] || status}`);
       task.snapAfter = after?.commit || null;
     }
     if (task.conversationId) chat.clearGuards(task.conversationId);
-    task.status = status;
-    task.finishedAt = Date.now();
     projects.addLog(p, text);
     if (status !== 'done') {
       p.active = false;

@@ -303,6 +303,37 @@ export const scoped = (user, p) => ({ ...user, project: p.folder });
 /** Cartella del progetto sul disco. */
 export const dirOf = (user, p) => workspace.userRoot(scoped(user, p));
 
+// ---------------- STATO.md ----------------
+// Libro mindfulness (2026-10-12): per «capire il quadro» i modelli rileggevano tutti i capitoli e riempivano il contesto.
+// LocalAI scrive dopo ogni task un riassunto dello stato (fatto, file, problemi, da fare) che i task successivi leggono.
+export const STATE_FILE = 'STATO.md';
+const TYPE_NAME = { code: 'codice', page: 'pagina', read: 'lettura', chat: 'testo' };
+
+/** Testo di STATO.md, dallo stato dei task (sempre rigenerato, non cresce all'infinito). */
+export function stateText(p) {
+  const line = (t) => `- [${TYPE_NAME[t.type] || t.type}] ${t.title}`;
+  const done = p.tasks.filter((t) => t.status === 'done');
+  const open = p.tasks.filter((t) => ['failed', 'error'].includes(t.status));
+  const todo = p.tasks.filter((t) => ['queued', 'running', 'testing'].includes(t.status));
+  const out = [`# Stato del progetto «${p.name}»`, '', `Scritto da LocalAI dopo ogni task: non modificarlo a mano. Ultimo aggiornamento: ${new Date().toLocaleString('it-IT')}.`];
+  if (done.length) {
+    out.push('', '## Fatto');
+    for (const t of done) {
+      out.push(line(t));
+      if (t.summary) out.push(`  ${t.summary.replace(/\s+/g, ' ').slice(0, 300)}`);
+      if (t.files?.length) out.push(`  File: ${t.files.join(', ')}`);
+    }
+  }
+  if (open.length) out.push('', '## Problemi aperti', ...open.map((t) => `${line(t)}: ${t.error || 'non riuscito'}`));
+  if (todo.length) out.push('', '## Da fare', ...todo.map(line));
+  return `${out.join('\n')}\n`;
+}
+
+/** Scrive STATO.md nella cartella del progetto. */
+export async function writeState(user, p) {
+  await fsp.writeFile(path.join(dirOf(user, p), STATE_FILE), stateText(p));
+}
+
 /** Fotografia della cartella del progetto (snapshots.js): commit solo se è cambiato qualcosa; null senza git. */
 export const snap = (user, p, message) => snapshots.snapshot(dirOf(user, p), message);
 
@@ -342,7 +373,7 @@ una o due frasi
   eventuali dettagli rientrati di due spazi
 
 Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi, niente librerie esterne); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README, capitoli, articoli e testi.
-Da 3 a 8 task, in ordine di esecuzione. Il primo crea qualcosa che funziona già; i successivi aggiungono una cosa alla volta.
+Quanti task: un progetto piccolo (una pagina web, uno script, un testo breve, un'analisi) è UN SOLO task, completo: chi lo esegue lavora come in una chat e lo finisce da solo. Un progetto più grande va in 3-8 tappe vere, in ordine di esecuzione, ognuna con un risultato che si può verificare: la prima crea qualcosa che funziona già, le successive aggiungono una cosa alla volta. Non spezzare in task separati cose che stanno in un file solo.
 Se il progetto è soprattutto testo (libro, guida, raccolta di articoli): un task [testo] per ogni capitolo o file, anche più di 8 task. Chi esegue un task scrive al massimo circa 4000 parole: dividi il testo in file e task di questa misura. In ogni task di testo indica il file e la lunghezza come «almeno N parole» (1 pagina = 250 parole): LocalAI conta le parole e rimanda indietro i file troppo corti. Lo script che assembla il libro (PDF o altro) prende solo i file del libro, nell'ordine giusto (es. introduzione.md e cap_*.md), non il piano, il README o gli appunti.
 Strumenti che chi esegue i task ha già, senza installare niente: html_to_pdf (stampa una pagina HTML in PDF con il browser, CSS di stampa compreso) e html_to_word (HTML → documento Word). Preferiscili alle librerie da installare. Per libri, guide e documenti impaginati in PDF: un task [pagina] che crea book.html dai file del testo (copertina, indice con link ai capitoli, CSS di stampa con @page per formato e margini, break-before: page all'inizio di ogni capitolo) e lo converte con html_to_pdf; niente librerie PDF come fpdf o reportlab, che costringono a calcolare a mano righe e pagine (libro mindfulness 2026-10-12: un'ora di tentativi falliti con fpdf2).
 Se l'obiettivo dà una lunghezza totale (pagine o parole), la somma degli «almeno N parole» dei task deve raggiungerla: per esempio 125 pagine = circa 31000 parole = 11-12 task da 2500-3000 parole. Non ridurre il progetto e non tralasciare nessuna parte chiesta dall'obiettivo (copertina, PDF, esercizi…): ognuna ha il suo task.
