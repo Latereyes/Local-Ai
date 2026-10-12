@@ -22,6 +22,7 @@ import * as projects from './projects.js';
 import { checkPage } from './browser.js';
 import * as snapshots from './snapshots.js';
 import * as deps from './deps.js';
+import * as memory from './memory.js';
 import { judgeScreenshot } from './vision.js';
 import { randomUUID, createHash } from 'node:crypto';
 
@@ -1131,6 +1132,17 @@ export async function send(conv, opts) {
         let limit = numCtx - ctx.outputReserve(numCtx, think);
         const convo = history(conv, opts);
         const lastU = convo.findLast((m) => m.role === 'user');
+        // Memoria: note dell'utente pertinenti alla domanda (generali e del progetto), solo se ce ne sono
+        const memProject = conv.project && owner ? (pj || projects.get(owner, conv.project.id)) : null;
+        const mem = memory.pack(conv.ownerId, text, { project: conv.project?.id || null, projectOn: memProject?.memory !== false });
+        if (mem.notes.length) {
+          convo[0].content += `
+
+${mem.text}`;
+          const step = { id: store.newId(), type: 'memory', status: 'done', notes: mem.notes.map((n) => ({ id: n.id, type: n.type, scope: n.scope, text: n.text })), startedAt: Date.now(), finishedAt: Date.now() };
+          msg.steps.push(step);
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        }
         // spazio per documenti e pagine web: tolti prompt di sistema, strumenti e ultima domanda (la cronologia si accorcia)
         const free = () => limit - ctx.promptTokens([convo[0], lastU], allTools, model);
 
