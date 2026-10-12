@@ -1134,7 +1134,9 @@ export async function send(conv, opts) {
         const lastU = convo.findLast((m) => m.role === 'user');
         // Memoria: note dell'utente pertinenti alla domanda (generali e del progetto), solo se ce ne sono
         const memProject = conv.project && owner ? (pj || projects.get(owner, conv.project.id)) : null;
-        const mem = memory.pack(conv.ownerId, text, { project: conv.project?.id || null, projectOn: memProject?.memory !== false });
+        let mem = { notes: [] };
+        try { mem = memory.pack(conv.ownerId, text, { project: conv.project?.id || null, projectOn: memProject?.memory !== false }); }
+        catch (e) { console.warn('[chat] memoria non disponibile:', e.message); }
         if (mem.notes.length) {
           convo[0].content += `
 
