@@ -136,7 +136,8 @@ app.get('/api/events', (req, res) => {
 });
 
 // ---- Conversazioni ----
-app.get('/api/conversations', (req, res) => res.json(store.list(req.user.id)));
+// Le chat dei task della coda non vanno nello storico: sono tante e si aprono dalla pagina del progetto
+app.get('/api/conversations', (req, res) => res.json(store.list(req.user.id).filter((c) => !c.task)));
 
 app.post('/api/conversations', wrap(async (req, res) => {
   const c = store.create(req.user.id);

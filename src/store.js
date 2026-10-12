@@ -27,7 +27,7 @@ export function list(ownerId) {
     if (!name.endsWith('.json')) continue;
     const id = name.slice(0, -5);
     const c = cache.get(id) || safeRead(id);
-    if (c && (!ownerId || c.ownerId === ownerId)) out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, pinned: !!c.pinned });
+    if (c && (!ownerId || c.ownerId === ownerId)) out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, pinned: !!c.pinned, ...(c.project && !c.projectChat ? { task: true } : {}) });
   }
   return out.sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
 }

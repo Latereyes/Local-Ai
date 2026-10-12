@@ -58,6 +58,17 @@ test('strumenti e prompt: coda e verifica solo nella chat del progetto', () => {
   assert.match(calm, /per verificare il lavoro usa check_project/);
   assert.doesNotMatch(calm, /ADESSO un task/);
   assert.match(computerPrompt({ ...base, projectChat: { text: '', busy: true } }), /ADESSO un task della coda sta lavorando/);
+  // modifiche mirate e ripristino ovunque; librerie solo per l'amministratore nella chat del progetto
+  assert.ok(['edit_file', 'restore_file'].every((n) => names({ project: true }).includes(n)));
+  assert.ok(!names({ project: true, projectChat: true }).includes('install_packages'));
+  assert.ok(names({ project: true, projectChat: true, canRun: true }).includes('install_packages'));
+  assert.ok(!names({ project: true, canRun: true }).includes('install_packages'));
+  // il coordinatore guida da solo: piano, task e coda nello stesso turno, librerie installate senza chiedere
+  const admin = computerPrompt({ ...base, canRun: true, projectChat: { text: '', busy: false } });
+  assert.match(admin, /fai tutti i passi nello stesso turno/);
+  assert.match(admin, /installale tu con install_packages/);
+  assert.doesNotMatch(calm, /install_packages/);
+  assert.doesNotMatch(calm, /riscrivilo intero/);
 });
 
 test('coordinatore: spento o oltre il limite di interventi non apre turni e lascia la decisione all\'utente', async () => {
@@ -79,3 +90,8 @@ test('coordinatore: spento o oltre il limite di interventi non apre turni e lasc
 });
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+test('piano: la sezione «Regole» è riferimento per i task, non un elenco di task', () => {
+  const plan = '# Obiettivo\nClone di Space Invaders\n\n# Regole\n- alieni in griglia 5x11 che si muove in blocco\n- scendono a ogni bordo\n\n# Task\n- [pagina] index.html con il canvas\n  Fatto quando: si vede la formazione\n- [codice] logica in game.js';
+  assert.deepEqual(projects.parsePlan(plan).map((t) => t.text), ['[pagina] index.html con il canvas\nFatto quando: si vede la formazione', '[codice] logica in game.js']);
+});

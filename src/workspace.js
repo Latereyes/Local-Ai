@@ -114,22 +114,84 @@ export async function readFile(user, rel) {
   if (!st?.isFile()) throw new WorkspaceError(`Il file «${r}» non esiste`);
   if (st.size > MAX_FILE) throw new WorkspaceError(`Il file «${r}» è troppo grande (${human(st.size)})`);
   const buf = await fsp.readFile(abs);
-  if (buf.subarray(0, 8000).includes(0)) return { path: r, size: st.size, text: null };
+  if (buf.subarray(0, 8000).includes(0)) return { path: r, size: st.size, mtime: st.mtimeMs, text: null };
   let text = buf.toString('utf8');
   const truncated = text.length > MAX_READ_CHARS;
   if (truncated) text = text.slice(0, MAX_READ_CHARS);
-  return { path: r, size: st.size, text, truncated };
+  return { path: r, size: st.size, mtime: st.mtimeMs, text, truncated };
 }
 
-export async function writeFile(user, rel, content) {
+// ---- Scritture protette ----
+// Prova del 2026-10-11 (Missile Command): il modello copiava nei file il segnaposto con cui LocalAI accorcia
+// le sue scritture precedenti nella cronologia («[N caratteri scritti nel file…]»), così game.js e synth_gen.py
+// diventavano una riga sola; la verifica falliva, il task ripartiva e riscriveva lo stesso segnaposto.
+// Ora i segnaposti si rifiutano, un file pieno non si svuota e la versione precedente resta in una copia.
+
+const PLACEHOLDER = /\[\d+ caratteri scritti nel file|«omessi \d+ caratteri|<<omesso|\[contenuto omesso/i;
+// segnaposto «pigri»: solo se il contenuto è corto (in un file vero queste frasi possono stare in un commento)
+const LAZY = /\b(resto del (codice|file)|codice (invariato|precedente|di prima)|come prima|rest of (the )?(code|file)|unchanged|same as before|existing code)\b/i;
+
+/** Motivo per cui un contenuto non è un file vero (segnaposto), oppure '' se va bene. */
+export function placeholderReason(text) {
+  const t = String(text ?? '');
+  if (PLACEHOLDER.test(t)) return 'è il segnaposto con cui LocalAI riassume nella cronologia un file già scritto, non il codice';
+  if (t.trim().length < 300 && LAZY.test(t) && t.trim().split(/\r?\n/).length <= 6) return 'è un segnaposto («resto del codice…»), non il contenuto completo';
+  return '';
+}
+
+const BACKUPS = path.join(config.paths.data, 'backups');
+const KEEP_BACKUPS = 5;
+
+/** Cartella delle copie di un file (fuori dalla cartella di lavoro: test, librerie e storia non le vedono). */
+function backupDir(user, r) {
+  const sub = user.project ? safeFolder(user.project) : '';
+  return path.join(BACKUPS, slug(user.username), sub ? folderName(sub) || '_' : '_', ...r.split('/'));
+}
+
+/** Copia la versione attuale di un file prima di cambiarlo (tiene le ultime KEEP_BACKUPS). */
+async function backup(user, abs, r) {
+  const st = await fsp.stat(abs).catch(() => null);
+  if (!st?.isFile() || !st.size) return false;
+  const dir = backupDir(user, r);
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.copyFile(abs, path.join(dir, `${Date.now()}`));
+  const old = (await fsp.readdir(dir)).filter((f) => /^\d+$/.test(f)).sort((a, b) => Number(b) - Number(a)).slice(KEEP_BACKUPS);
+  for (const f of old) await fsp.rm(path.join(dir, f), { force: true });
+  return true;
+}
+
+const lines = (s) => (s ? String(s).split(/\r?\n/).length : 0);
+
+/** Controlli comuni alle scritture: niente segnaposti, niente file pieni svuotati. */
+function guard(r, text, oldSize) {
+  const why = placeholderReason(text);
+  if (why) throw Object.assign(new WorkspaceError(`Scrittura di «${r}» rifiutata: il contenuto ${why}. Il file su disco non è cambiato. Scrivi il contenuto vero e completo; per cambiare solo una parte usa edit_file.`), { placeholder: true });
+  if (oldSize > 0 && !text.trim()) throw new WorkspaceError(`Scrittura di «${r}» rifiutata: il contenuto è vuoto e il file ne ha già uno (${human(oldSize)}). Per eliminarlo usa delete_file.`);
+}
+
+/** Scrive un file. fromUser: scritto dall'utente nell'interfaccia (es. il piano svuotato), senza i controlli sui segnaposti. */
+export async function writeFile(user, rel, content, { fromUser = false } = {}) {
   const { abs, rel: r } = resolve(user, rel);
   if (!r || r.endsWith('/')) throw new WorkspaceError('Serve il nome del file');
   const text = String(content ?? '');
   if (Buffer.byteLength(text) > MAX_FILE) throw new WorkspaceError('Contenuto troppo grande (max 2 MB)');
-  const existed = fs.existsSync(abs);
+  const st = await fsp.stat(abs).catch(() => null);
+  if (st && !st.isFile()) throw new WorkspaceError(`«${r}» è una cartella`);
+  if (!fromUser) guard(r, text, st?.size || 0);
+  let before = null;
+  if (st?.size) {
+    before = await fsp.readFile(abs, 'utf8').catch(() => null);
+    if (before !== text) await backup(user, abs, r);
+  }
   await fsp.mkdir(path.dirname(abs), { recursive: true });
   await fsp.writeFile(abs, text, 'utf8');
-  return { path: r, size: Buffer.byteLength(text), created: !existed };
+  const out = { path: r, size: Buffer.byteLength(text), created: !st, lines: lines(text) };
+  // riscrittura che accorcia molto un file lungo: o è la prima parte (si continua con append_file) o si è perso codice
+  if (before !== null && lines(before) >= 40 && out.lines < lines(before) / 2) {
+    out.previousLines = lines(before);
+    out.warning = `Il file aveva ${out.previousLines} righe, ora ${out.lines}. Se è la prima parte di una riscrittura continua con append_file; se hai perso codice, la versione precedente è salvata: restore_file la rimette. Per modifiche mirate usa edit_file invece di riscrivere.`;
+  }
+  return out;
 }
 
 /** Aggiunge testo in fondo a un file esistente (per scrivere i file lunghi a blocchi). */
@@ -138,9 +200,78 @@ export async function appendFile(user, rel, content) {
   const st = await fsp.stat(abs).catch(() => null);
   if (!st?.isFile()) throw new WorkspaceError(`Il file «${r}» non esiste: crealo prima con write_file`);
   const text = String(content ?? '');
+  guard(r, text, 0);
+  if (!text) throw new WorkspaceError('Niente da aggiungere: il contenuto è vuoto');
   if (st.size + Buffer.byteLength(text) > MAX_FILE) throw new WorkspaceError('File troppo grande (max 2 MB)');
   await fsp.appendFile(abs, text, 'utf8');
   return { path: r, size: st.size + Buffer.byteLength(text) };
+}
+
+/**
+ * Modifica mirata: sostituisce un pezzo di testo esatto con un altro. Così per cambiare dieci righe
+ * non si riscrive (e non si rischia di troncare) un file di trecento.
+ */
+export async function editFile(user, rel, oldText, newText, { all = false } = {}) {
+  const { abs, rel: r } = resolve(user, rel);
+  const st = await fsp.stat(abs).catch(() => null);
+  if (!st?.isFile()) throw new WorkspaceError(`Il file «${r}» non esiste: crealo con write_file`);
+  if (st.size > MAX_FILE) throw new WorkspaceError(`Il file «${r}» è troppo grande (${human(st.size)})`);
+  const find = String(oldText ?? '');
+  const repl = String(newText ?? '');
+  if (!find) throw new WorkspaceError('Manca old_text: il pezzo esatto da sostituire (leggilo prima con read_file)');
+  guard(r, repl, 0);
+  const text = await fsp.readFile(abs, 'utf8');
+  // i file scritti su Windows possono avere \r\n: si cerca anche con quelli
+  const crlf = text.includes('\r\n');
+  const needle = crlf && !find.includes('\r\n') && !text.includes(find) ? find.replace(/\n/g, '\r\n') : find;
+  const count = text.split(needle).length - 1;
+  if (!count) {
+    // prova Space Invaders 2026-10-11: il modello ripeteva una modifica già fatta e riceveva sei volte «non c'è»
+    if (repl.trim() && text.includes(repl)) throw new WorkspaceError(`Il testo da sostituire non c'è in «${r}», ma new_text c'è già: la modifica sembra già fatta. Non ripeterla: passa alla prossima o chiudi con il riepilogo.`);
+    throw new WorkspaceError(`Il testo da sostituire non c'è in «${r}» (deve essere identico, spazi compresi): rileggi il file con read_file e copia il pezzo esatto.`);
+  }
+  if (count > 1 && !all) throw new WorkspaceError(`Il testo da sostituire compare ${count} volte in «${r}»: allarga old_text con le righe vicine perché sia unico, oppure usa replace_all.`);
+  const value = crlf && needle !== find ? repl.replace(/\r?\n/g, '\r\n') : repl;
+  const next = all ? text.split(needle).join(value) : text.replace(needle, () => value);
+  if (Buffer.byteLength(next) > MAX_FILE) throw new WorkspaceError('File troppo grande (max 2 MB)');
+  if (!next.trim()) throw new WorkspaceError(`La modifica svuoterebbe «${r}»: per eliminarlo usa delete_file.`);
+  await backup(user, abs, r);
+  await fsp.writeFile(abs, next, 'utf8');
+  return { path: r, size: Buffer.byteLength(next), replaced: all ? count : 1, lines: lines(next), text: next };
+}
+
+/** Copie salvate di un file, dalla più recente: { id, at, size }. */
+export async function backups(user, rel) {
+  const { rel: r } = resolve(user, rel);
+  const dir = backupDir(user, r);
+  const names = (await fsp.readdir(dir).catch(() => [])).filter((f) => /^\d+$/.test(f)).sort((a, b) => Number(b) - Number(a));
+  return Promise.all(names.map(async (f) => ({ id: f, at: Number(f), size: (await fsp.stat(path.join(dir, f))).size })));
+}
+
+/**
+ * Rimette la copia più recente di un file diversa dalla versione attuale (o quella indicata).
+ * La versione attuale, se è buona, diventa a sua volta una copia: così anche il ripristino si annulla.
+ */
+export async function restoreFile(user, rel, id) {
+  const { abs, rel: r } = resolve(user, rel);
+  const list = await backups(user, r);
+  if (!list.length) throw new WorkspaceError(`Non ci sono copie salvate di «${r}»`);
+  const current = await fsp.readFile(abs).catch(() => null);
+  const dir = backupDir(user, r);
+  let pick = null;
+  for (const b of list) {
+    if (id && b.id !== String(id)) continue;
+    const data = await fsp.readFile(path.join(dir, b.id));
+    if (!id && current && data.equals(current)) continue;
+    if (!id && placeholderReason(data.toString('utf8'))) continue;
+    pick = { ...b, data };
+    break;
+  }
+  if (!pick) throw new WorkspaceError(id ? 'Copia non trovata' : `Le copie salvate di «${r}» sono uguali al file attuale`);
+  if (current?.length && !placeholderReason(current.toString('utf8'))) await backup(user, abs, r);
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  await fsp.writeFile(abs, pick.data);
+  return { path: r, size: pick.data.length, from: pick.at, lines: lines(pick.data.toString('utf8')) };
 }
 
 /** Copia nella cartella un file dell'app (es. un'immagine generata in chat); aggiunge l'estensione se manca. */
@@ -158,6 +289,8 @@ export async function deleteFile(user, rel) {
   if (!r) throw new WorkspaceError('Non si può eliminare la cartella di lavoro');
   const st = await fsp.stat(abs).catch(() => null);
   if (!st) throw new WorkspaceError(`«${r}» non esiste`);
+  // anche un file eliminato si può riavere con restore_file
+  if (st.isFile()) await backup(user, abs, r);
   await fsp.rm(abs, { recursive: true, force: true });
   return { path: r, dir: st.isDirectory() };
 }

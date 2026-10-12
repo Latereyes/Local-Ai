@@ -96,6 +96,17 @@ async function existsOn(url) {
   } catch { return null; }
 }
 
+/** Moduli del progetto stesso (file .py e cartelle-pacchetto): non sono librerie esterne. */
+export async function localModules(dir) {
+  const local = new Set();
+  for (const f of await sourceFiles(dir, ['.py'])) {
+    local.add(path.basename(f, '.py'));
+    let d = path.dirname(f);
+    while (d.startsWith(dir) && d !== dir) { local.add(path.basename(d)); d = path.dirname(d); }
+  }
+  return local;
+}
+
 /**
  * Controllo delle librerie del progetto. Restituisce:
  * { checked, missing: [{ lang, name, pkg, exists }] } — exists false = non esiste (inventata),
@@ -103,13 +114,7 @@ async function existsOn(url) {
  */
 export async function checkDependencies(dir) {
   const missing = [];
-  const local = new Set();
-  // moduli del progetto stesso (file .py e cartelle-pacchetto): non sono librerie esterne
-  for (const f of await sourceFiles(dir, ['.py'])) {
-    local.add(path.basename(f, '.py'));
-    let d = path.dirname(f);
-    while (d.startsWith(dir) && d !== dir) { local.add(path.basename(d)); d = path.dirname(d); }
-  }
+  const local = await localModules(dir);
   const pyFiles = await sourceFiles(dir, ['.py']);
   const pyNames = new Set();
   for (const f of pyFiles) for (const n of pythonImports(await fsp.readFile(f, 'utf8').catch(() => ''))) if (!local.has(n)) pyNames.add(n);
@@ -134,4 +139,75 @@ export function installCommand(missing) {
   const py = missing.filter((m) => m.lang === 'python' && m.exists).map((m) => m.pkg);
   const js = missing.filter((m) => m.lang === 'js' && m.exists).map((m) => m.pkg);
   return [py.length ? `pip install ${py.join(' ')}` : '', js.length ? `npm install ${js.join(' ')}` : ''].filter(Boolean).join(' e ');
+}
+
+/**
+ * Librerie mancanti lette dall'output di test e script:
+ * Python «ModuleNotFoundError: No module named 'numpy'», Node «Cannot find package 'x'» / «Cannot find module 'x'».
+ * Restituisce [{ lang, name, pkg }] (nome di primo livello, alias PyPI applicati).
+ */
+export function missingFromOutput(text) {
+  const out = new Map();
+  const s = String(text || '');
+  for (const m of s.matchAll(/No module named ['"]?([A-Za-z_][\w.]*)['"]?/g)) {
+    const name = m[1].split('.')[0];
+    out.set(`python:${name}`, { lang: 'python', name, pkg: PYPI_ALIAS[name] || name });
+  }
+  for (const m of s.matchAll(/Cannot find (?:package|module) ['"]([^'"]+)['"]/g)) {
+    const spec = m[1];
+    if (/^(\.|\/|[A-Za-z]:|node:)/.test(spec)) continue;
+    const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+    if (!builtinModules.includes(name)) out.set(`js:${name}`, { lang: 'js', name, pkg: name });
+  }
+  return [...out.values()];
+}
+
+// nomi accettati: quelli dei registri (niente opzioni, percorsi o URL che pip e npm interpreterebbero)
+const PYPI_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
+const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,213}$/;
+
+function runOut(cmd, args, cwd, timeout) {
+  return new Promise((resolve) => execFile(cmd, args, { cwd, timeout, windowsHide: true, maxBuffer: 8 * 1024 * 1024, shell: process.platform === 'win32' && cmd === 'npm', env: { ...process.env, PIP_DISABLE_PIP_VERSION_CHECK: '1', PYTHONIOENCODING: 'utf-8' } },
+    (err, stdout, stderr) => resolve({ ok: !err, output: `${stdout || ''}${stderr || ''}`.trim(), missing: err?.code === 'ENOENT' })));
+}
+
+/**
+ * Installa librerie Python (pip, nell'ambiente Python del PC) o npm (nella cartella del progetto).
+ * Solo pacchetti che esistono davvero sul registro: un nome inventato o scritto male non parte.
+ * packages: [{ lang: 'python'|'js', pkg }]. Restituisce { installed, skipped: [{ pkg, why }], output }.
+ */
+export async function installPackages(dir, packages, { timeout = 300000 } = {}) {
+  const skipped = [];
+  const ok = { python: [], js: [] };
+  const seen = new Set();
+  for (const p of packages) {
+    const lang = p.lang === 'js' ? 'js' : 'python';
+    const pkg = String(p.pkg || p.name || '').trim();
+    if (!pkg || seen.has(`${lang}:${pkg}`)) continue;
+    seen.add(`${lang}:${pkg}`);
+    if (!(lang === 'js' ? NPM_NAME : PYPI_NAME).test(pkg)) { skipped.push({ pkg, why: 'nome non valido' }); continue; }
+    const exists = await existsOn(lang === 'js' ? `https://registry.npmjs.org/${pkg.replace('/', '%2f')}` : `https://pypi.org/pypi/${encodeURIComponent(pkg)}/json`);
+    if (exists === false) { skipped.push({ pkg, why: `non esiste su ${lang === 'js' ? 'npm' : 'PyPI'}` }); continue; }
+    if (exists === null) { skipped.push({ pkg, why: 'registro non raggiungibile' }); continue; }
+    ok[lang].push(pkg);
+  }
+  const outputs = [];
+  const installed = [];
+  if (ok.python.length) {
+    let r = null;
+    for (const py of process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']) {
+      r = await runOut(py, ['-m', 'pip', 'install', ...ok.python], dir, timeout);
+      if (!r.missing) break;
+    }
+    outputs.push(r.output.slice(-2000));
+    if (r.ok) installed.push(...ok.python);
+    else for (const pkg of ok.python) skipped.push({ pkg, why: r.missing ? 'Python non trovato' : 'pip non è riuscito' });
+  }
+  if (ok.js.length) {
+    const r = await runOut('npm', ['install', '--no-audit', '--no-fund', ...ok.js], dir, timeout);
+    outputs.push(r.output.slice(-2000));
+    if (r.ok) installed.push(...ok.js);
+    else for (const pkg of ok.js) skipped.push({ pkg, why: r.missing ? 'npm non trovato' : 'npm non è riuscito' });
+  }
+  return { installed, skipped, output: outputs.join('\n').trim() };
 }
