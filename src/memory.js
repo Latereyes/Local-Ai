@@ -100,7 +100,7 @@ export function redact(text) {
 }
 
 // ---------------- Note ----------------
-const row = (r) => r && ({
+const row = (r) => (!r ? null : {
   id: Number(r.id), text: r.text, type: r.type, scope: r.scope, source: r.source,
   createdAt: Number(r.created_at), updatedAt: Number(r.updated_at), uses: Number(r.uses),
   lastUsed: r.last_used == null ? null : Number(r.last_used), status: r.status,
