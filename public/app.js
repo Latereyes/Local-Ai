@@ -462,7 +462,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', script: 'Script eseguito' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);

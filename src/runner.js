@@ -153,6 +153,7 @@ ${task.text}
 
 Rules:
 - Do only this task, complete and working; first read the existing files you need.
+- You cannot run commands. You can run the project's own scripts (.py, .js) with run_script, for example to generate a file; LocalAI runs the tests at the end of your turn.
 - Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
 - Files that already exist: read them with read_file first (LocalAI rejects changes to files you have not read, or that changed after you read them), then change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
 ${rules}
@@ -163,13 +164,17 @@ ${rules}
 /** File scritti (o modificati) dal task, in tutti i tentativi. */
 function writtenFiles(conv) {
   return [...new Set(conv.messages.flatMap((m) => m.steps || [])
-    .filter((s) => s.type === 'file' && ['write', 'append', 'edit', 'restore'].includes(s.action) && s.status === 'done' && s.path).map((s) => s.path))];
+    .filter((s) => s.type === 'file' && ['write', 'append', 'edit', 'restore', 'pdf', 'word', 'script'].includes(s.action) && s.status === 'done' && s.path).map((s) => s.path))];
 }
 
-/** Pagina da controllare: l'html scritto in questo task (index.html se c'è), altrimenti index.html del progetto. */
-function entryPage(user, conv) {
+/**
+ * Pagina da controllare: l'html scritto in questo task (index.html se c'è), poi quelli nominati nel task (anche se li
+ * crea uno script, come book.html del libro mindfulness), altrimenti index.html del progetto.
+ */
+function entryPage(user, conv, taskText = '') {
   const written = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append'].includes(s.action) && s.status === 'done' && /\.html?$/i.test(s.path)).map((s) => s.path);
-  const candidates = [...written.filter((f) => /(^|\/)index\.html?$/i.test(f)), ...written, 'index.html'];
+  const named = String(taskText).match(/[\w./-]*\w\.html?\b/gi) || [];
+  const candidates = [...written.filter((f) => /(^|\/)index\.html?$/i.test(f)), ...written, ...named, 'index.html'];
   return candidates.find((f) => { try { return fs.existsSync(workspace.resolve(user, f).abs); } catch { return false; } }) || null;
 }
 
@@ -272,7 +277,7 @@ async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
 
   // 4. Pagina nel browser: errori JavaScript e screenshot
   if (task.type === 'page') {
-    const page = entryPage(user, conv);
+    const page = entryPage(user, conv, task.text);
     if (!page) {
       add({ kind: 'page', ok: false, summary: 'Nessuna pagina HTML trovata' });
       problems.push('I cannot find the HTML page of the task: create index.html (or the requested file).');

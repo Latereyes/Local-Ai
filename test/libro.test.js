@@ -252,3 +252,11 @@ test('modelsTried: i modelli diversi con cui un task ha lavorato (per passare al
   assert.deepEqual(projects.modelsTried({ modelsTried: ['qwen3.8-coder:latest', 'qwen3.8-coder'] }), ['qwen3.8-coder']);
   assert.equal(projects.modelsTried({ modelsTried: ['qwen3.8-coder:latest', 'hf.co/x/gemma:IQ4'] }).length, 2);
 });
+
+test('run_script: offerto solo ai task della coda (scripts), non alle chat normali', async () => {
+  const { computerTools } = await import('../src/prompts.js');
+  const names = (o) => computerTools(o).map((t) => t.function.name);
+  assert.ok(names({ project: true, scripts: true }).includes('run_script'));
+  assert.ok(!names({ project: true }).includes('run_script'));
+  assert.ok(!names({ canRun: true }).includes('run_script'));
+});

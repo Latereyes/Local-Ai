@@ -271,7 +271,7 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
-export function computerTools({ canRun = false, images = [], project = false, projectChat = false } = {}) {
+export function computerTools({ canRun = false, images = [], project = false, projectChat = false, scripts = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
   return [
@@ -312,6 +312,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    // task della coda: niente comandi, ma gli script del progetto sì (stesso rischio dei test che la coda già esegue)
+    ...(scripts ? [fn('run_script', 'Esegue uno script del progetto (Python .py o Node .js/.mjs) nella cartella del progetto e restituisce l\'output: per generare file (es. book.html dai capitoli) o provare il codice. Solo script del progetto, niente altri comandi.', {
+      path: p('Script da eseguire, es. build_book.py'),
+    }, ['path'])] : []),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },

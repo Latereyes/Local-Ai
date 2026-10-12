@@ -39,7 +39,7 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 // in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'run_script', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const WRITE_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'restore_file', 'delete_file', 'save_chat_image', 'create_audio_file', 'html_to_word', 'html_to_pdf']);
 const FORCE_NOTE = {
@@ -350,7 +350,7 @@ export function singleFile(text) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', run_script: 'script', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.file_path ?? args.filename ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -481,6 +481,22 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.copyIn(user, path.join(config.paths.media, img.file), step.path, path.extname(img.file));
         Object.assign(step, { path: r.path, size: r.size });
         output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, width: img.width || undefined, height: img.height || undefined });
+        break;
+      }
+      case 'run_script': {
+        // solo nei task della coda dell'amministratore (strumento offerto lì), solo script del progetto
+        const owner = getUser(conv.ownerId);
+        if (!conv.project || conv.projectChat || owner?.role !== 'admin') throw new workspace.WorkspaceError('run_script è disponibile solo nei task della coda');
+        const { rel } = workspace.resolve(user, step.path);
+        const ext = /\.(py|js|mjs)$/i.exec(rel)?.[1]?.toLowerCase();
+        if (!ext || /["&|<>^%!`$]/.test(rel)) throw new workspace.WorkspaceError('Solo script .py, .js o .mjs del progetto (nome senza caratteri speciali)');
+        if (!fs.existsSync(workspace.resolve(user, rel).abs)) throw new workspace.WorkspaceError(`Lo script «${rel}» non esiste: scrivilo prima con write_file`);
+        step.path = rel;
+        const cmd = `${ext === 'py' ? (process.platform === 'win32' ? 'python' : 'python3') : 'node'} "${rel}"`;
+        const r = await workspace.runCommand(user, cmd, { timeout: config.projects.testTimeoutMs, signal });
+        step.exitCode = r.exitCode;
+        const out = projects.printable(r.output || r.error || '').slice(-3000);
+        output = JSON.stringify({ exit_code: r.timedOut ? 'timed out' : r.exitCode, output: out || '(no output)' });
         break;
       }
       case 'html_to_pdf': {
@@ -1183,7 +1199,7 @@ export async function send(conv, opts) {
           // nei task dei progetti, solo i file (i test li fa la coda)
           ...(opts.auto || projectTask ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv), melody: recentMelody(conv) })
             .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
-          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat }) : []),
+          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat, scripts: projectTask && user?.role === 'admin' }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
         const maxRounds = computer ? Math.max(config.workspace.maxRounds, config.search.maxRounds) : config.search.maxRounds;
