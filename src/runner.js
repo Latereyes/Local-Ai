@@ -177,8 +177,14 @@ function entryPage(user, conv) {
  * Verifica il lavoro del task. Restituisce { ok, feedback } dove feedback è il messaggio per il modello se qualcosa non va.
  * Ogni controllo resta nel task (task.checks) per l'interfaccia.
  */
-async function verify(p, task, conv, owner) {
+async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
   const user = projects.scoped(owner, p);
+  // un task di codice o pagina che non ha cambiato nessun file non è fatto, anche se i test (vecchi) passano
+  // (libro mindfulness 2026-10-12: Qwen ha letto cinque file e chiuso il turno vuoto, il PDF è rimasto com'era)
+  if (requireChanges && (task.type === 'code' || task.type === 'page') && !writtenFiles(conv).length) {
+    task.checks.push({ id: randomUUID(), at: Date.now(), attempt: task.attempts, kind: 'test', ok: false, summary: 'Nessun file creato o modificato' });
+    return { ok: false, feedback: 'You did not create or change any file: the task is not done. Do not read more than you need (open only the files you will change, long ones in pieces), then make the changes with edit_file or write_file.' };
+  }
   const problems = [];
   const add = (check) => { task.checks.push({ id: randomUUID(), at: Date.now(), attempt: task.attempts, ...check }); projects.save(p, { touch: false }); };
   const canRun = owner.role === 'admin';
@@ -426,7 +432,7 @@ async function runTask(p, task) {
     task.status = 'testing';
     projects.save(p, { touch: false });
     let result;
-    try { result = await verify(p, task, conv, owner); }
+    try { result = await verify(p, task, conv, owner, { requireChanges: true }); }
     catch (e) { result = { ok: true }; task.checks.push({ id: randomUUID(), at: Date.now(), kind: 'test', ok: null, summary: `Verifica non riuscita: ${e.message}` }); }
     if (current.cancelled) return finish('cancelled', `«${task.title}» fermato`);
     if (result.ok) return finish('done', `«${task.title}» completato${task.attempts > 1 ? ` al tentativo ${task.attempts}` : ''}`);
