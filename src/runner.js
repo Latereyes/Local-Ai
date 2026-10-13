@@ -251,8 +251,12 @@ async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
   // parole, pagine del PDF, pagina senza errori): libro mindfulness 2026-10-12, copertina e book.html bloccati da test
   // vecchi o inventati dal modello per altri lavori.
   if (p.autoTest && task.type === 'code') {
-    // i test del task, se ne ha scritti (i test vecchi di altri lavori non lo bloccano); altrimenti tutta la suite
-    const cmd = canRun ? (p.testCommand || projects.taskTestCommand(writtenFiles(conv)) || await projects.testCommand(user, p)) : null;
+    // i test creati dal task (i test vecchi di altri lavori non lo bloccano, anche se il modello li ha ritoccati:
+    // libreria 2026-10-13, scan_flow.test.js modificato e rientrato nella verifica di books.js); se non ne ha creati,
+    // quelli che ha modificato; altrimenti tutta la suite
+    const steps = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && s.status === 'done' && s.path);
+    const created = [...new Set(steps.filter((s) => s.action === 'write' && s.created).map((s) => s.path))];
+    const cmd = canRun ? (p.testCommand || projects.taskTestCommand(created) || projects.taskTestCommand(writtenFiles(conv)) || await projects.testCommand(user, p)) : null;
     if (!canRun) add({ kind: 'test', ok: null, summary: 'Test non eseguiti: solo l\'amministratore può far girare il codice' });
     else if (!cmd && task.type === 'code') {
       add({ kind: 'test', ok: false, summary: 'Nessun test trovato' });
