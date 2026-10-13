@@ -154,3 +154,10 @@ test('checkPlan: task scrive troppi file', () => {
 test('namedFiles: un URL nel testo non nasconde i file nominati dopo', () => {
   assert.deepEqual(namedFiles('Vedi https://esempio.it/guida.html poi crea `book.html` e ./out/libro.pdf'), ['book.html', 'out/libro.pdf']);
 });
+
+test('checkPlan: un progetto in un file solo spezzato in più task va rifatto come un task unico', () => {
+  const plan = '# Obiettivo\nPagina\n\n# Task\n\n- [pagina] Struttura di `index.html`\n- [pagina] Menu in `index.html`\n- [pagina] Contatti in `index.html`\n';
+  assert.ok(checkPlan(plan, 'Una pagina web per una pizzeria').some((x) => /UN SOLO task/.test(x)));
+  const ok = '# Obiettivo\nGioco\n\n# Task\n\n- [codice] Logica in `game.js` con i test\n- [pagina] `index.html` che usa game.js\n';
+  assert.ok(!checkPlan(ok, 'Un gioco').some((x) => /UN SOLO task/.test(x)));
+});

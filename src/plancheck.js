@@ -146,6 +146,16 @@ export function checkPlan(plan, goal) {
     }
   }
 
+  // f) progetto piccolo spezzato: tutti i task lavorano sullo stesso unico file (prova pizzeria 2026-10-13:
+  // tre task su index.html, che una chat fa in un colpo solo)
+  if (tasks.length > 1) {
+    const sets = tasks.map((t) => namedFiles(t.text).filter((f) => !/^(PIANO|README)\.md$/i.test(f) && !/^tests?\//i.test(f)));
+    const only = sets[0].length === 1 ? sets[0][0] : null;
+    if (only && sets.every((s) => s.length === 1 && s[0] === only)) {
+      problems.push(`Tutti i task lavorano solo su ${only}: è un progetto piccolo, fai UN SOLO task completo che lo crea tutto.`);
+    }
+  }
+
   return problems;
 }
 
