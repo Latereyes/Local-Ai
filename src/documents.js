@@ -55,7 +55,7 @@ const withPageMarks = (pages, from = 1) => pages.map((t, i) => `[p. ${from + i}]
 // ---------------- Lingua e ricerca dei passaggi (BM25) ----------------
 const STOP = new Set(('il lo la i gli le un una uno di da in con su per tra fra e o ma che chi cui non si è sono era ha hanno al alla ai agli allo dei delle del della nel nella nei sul sulla come anche più questo questa quello quella cosa ' +
   'the a an of to in on at for with and or but is are was were be been it its this that these those he she they them his her their you your i we our as by from not have has had do does did what who which when where how').split(' '));
-const tokens = (s) => (s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[\p{L}\p{N}]{2,}/gu) || []).filter((w) => !STOP.has(w));
+export const tokens = (s) => (s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[\p{L}\p{N}]{2,}/gu) || []).filter((w) => !STOP.has(w));
 
 export function guessLanguage(text) {
   const w = text.toLowerCase().slice(0, 20000).match(/\b\p{L}+\b/gu) || [];

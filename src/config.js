@@ -75,7 +75,9 @@ export default {
       code: env.TASK_MODEL_CODE || 'qwen3.8-coder:latest',
       page: env.TASK_MODEL_PAGE || 'qwen3.8-coder:latest',
       read: env.TASK_MODEL_READ || 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
-      chat: env.TASK_MODEL_CHAT || '',   // vuoto = modello predefinito (OLLAMA_MODEL)
+      // testi (capitoli, articoli): Gemma 26B scrive meglio di gemma4-12b ed è più veloce (~90 tok/s); con il 12B i capitoli
+      // del libro mindfulness uscivano corti e write_file arrivava senza percorso. TASK_MODEL_CHAT= (vuoto) = modello predefinito
+      chat: env.TASK_MODEL_CHAT ?? 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
     },
     // Tentativi per task: dopo un test fallito il modello riceve l'errore e corregge, fino a questo numero di giri
     maxAttempts: Number(env.TASK_MAX_ATTEMPTS || 3),
@@ -103,6 +105,12 @@ export default {
     describeModel: env.DESCRIBE_MODEL ?? 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
   },
 
+  // Memoria: note scritte dall'utente (preferenze, fatti, procedure, correzioni) aggiunte al prompt quando servono
+  memory: {
+    // caratteri massimi di note per messaggio (il pacchetto si aggiunge solo se la ricerca trova note pertinenti)
+    packChars: Number(env.MEMORY_PACK_CHARS || 1500),
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',
@@ -122,6 +130,8 @@ export default {
     sessions: path.join(dataDir, 'sessions.json'),
     public: path.join(root, 'public'),
     projects: path.join(dataDir, 'projects'),
+    // Memoria (note dell'utente usate nelle risposte): un database SQLite
+    memory: path.join(dataDir, 'memory.sqlite'),
     workspace: env.WORKSPACE_DIR ? path.resolve(env.WORKSPACE_DIR) : path.join(root, 'workspace'),
   },
 };

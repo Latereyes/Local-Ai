@@ -85,7 +85,9 @@ test('coordinatore: spento o oltre il limite di interventi non apre turni e lasc
   task.coordinated = 2;
   await runner.coordinate(p, task);
   assert.equal(task.coordinated, 3);
-  assert.match(p.log.at(-1).text, /serve il tuo aiuto/);
+  // domanda chiara all'utente: cosa non va, cosa è stato provato, cosa può fare
+  assert.match(p.log.at(-1).text, /Domanda per te: .* non riesce: .*Cosa faccio\?/);
+  assert.match(task.question, /Rispondi nella chat del progetto/);
   assert.deepEqual(p.chats, []);
 });
 

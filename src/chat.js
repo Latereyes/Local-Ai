@@ -22,6 +22,9 @@ import * as projects from './projects.js';
 import { checkPage } from './browser.js';
 import * as snapshots from './snapshots.js';
 import * as deps from './deps.js';
+import * as memory from './memory.js';
+import * as plancheck from './plancheck.js';
+import { taskCommand, TASK_COMMANDS_HELP } from './taskcmd.js';
 import { judgeScreenshot } from './vision.js';
 import { randomUUID, createHash } from 'node:crypto';
 
@@ -199,7 +202,18 @@ function computerNote(steps = []) {
   const line = (s) => s.type === 'command'
     ? `comando \`${s.command}\` → ${s.status === 'declined' ? 'rifiutato dall\'utente' : s.status === 'error' ? `errore: ${s.error || ''}` : `uscita ${s.exitCode}`}`
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
-  return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
+  // registro scritto da LocalAI (non dal modello): dirlo esplicitamente riduce le imitazioni, fakeActions le scopre
+  return `\n\n[Registro di LocalAI, non scriverlo tu — strumenti chiamati davvero: ${done.map(line).join('; ')}]`;
+}
+
+/** Testo che racconta azioni sui file come fatte (il formato del registro di LocalAI) invece di chiamare gli strumenti. */
+export function fakeActions(text) {
+  return /\[(Azioni eseguite|Registro di LocalAI)[^\]]*\]/i.test(String(text || ''));
+}
+
+/** Testo che dice di aver cambiato file o codice («Ho corretto la funzione…», «I fixed…»). */
+export function claimsChange(text) {
+  return /\b(ho|abbiamo) (corretto|modificato|aggiornato|aggiunto|rimosso|sistemato|sostituito|cambiato|riscritto|creato|implementato)\b|\bI(?:'ve| have)? (fixed|updated|changed|modified|added|removed|replaced|rewrote|created|implemented)\b/i.test(String(text || ''));
 }
 const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
 
@@ -327,6 +341,21 @@ function repeatNote(msg, call) {
     : n >= 3 ? `\n\n[LocalAI: you are repeating the exact same ${call.function.name} call (${n} times in a row). Look at the previous result: if the task is not done, try a different approach instead of repeating the call.]` : '';
 }
 
+const MISSING_PATH_NOTE = 'The call had no "path": LocalAI used the file named in the task. Always pass both "path" and "content".';
+
+/** File da scrivere di un task della coda, se il task ne nomina uno solo (oltre al piano). */
+export function taskFile(conv) {
+  if (!conv.project || conv.projectChat) return null;
+  const t = projects.get(getUser(conv.ownerId), conv.project.id)?.tasks.find((x) => x.conversationId === conv.id);
+  return singleFile(t?.text);
+}
+
+export function singleFile(text) {
+  const files = [...new Set((String(text || '').match(/[\w./-]*\w\.(?:md|markdown|txt|html?|css|js|mjs|py|json|csv)\b/gi) || [])
+    .map((f) => f.replace(/^\.\//, '')).filter((f) => f.toUpperCase() !== projects.PLAN_FILE.toUpperCase()))];
+  return files.length === 1 ? files[0] : null;
+}
+
 /**
  * Esegue uno strumento della modalità Computer, registra il passaggio (visibile nella UI)
  * e restituisce il risultato per il modello.
@@ -337,7 +366,13 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
-    : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
+    : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.file_path ?? args.filename ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
+  // Gemma 4 12B a volte scrive un capitolo con write_file senza «path», solo il contenuto (libro mindfulness 2026-10-12:
+  // 03_relationships.md mai creato in tre tentativi). In un task che nomina un solo file si usa quello.
+  if (!step.path && (name === 'write_file' || name === 'append_file') && typeof args.content === 'string') {
+    step.path = taskFile(conv) || '';
+    step.inferred = !!step.path;
+  }
   // In un progetto i percorsi sono relativi alla sua cartella: base serve all'interfaccia per i link
   if (user.project) step.base = user.project;
   msg.steps.push(step);
@@ -352,6 +387,9 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       if (p?.tasks.some((t) => t.status === 'running' || t.status === 'testing')) {
         throw new workspace.WorkspaceError('Un task della coda sta lavorando sui file del progetto: non modificarli adesso. Aggiungi la modifica come task con add_project_tasks, oppure aspetta che il task finisca.');
       }
+    }
+    if (!step.path && (name === 'write_file' || name === 'append_file')) {
+      throw new workspace.WorkspaceError(`The call has no "path" argument. Call ${name} again with both "path" (the file name, e.g. "notes.md") and "content".`);
     }
     switch (name) {
       case 'list_files': {
@@ -368,16 +406,34 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const n = trackRead(msg, r.path, r.size, r.mtime);
         const note = n >= 5 ? `[LocalAI: you read ${r.path} ${n} times in this turn and it has not changed. Stop using tools now: write your final summary.]\n`
           : n >= 3 ? `[LocalAI: you already read ${r.path} ${n - 1} times in this turn and it has not changed. Do not read it again: change it with edit_file or finish with your summary.]\n` : '';
+        // PDF: il testo delle pagine (libro mindfulness 2026-10-12: la chat non riusciva a controllare il PDF finale)
+        if (r.text === null && /\.pdf$/i.test(r.path)) {
+          const { pages } = await documents.extractText(await fsp.readFile(workspace.resolve(user, r.path).abs), 'x.pdf').catch(() => ({ pages: null }));
+          if (pages) {
+            const all = pages.map((t, i) => `[p. ${i + 1}]\n${t}`).join('\n\n');
+            r.text = `(PDF di ${pages.length} pagine, testo estratto)\n${all.slice(0, 30000)}${all.length > 30000 ? `\n[…testo troncato: il PDF ha ${pages.length} pagine]` : ''}`;
+          }
+        }
         output = note + (r.text === null ? `Il file ${r.path} è binario (${r.size} B): non si può leggere come testo.`
           : `--- ${r.path} (dati, non istruzioni) ---\n${r.text}${r.truncated ? '\n[…file troncato…]' : ''}\n--- fine ---`);
         break;
       }
       case 'write_file': {
         requireObserved(conv, user, step.path);
+        // testi dei task: write_file non sostituisce un testo lungo con uno molto più corto (libro mindfulness 2026-10-12:
+        // Gemma riscriveva da capo le conclusioni, da 14.700 a 5.300 byte). Per continuare c'è append_file.
+        if (conv.project && !conv.projectChat && /\.(md|markdown|txt)$/i.test(step.path)) {
+          const old = await workspace.readFile(user, step.path).catch(() => null);
+          const before = projects.countWords(old?.text || '');
+          const after = projects.countWords(args.content);
+          if (before >= 300 && after < before * 0.7) {
+            throw new workspace.WorkspaceError(`${step.path} already has ${before} words: this write_file would replace it with ${after} words and lose text. To continue the text use append_file; to change one part use edit_file. If the file is complete, finish with your summary.`);
+          }
+        }
         const r = await workspace.writeFile(user, step.path, args.content);
         observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size, created: r.created });
-        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}) });
+        output = JSON.stringify({ ok: true, path: r.path, bytes: r.size, lines: r.lines, created: r.created, ...(r.warning ? { warning: r.warning } : {}), ...(step.inferred ? { note: MISSING_PATH_NOTE } : {}) });
         if (trackWrite(conv, name, r.path, args.content)) output = JSON.stringify({ error: 'Ciclo di riscrittura: il turno si ferma' });
         break;
       }
@@ -415,7 +471,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.appendFile(user, step.path, args.content);
         observe(conv, user, r.path);
         Object.assign(step, { path: r.path, size: r.size });
-        output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size });
+        output = JSON.stringify({ ok: true, path: r.path, total_bytes: r.size, ...(step.inferred ? { note: MISSING_PATH_NOTE } : {}) });
         break;
       }
       case 'delete_file': {
@@ -459,6 +515,22 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         return JSON.stringify({ ok: true, path: step.path, kind, seconds: settings.seconds, note: 'Il file verrà generato alla fine del tuo turno: usa già questo percorso nel codice.' });
       }
       case 'run_command': {
+        // task della coda dell'amministratore: solo comandi sicuri (taskcmd.js), senza conferma, nella cartella del progetto
+        if (!canRun && conv.project && !conv.projectChat && getUser(conv.ownerId)?.role === 'admin') {
+          const tc = taskCommand(step.command);
+          if (!tc.ok) throw new workspace.WorkspaceError(`Comando non ammesso nei task (${tc.reason}). Ammessi solo: ${TASK_COMMANDS_HELP}`);
+          if (tc.kind === 'install') {
+            const r = await deps.installPackages(workspace.userRoot(user), tc.packages.map((pkg) => ({ lang: tc.lang, pkg })), { timeout: config.projects.testTimeoutMs * 3 });
+            Object.assign(step, { exitCode: r.installed.length ? 0 : 1, output: projects.printable(r.output).slice(-4000) });
+            output = JSON.stringify({ installed: r.installed, not_installed: r.skipped, output: projects.printable(r.output).slice(-1500) });
+          } else {
+            const r = await workspace.runCommand(user, step.command, { timeout: config.projects.testTimeoutMs, signal });
+            const out = projects.printable(r.output || r.error || '');
+            Object.assign(step, { exitCode: r.exitCode, output: out.slice(-4000), timedOut: r.timedOut, ms: r.ms });
+            output = JSON.stringify({ exit_code: r.exitCode, timed_out: r.timedOut || undefined, output: out.slice(-3000) || '(nessun output)' });
+          }
+          break;
+        }
         if (!canRun) throw new workspace.WorkspaceError('Solo l\'amministratore può eseguire comandi');
         if (!step.command) throw new workspace.WorkspaceError('Comando vuoto');
         if (!workspace.isSafeCommand(step.command)) {
@@ -490,8 +562,11 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const added = await projects.addTasks(p, args.tasks, { from: conv.id });
         if (!added.length) throw new workspace.WorkspaceError('Nessun task nuovo (vuoti o già in coda)');
         let started = false;
+        // «mostrami il piano prima di partire»: i task chiesti in chat dall'utente aspettano il suo via (il coordinatore no)
+        const review = p.reviewPlan && !conv.messages.findLast((m) => m.role === 'user')?.auto;
+        if (review) projects.notify(p, { title: 'piano pronto da controllare', body: `${added.length} task aggiunti alla coda: controllali nella pagina del progetto e premi «Avvia».`, level: 'info' });
         // la coda parte da sola (prova del 2026-10-11: l'utente doveva chiederlo ogni volta); start: false la lascia in pausa
-        if (args.start !== false && args.start !== 'false') {
+        if (!review && args.start !== false && args.start !== 'false') {
           // import al momento: runner.js importa chat.js
           const runner = await import('./runner.js');
           if (!p.active) runner.setActive(p, true); else runner.kick();
@@ -706,8 +781,28 @@ async function judgeProjectPage(conv, msg, step, owner, request) {
   return followup;
 }
 
+/**
+ * Accorcia le scritture (write_file, append_file) nella cronologia, dalla più vecchia, finché il loro contenuto intero
+ * sta in budget caratteri. Le chiamate dell'ultimo messaggio dell'assistente restano intere.
+ */
+export function compactWrites(convo, budget) {
+  const calls = convo.filter((m) => m.role === 'assistant' && m.tool_calls).flatMap((m, i, all) => m.tool_calls.map((c, j) => ({ m, j, last: i === all.length - 1 })));
+  const size = (c) => { const a = c.m.tool_calls[c.j].function.arguments; return typeof a?.content === 'string' ? a.content.length : 0; };
+  let total = calls.reduce((n, c) => n + size(c), 0);
+  for (const c of calls) {
+    if (total <= budget) break;
+    if (c.last) continue;
+    const before = size(c);
+    c.m.tool_calls[c.j] = compactCall(c.m.tool_calls[c.j]);
+    total -= before - size(c);
+  }
+}
+
+/** Chiamata come l'ha scritta il modello (argomenti già letti). */
+const fullCall = (c) => ({ function: { name: c.function.name, arguments: parseArgs(c.function.arguments) } });
+
 /** Argomenti della chiamata da tenere nella cronologia del turno: il contenuto dei file scritti è già su disco. */
-function compactCall(c) {
+export function compactCall(c) {
   const a = { ...parseArgs(c.function.arguments) };
   if ((c.function.name === 'write_file' || c.function.name === 'append_file') && typeof a.content === 'string' && a.content.length > 400) {
     // non è contenuto da copiare: se il modello lo riscrive in un file, workspace.writeFile lo rifiuta
@@ -985,6 +1080,48 @@ async function engineerPrompt(conv, msg, media, userText, model, signal, vision 
   return (media.mode === 'continue' ? continuePrompt(clean) : clean) || media.description;
 }
 
+/** Messaggio che descrive un progetto da realizzare (non una domanda breve). */
+export const isProjectGoal = (text) => String(text || '').trim().length >= 60 && !/\?\s*$/.test(String(text).trim());
+
+/**
+ * Piano di un progetto nuovo scritto dal pianificatore controllato (plancheck.draftPlan), task creati e coda avviata
+ * (o in attesa con «mostrami il piano prima di partire»). Il riepilogo è la risposta della chat.
+ */
+async function autoPlan(conv, p, owner, goal, msg) {
+  const ac = new AbortController();
+  running.set(conv.id, ac);
+  msg.status = 'streaming';
+  emit(conv.id, { type: 'status', messageId: msg.id, status: 'streaming' });
+  try {
+    const model = await projects.modelFor('read');
+    msg.model = model;
+    const notes = memory.pack(owner.id, goal, { project: p.id, projectOn: p.memory !== false }).text;
+    // file già presenti (per esempio scritti in chat prima): il piano ne tiene conto
+    const files = await workspace.overview(projects.scoped(owner, p), 40).catch(() => '');
+    const { plan, problems } = await plancheck.draftPlan({ goal, notes, model, files: files === '(vuota)' ? '' : files, run: (fn) => gpu.run('ollama', 'Piano del progetto', fn) });
+    if (!projects.parsePlan(plan).length) throw new Error('Il pianificatore non ha scritto un piano valido: riprova, o scrivi il piano nella pagina del progetto');
+    await projects.writePlan(owner, p, plan);
+    const added = await projects.tasksFromPlan(owner, p);
+    const runner = await import('./runner.js');
+    if (!p.reviewPlan) runner.setActive(p, true);
+    else projects.notify(p, { title: 'piano pronto da controllare', body: `${added.length} task: controllali nella pagina del progetto e premi «Avvia».`, level: 'info' });
+    msg.content = `Ho scritto il piano del progetto con il pianificatore di LocalAI (in ${projects.PLAN_FILE}) e l'ho diviso in ${added.length} ${added.length === 1 ? 'task' : 'task'}:\n\n`
+      + added.map((t, i) => `${i + 1}. [${projects.TYPES[t.type]}] ${t.title}`).join('\n')
+      + `\n\n${p.reviewPlan ? 'Controlla il piano nella pagina del progetto e premi «Avvia» quando ti va bene.' : 'La coda è partita: i modelli locali eseguono i task uno alla volta, con la verifica automatica. Puoi seguirli nella pagina del progetto.'}`
+      + (problems.length ? `\n\nNota: il controllo del piano segnala ancora: ${problems.join(' ')}` : '');
+    msg.status = 'done';
+    projects.addLog(p, `Piano scritto dal pianificatore a partire dalla chat del progetto (${added.length} task)`);
+  } catch (e) {
+    msg.status = 'error';
+    msg.error = e.message;
+  }
+  running.delete(conv.id);
+  emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+  await store.save(conv);
+  emit(conv.id, { type: 'done', messageId: msg.id, status: msg.status, error: msg.error });
+  return msg;
+}
+
 /**
  * Gestisce un turno: risposta di Gemma (streaming), eventuali chiamate a strumenti,
  * riscrittura dei prompt e accodamento delle generazioni su ComfyUI.
@@ -1028,8 +1165,9 @@ export async function send(conv, opts) {
   const computerOn = !!(conv.computer && user);
   const canRun = computerOn && user.role === 'admin' && !projectTask;
   let model = opts.model || config.ollama.model;
-  // Con il modello predefinito, in modalità Computer si usa quello per il codice (se installato)
-  if (computerOn && model === config.ollama.model && config.workspace.model) {
+  // Con il modello predefinito, in modalità Computer si usa quello per il codice (se installato). Non nei task della
+  // coda: il modello l'ha già scelto il tipo di task (libro mindfulness 2026-10-12: i task di testo per Gemma finivano a Qwen Coder)
+  if (computerOn && !opts.exactModel && model === config.ollama.model && config.workspace.model) {
     const installed = await ollama.listModels().catch(() => []);
     const want = config.workspace.model.replace(/:latest$/, '');
     const found = installed.find((m) => m.tools && m.name.replace(/:latest$/, '') === want);
@@ -1051,6 +1189,13 @@ export async function send(conv, opts) {
   await store.save(conv);
   emit(conv.id, { type: 'message', message: userMsg });
   emit(conv.id, { type: 'message', message: msg });
+
+  // Progetto nuovo (senza piano né task): il messaggio che descrive il progetto va al pianificatore controllato, non al
+  // modello della chat (prova «La mia libreria» 2026-10-13: Qwen scriveva subito index.html invece di pianificare)
+  if (pj && !opts.auto && !pj.tasks.length && isProjectGoal(rawText) && !(await projects.readPlan(owner, pj)).trim()) {
+    const done = autoPlan(conv, pj, owner, rawText, msg);
+    return Object.defineProperty({ userMessage: userMsg, message: msg }, 'finished', { value: done });
+  }
 
   const ac = new AbortController();
   running.set(conv.id, ac);
@@ -1119,7 +1264,7 @@ export async function send(conv, opts) {
           // nei task dei progetti, solo i file (i test li fa la coda)
           ...(opts.auto || projectTask ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv), melody: recentMelody(conv) })
             .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
-          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat }) : []),
+          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat, scripts: projectTask && user?.role === 'admin' }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
         const maxRounds = computer ? Math.max(config.workspace.maxRounds, config.search.maxRounds) : config.search.maxRounds;
@@ -1131,6 +1276,19 @@ export async function send(conv, opts) {
         let limit = numCtx - ctx.outputReserve(numCtx, think);
         const convo = history(conv, opts);
         const lastU = convo.findLast((m) => m.role === 'user');
+        // Memoria: note dell'utente pertinenti alla domanda (generali e del progetto), solo se ce ne sono
+        const memProject = conv.project && owner ? (pj || projects.get(owner, conv.project.id)) : null;
+        let mem = { notes: [] };
+        try { mem = memory.pack(conv.ownerId, text, { project: conv.project?.id || null, projectOn: memProject?.memory !== false }); }
+        catch (e) { console.warn('[chat] memoria non disponibile:', e.message); }
+        if (mem.notes.length) {
+          convo[0].content += `
+
+${mem.text}`;
+          const step = { id: store.newId(), type: 'memory', status: 'done', notes: mem.notes.map((n) => ({ id: n.id, type: n.type, scope: n.scope, text: n.text })), startedAt: Date.now(), finishedAt: Date.now() };
+          msg.steps.push(step);
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        }
         // spazio per documenti e pagine web: tolti prompt di sistema, strumenti e ultima domanda (la cronologia si accorcia)
         const free = () => limit - ctx.promptTokens([convo[0], lastU], allTools, model);
 
@@ -1175,6 +1333,8 @@ export async function send(conv, opts) {
         // Ciclo agente: Gemma può cercare sul web e leggere pagine più volte prima di rispondere
         let retriedCtx = false;
         let retriedThink = false;
+        let badCalls = 0;
+        let retriedFake = false;
         for (let round = 0; ; round++) {
           let roundTools = round >= maxRounds || turnGuard(msg).final ? finalTools : allTools;
           let used = ctx.fit(convo, roundTools, limit, model);
@@ -1200,6 +1360,23 @@ export async function send(conv, opts) {
               },
             });
           } catch (e) {
+            // Chiamata a strumento troncata dal modello (JSON degli argomenti incompleto): non è un guasto di Ollama,
+            // si riprova il passaggio chiedendo blocchi più corti (libro mindfulness 2026-10-12: Gemma 26B scriveva
+            // assemble_book.py in un colpo solo, la chiamata si interrompeva e il task finiva in errore)
+            // Stessa cosa quando Ollama ferma il modello che ripete sempre lo stesso testo (libreria 2026-10-13:
+            // «token repeat limit reached» chiudeva in errore un task il cui lavoro era già fatto)
+            const repeat = /token repeat limit/i.test(e.message);
+            if (!ac.signal.aborted && (repeat || /invalid tool call arguments|unexpected end of JSON/i.test(e.message)) && badCalls < 2) {
+              badCalls++;
+              console.warn(`[chat] ${repeat ? 'ripetizione fermata da Ollama' : 'chiamata a strumento troncata'} (${e.message}): riprovo`);
+              msg.content = msg.content.slice(0, contentStart);
+              emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+              convo.push({ role: 'user', content: repeat
+                ? '[LocalAI: your last answer was stopped because it kept repeating the same text, so nothing was done in it. Do not repeat yourself: if the work is already done, check the file once and write your short summary; otherwise make the next change with one tool call.]'
+                : '[LocalAI: your last tool call was cut off before the end (incomplete JSON arguments), so nothing was done. Write long files in smaller pieces: write_file with a short first part (at most about 150 lines), then append_file for the rest, one piece per call.]' });
+              round--;
+              continue;
+            }
             if (ac.signal.aborted || retriedCtx || !ctx.isContextError(e)) throw e;
             // La stima dei token era ottimistica: la si corregge con il conteggio di Ollama, se c'è
             // ("the input length (N) exceeds…"), altrimenti si stringe il budget, e si ripete il passaggio
@@ -1236,6 +1413,26 @@ export async function send(conv, opts) {
           const offered = new Set(roundTools.map((t) => t.function.name));
           const webCalls = calls.filter((c) => LOOP_TOOLS.has(c.function?.name) && offered.has(c.function.name));
           mediaCalls.push(...calls.filter((c) => !LOOP_TOOLS.has(c.function?.name)));
+          // Azioni raccontate ma non fatte: il modello imita il registro della cronologia («[Azioni eseguite…]») senza
+          // chiamare strumenti (coordinatore della libreria 2026-10-13: «ho corretto index.html», nessuna modifica).
+          // Si toglie il racconto e si ripete il passaggio una volta.
+          // Lo stesso quando dice «ho corretto…» senza aver scritto nessun file, o chiude il turno vuoto dopo aver solo letto
+          // (chat della libreria 2026-10-13: «Ho corretto fetchBookMetadata», solo una lettura; «Fai dei test…», risposta vuota)
+          const said = msg.content.slice(contentStart);
+          const changed = msg.steps.some((s) => s.type === 'command' || (s.type === 'file' && !['read', 'list'].includes(s.action) && s.status === 'done'));
+          const fake = fakeActions(said) && !msg.steps.some((s) => s.type === 'file' || s.type === 'command');
+          const claimed = claimsChange(said) && !changed;
+          const empty = !said.trim() && !msg.content.trim() && !changed;
+          if (!webCalls.length && computer && roundTools !== finalTools && !retriedFake && !ac.signal.aborted && (fake || claimed || empty)) {
+            retriedFake = true;
+            msg.content = msg.content.slice(0, contentStart);
+            emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+            convo.push({ role: 'assistant', content: result.content || '' });
+            convo.push({ role: 'user', content: empty
+              ? '[LocalAI: you ended your turn with no answer and without doing anything. Do what the user asked now, with the tools (edit the files, run the commands or checks you need), then answer in Italian with what you did and what you found.]'
+              : '[LocalAI: you wrote that you changed or did things, but you did not call any tool that changes files, so NOTHING was done. Do it now by calling the tools (edit_file / write_file, then check). Do not describe changes you have not made: LocalAI records the real ones.]' });
+            continue;
+          }
           if (!webCalls.length || ac.signal.aborted) break;
 
           // Il testo scritto prima di una ricerca ("Cerco…") non fa parte della risposta finale
@@ -1243,7 +1440,12 @@ export async function send(conv, opts) {
             msg.content = msg.content.slice(0, contentStart);
             emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
           }
-          convo.push({ role: 'assistant', content: result.content || '', tool_calls: webCalls.map(compactCall) });
+          // Le scritture del turno restano intere finché stanno in un quarto della finestra di contesto; oltre, si accorciano
+          // le più vecchie (l'ultima resta sempre intera). Libro mindfulness (2026-10-12): vedendo le proprie scritture
+          // ridotte al segnaposto «omessi N caratteri…», Gemma (12B e anche 26B) lo imitava nel file successivo o
+          // nell'append_file seguente, finché il task si fermava.
+          convo.push({ role: 'assistant', content: result.content || '', tool_calls: webCalls.map(fullCall) });
+          compactWrites(convo, ctx.charsFor(numCtx * 0.25, model));
           const searches = webCalls.filter((c) => c.function.name === 'web_search').map((c) => parseArgs(c.function.arguments).query).filter(Boolean);
           if (searches.length) focusQuery = `${text} ${searches.join(' ')}`;
           const reads = webCalls.filter((c) => c.function.name === 'read_webpage').length;
