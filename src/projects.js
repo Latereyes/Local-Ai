@@ -347,11 +347,21 @@ export async function writePlan(user, p, text) {
   await save(p);
 }
 
+/**
+ * Un task di codice che nomina solo pagine (HTML/CSS) è una pagina: si verifica aprendola nel browser, non con i test
+ * (prova «La mia libreria» 2026-10-13: app in un solo index.html, task marcati [codice] dal pianificatore).
+ */
+export function pageIfOnlyHtml(text, type) {
+  if (type !== 'code') return type;
+  const files = String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)/gi) || [];
+  return files.length && files.every((f) => /\.(html?|css)$/i.test(f)) ? 'page' : type;
+}
+
 export function newTask(text, type) {
   const body = stripTag(text);
   return {
     id: randomUUID(),
-    type: TYPES[type] ? type : classify(text),
+    type: pageIfOnlyHtml(body, TYPES[type] ? type : classify(text)),
     text: body,
     title: body.split('\n')[0].slice(0, 100),
     status: 'queued',

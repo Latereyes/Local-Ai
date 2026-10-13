@@ -23,6 +23,7 @@ import { checkPage } from './browser.js';
 import * as snapshots from './snapshots.js';
 import * as deps from './deps.js';
 import * as memory from './memory.js';
+import * as plancheck from './plancheck.js';
 import { taskCommand, TASK_COMMANDS_HELP } from './taskcmd.js';
 import { judgeScreenshot } from './vision.js';
 import { randomUUID, createHash } from 'node:crypto';
@@ -1068,6 +1069,48 @@ async function engineerPrompt(conv, msg, media, userText, model, signal, vision 
   return (media.mode === 'continue' ? continuePrompt(clean) : clean) || media.description;
 }
 
+/** Messaggio che descrive un progetto da realizzare (non una domanda breve). */
+export const isProjectGoal = (text) => String(text || '').trim().length >= 60 && !/\?\s*$/.test(String(text).trim());
+
+/**
+ * Piano di un progetto nuovo scritto dal pianificatore controllato (plancheck.draftPlan), task creati e coda avviata
+ * (o in attesa con «mostrami il piano prima di partire»). Il riepilogo è la risposta della chat.
+ */
+async function autoPlan(conv, p, owner, goal, msg) {
+  const ac = new AbortController();
+  running.set(conv.id, ac);
+  msg.status = 'streaming';
+  emit(conv.id, { type: 'status', messageId: msg.id, status: 'streaming' });
+  try {
+    const model = await projects.modelFor('read');
+    msg.model = model;
+    const notes = memory.pack(owner.id, goal, { project: p.id, projectOn: p.memory !== false }).text;
+    // file già presenti (per esempio scritti in chat prima): il piano ne tiene conto
+    const files = await workspace.overview(projects.scoped(owner, p), 40).catch(() => '');
+    const { plan, problems } = await plancheck.draftPlan({ goal, notes, model, files: files === '(vuota)' ? '' : files, run: (fn) => gpu.run('ollama', 'Piano del progetto', fn) });
+    if (!projects.parsePlan(plan).length) throw new Error('Il pianificatore non ha scritto un piano valido: riprova, o scrivi il piano nella pagina del progetto');
+    await projects.writePlan(owner, p, plan);
+    const added = await projects.tasksFromPlan(owner, p);
+    const runner = await import('./runner.js');
+    if (!p.reviewPlan) runner.setActive(p, true);
+    else projects.notify(p, { title: 'piano pronto da controllare', body: `${added.length} task: controllali nella pagina del progetto e premi «Avvia».`, level: 'info' });
+    msg.content = `Ho scritto il piano del progetto con il pianificatore di LocalAI (in ${projects.PLAN_FILE}) e l'ho diviso in ${added.length} ${added.length === 1 ? 'task' : 'task'}:\n\n`
+      + added.map((t, i) => `${i + 1}. [${projects.TYPES[t.type]}] ${t.title}`).join('\n')
+      + `\n\n${p.reviewPlan ? 'Controlla il piano nella pagina del progetto e premi «Avvia» quando ti va bene.' : 'La coda è partita: i modelli locali eseguono i task uno alla volta, con la verifica automatica. Puoi seguirli nella pagina del progetto.'}`
+      + (problems.length ? `\n\nNota: il controllo del piano segnala ancora: ${problems.join(' ')}` : '');
+    msg.status = 'done';
+    projects.addLog(p, `Piano scritto dal pianificatore a partire dalla chat del progetto (${added.length} task)`);
+  } catch (e) {
+    msg.status = 'error';
+    msg.error = e.message;
+  }
+  running.delete(conv.id);
+  emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+  await store.save(conv);
+  emit(conv.id, { type: 'done', messageId: msg.id, status: msg.status, error: msg.error });
+  return msg;
+}
+
 /**
  * Gestisce un turno: risposta di Gemma (streaming), eventuali chiamate a strumenti,
  * riscrittura dei prompt e accodamento delle generazioni su ComfyUI.
@@ -1135,6 +1178,13 @@ export async function send(conv, opts) {
   await store.save(conv);
   emit(conv.id, { type: 'message', message: userMsg });
   emit(conv.id, { type: 'message', message: msg });
+
+  // Progetto nuovo (senza piano né task): il messaggio che descrive il progetto va al pianificatore controllato, non al
+  // modello della chat (prova «La mia libreria» 2026-10-13: Qwen scriveva subito index.html invece di pianificare)
+  if (pj && !opts.auto && !pj.tasks.length && isProjectGoal(rawText) && !(await projects.readPlan(owner, pj)).trim()) {
+    const done = autoPlan(conv, pj, owner, rawText, msg);
+    return Object.defineProperty({ userMessage: userMsg, message: msg }, 'finished', { value: done });
+  }
 
   const ac = new AbortController();
   running.set(conv.id, ac);

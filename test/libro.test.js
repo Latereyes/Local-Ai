@@ -281,3 +281,16 @@ test('recipeFor: la ricetta del tipo di progetto riconosciuto nell\'obiettivo', 
   assert.equal(projects.recipeFor('Riordina le foto delle vacanze'), '');
   assert.match(projects.planPrompt('Una pagina web per la pizzeria', '')[1].content, /Ricetta per questo tipo di progetto/);
 });
+
+test('isProjectGoal: la descrizione di un progetto va al pianificatore, una domanda breve no', () => {
+  assert.equal(chat.isProjectGoal('Un app che permette di creare la propria libreria digitale, scannerizzando i codici ISBN con la fotocamera'), true);
+  assert.equal(chat.isProjectGoal('Come funziona il progetto?'), false);
+  assert.equal(chat.isProjectGoal('Puoi spiegarmi bene come funziona la coda e cosa fa ogni task di questo progetto?'), false);
+  assert.equal(chat.isProjectGoal('Aggiungi un pulsante'), false);
+});
+
+test('newTask: un task [codice] che nomina solo index.html diventa [pagina]; con file .js resta codice', () => {
+  assert.equal(projects.newTask('[codice] Implementa la ricerca nella libreria in `index.html`.').type, 'page');
+  assert.equal(projects.newTask('[codice] Logica del gioco in `game.js` usata da `index.html`').type, 'code');
+  assert.equal(projects.newTask('[codice] Script `spese.py` con i test').type, 'code');
+});
