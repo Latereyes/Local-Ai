@@ -14,6 +14,8 @@ import { bus as chatBus } from './jobs.js';
 import * as snapshots from './snapshots.js';
 import * as ollama from './ollama.js';
 import * as deps from './deps.js';
+import * as plancheck from './plancheck.js';
+import * as documents from './documents.js';
 
 // Errori di collegamento (Ollama spento, riavviato o irraggiungibile): non sono colpa del task e il coordinatore
 // non può farci niente. La coda del progetto aspetta Ollama e riparte da sola quando torna (watchServices).
@@ -233,13 +235,10 @@ async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
     }
   }
 
-  // 2. Test automatici (codice, e pagine che ne hanno). Una pagina che non ha toccato codice (solo HTML/CSS) non
-  // risponde dei test degli altri task: la copertina del libro mindfulness falliva per i test rotti dello script del PDF
-  // e il modello passava i tentativi a riscrivere quello script.
-  const touchedCode = writtenFiles(conv).some((f) => /\.(js|mjs|cjs|ts|py)$/i.test(f));
-  if (p.autoTest && task.type === 'page' && !touchedCode) {
-    add({ kind: 'test', ok: null, summary: 'Test non eseguiti: il task ha cambiato solo pagine (HTML/CSS), non codice' });
-  } else if (p.autoTest && (task.type === 'code' || task.type === 'page')) {
+  // 2. Test automatici, solo nei task di codice. Pagine e testi si verificano con i criteri del piano (file presenti,
+  // parole, pagine del PDF, pagina senza errori): libro mindfulness 2026-10-12, copertina e book.html bloccati da test
+  // vecchi o inventati dal modello per altri lavori.
+  if (p.autoTest && task.type === 'code') {
     const cmd = canRun ? await projects.testCommand(user, p) : null;
     if (!canRun) add({ kind: 'test', ok: null, summary: 'Test non eseguiti: solo l\'amministratore può far girare il codice' });
     else if (!cmd && task.type === 'code') {
@@ -272,6 +271,23 @@ async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
       const ok = r.checks.every((c) => c.ok);
       add({ kind: 'text', ok, summary: `${r.checks.map((c) => `${c.file}: ${c.words ? `${c.words} parole` : 'mancante'}`).join(' · ')}${r.target ? ` (richieste almeno ${r.target})` : ''}` });
       problems.push(...r.problems);
+    }
+  }
+
+  // 3b. Criteri semplici dal testo del task: i file nominati ci sono, i PDF hanno le pagine chieste
+  if (task.type !== 'code') {
+    const exists = (f) => { try { return fs.existsSync(workspace.resolve(user, f).abs); } catch { return false; } };
+    const files = plancheck.namedFiles(task.text).filter((f) => f.toUpperCase() !== projects.PLAN_FILE.toUpperCase());
+    const missing = files.filter((f) => !exists(f));
+    if (files.length) add({ kind: 'files', ok: !missing.length, summary: missing.length ? `Mancano: ${missing.join(', ')}` : `File presenti: ${files.join(', ')}` });
+    if (missing.length) problems.push(`These files named in the task do not exist yet: ${missing.join(', ')}. Create them (tools, or run_command to run a project script).`);
+    const range = plancheck.pdfPages(task.text);
+    for (const f of range ? files.filter((x) => /\.pdf$/i.test(x) && exists(x)) : []) {
+      const { pages } = await documents.extractText(await fsp.readFile(workspace.resolve(user, f).abs), 'x.pdf').catch(() => ({ pages: null }));
+      if (!pages) continue;
+      const ok = pages.length >= range.min && pages.length <= range.max;
+      add({ kind: 'files', ok, summary: `${f}: ${pages.length} pagine (richieste ${range.max === Infinity ? `almeno ${range.min}` : `${range.min}-${range.max}`})` });
+      if (!ok) problems.push(`${f} has ${pages.length} pages, the task asks for ${range.max === Infinity ? `at least ${range.min}` : `${range.min}-${range.max}`}. Adjust the layout (for example the font size in the CSS) and generate it again.`);
     }
   }
 

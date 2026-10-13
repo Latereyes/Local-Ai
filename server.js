@@ -21,6 +21,7 @@ import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
 import * as vision from './src/vision.js';
 import * as memory from './src/memory.js';
+import * as plancheck from './src/plancheck.js';
 
 const app = express();
 app.set('trust proxy', false);
@@ -260,12 +261,11 @@ app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
   const model = await projects.modelFor('read');
   const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
   const notes = memory.pack(req.user.id, goal, { project: p.id, projectOn: p.memory !== false }).text;
-  const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
-    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files, notes), timeout: 300000, options: { temperature: 0.3, num_predict: 5000 },
-  }));
-  const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
+  // bozza + controllo (lunghezza, parti dell'obiettivo, strumenti, task troppo grandi) e una riscrittura se serve
+  const { plan, problems } = await plancheck.draftPlan({ goal, files: files === '(vuota)' ? '' : files, notes, model, run: (fn) => gpu.run('ollama', 'Bozza del piano', fn) });
   if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
   await projects.writePlan(req.user, p, plan);
+  if (problems.length) projects.addLog(p, `Piano scritto, ma il controllo segnala ancora: ${problems.join(' ')}`);
   res.json(await fullProject(req, p));
 }));
 
