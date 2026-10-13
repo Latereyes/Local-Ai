@@ -353,7 +353,7 @@ export async function writePlan(user, p, text) {
  */
 export function pageIfOnlyHtml(text, type) {
   if (type !== 'code') return type;
-  const files = String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)/gi) || [];
+  const files = String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)\b/gi) || [];
   return files.length && files.every((f) => /\.(html?|css)$/i.test(f)) ? 'page' : type;
 }
 
