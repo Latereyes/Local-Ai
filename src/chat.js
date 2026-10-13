@@ -1358,12 +1358,17 @@ ${mem.text}`;
             // Chiamata a strumento troncata dal modello (JSON degli argomenti incompleto): non è un guasto di Ollama,
             // si riprova il passaggio chiedendo blocchi più corti (libro mindfulness 2026-10-12: Gemma 26B scriveva
             // assemble_book.py in un colpo solo, la chiamata si interrompeva e il task finiva in errore)
-            if (!ac.signal.aborted && /invalid tool call arguments|unexpected end of JSON/i.test(e.message) && badCalls < 2) {
+            // Stessa cosa quando Ollama ferma il modello che ripete sempre lo stesso testo (libreria 2026-10-13:
+            // «token repeat limit reached» chiudeva in errore un task il cui lavoro era già fatto)
+            const repeat = /token repeat limit/i.test(e.message);
+            if (!ac.signal.aborted && (repeat || /invalid tool call arguments|unexpected end of JSON/i.test(e.message)) && badCalls < 2) {
               badCalls++;
-              console.warn(`[chat] chiamata a strumento troncata (${e.message}): riprovo con blocchi più corti`);
+              console.warn(`[chat] ${repeat ? 'ripetizione fermata da Ollama' : 'chiamata a strumento troncata'} (${e.message}): riprovo`);
               msg.content = msg.content.slice(0, contentStart);
               emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
-              convo.push({ role: 'user', content: '[LocalAI: your last tool call was cut off before the end (incomplete JSON arguments), so nothing was done. Write long files in smaller pieces: write_file with a short first part (at most about 150 lines), then append_file for the rest, one piece per call.]' });
+              convo.push({ role: 'user', content: repeat
+                ? '[LocalAI: your last answer was stopped because it kept repeating the same text, so nothing was done in it. Do not repeat yourself: if the work is already done, check the file once and write your short summary; otherwise make the next change with one tool call.]'
+                : '[LocalAI: your last tool call was cut off before the end (incomplete JSON arguments), so nothing was done. Write long files in smaller pieces: write_file with a short first part (at most about 150 lines), then append_file for the rest, one piece per call.]' });
               round--;
               continue;
             }
