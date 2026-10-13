@@ -251,7 +251,8 @@ async function verify(p, task, conv, owner, { requireChanges = false } = {}) {
   // parole, pagine del PDF, pagina senza errori): libro mindfulness 2026-10-12, copertina e book.html bloccati da test
   // vecchi o inventati dal modello per altri lavori.
   if (p.autoTest && task.type === 'code') {
-    const cmd = canRun ? await projects.testCommand(user, p) : null;
+    // i test del task, se ne ha scritti (i test vecchi di altri lavori non lo bloccano); altrimenti tutta la suite
+    const cmd = canRun ? (p.testCommand || projects.taskTestCommand(writtenFiles(conv)) || await projects.testCommand(user, p)) : null;
     if (!canRun) add({ kind: 'test', ok: null, summary: 'Test non eseguiti: solo l\'amministratore può far girare il codice' });
     else if (!cmd && task.type === 'code') {
       add({ kind: 'test', ok: false, summary: 'Nessun test trovato' });

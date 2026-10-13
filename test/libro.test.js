@@ -332,3 +332,10 @@ test('claimsChange: «ho corretto…» senza modifiche si scopre (in italiano e 
   assert.equal(chat.claimsChange('I fixed the URL in index.html.'), true);
   assert.equal(chat.claimsChange('Il problema è che l\'API restituisce 422: va cambiato il parametro.'), false);
 });
+
+test('taskTestCommand: si eseguono i test scritti dal task, non tutta la suite', () => {
+  assert.equal(projects.taskTestCommand(['books.js', 'tests/books.test.js', 'index.html']), 'node --test tests/books.test.js');
+  assert.equal(projects.taskTestCommand(['spese.py', 'tests/test_spese.py']), 'python -m unittest tests.test_spese');
+  assert.equal(projects.taskTestCommand(['index.html']), null);
+  assert.equal(projects.taskTestCommand(['tests/a.test.js', 'tests/test_b.py']), null);
+});

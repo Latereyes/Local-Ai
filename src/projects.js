@@ -475,6 +475,20 @@ export async function testCommand(user, p) {
 }
 
 /**
+ * Comando per i soli test scritti o modificati dal task (JavaScript con node --test, Python con unittest), oppure null
+ * se il task non ne ha toccati o sono misti. Libreria 2026-10-13: il task di books.js eseguiva tutta la suite, compreso
+ * un vecchio test che simulava la fotocamera, e il modello passava i tentativi a sistemare quello.
+ */
+export function taskTestCommand(files) {
+  const safe = (f) => /^[\w./-]+$/.test(f) && !f.includes('..');
+  const js = files.filter((f) => safe(f) && /(^|\/)(tests?\/[^/]+|[^/]*[._-]test)\.(c|m)?js$/.test(f));
+  const py = files.filter((f) => safe(f) && /(^|\/)tests?\/test_[^/]+\.py$/.test(f));
+  if (js.length && !py.length) return `node --test ${js.join(' ')}`;
+  if (py.length && !js.length) return `python -m unittest ${py.map((f) => f.replace(/\.py$/, '').replaceAll('/', '.')).join(' ')}`;
+  return null;
+}
+
+/**
  * Task aggiunti da una chat del progetto (strumento add_project_tasks). items: [{ text, type }].
  * I testi già presenti tra i task non ancora fatti non si ripetono.
  */
