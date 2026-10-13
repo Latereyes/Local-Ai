@@ -185,7 +185,9 @@ function entryPage(user, conv, taskText = '') {
   const written = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append'].includes(s.action) && s.status === 'done' && /\.html?$/i.test(s.path)).map((s) => s.path);
   const named = String(taskText).match(/[\w./-]*\w\.html?\b/gi) || [];
   // con fotocamera & co. la pagina di prova con il file di esempio (test_scan.html) è quella che dimostra qualcosa
-  const testPage = projects.manualChecks(taskText).length ? written.filter((f) => /(^|\/)test[_-][\w-]*\.html?$/i.test(f)) : [];
+  // (anche se il task l'ha solo modificata o la nomina: libreria 2026-10-13, scan.js condiviso, verificata index.html)
+  const touched = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append', 'edit'].includes(s.action) && s.status === 'done').map((s) => s.path);
+  const testPage = projects.manualChecks(taskText).length ? [...touched, ...named].filter((f) => /(^|\/)test[_-][\w-]*\.html?$/i.test(f)) : [];
   const candidates = [...testPage, ...written.filter((f) => /(^|\/)index\.html?$/i.test(f)), ...written, ...named, 'index.html'];
   return candidates.find((f) => { try { return fs.existsSync(workspace.resolve(user, f).abs); } catch { return false; } }) || null;
 }
