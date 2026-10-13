@@ -1,6 +1,7 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
 import { MAX as LONG_VIDEO } from './videochain.js';
+import { TASK_COMMANDS_HELP } from './taskcmd.js';
 
 // musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
 const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
@@ -312,10 +313,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
-    // task della coda: niente comandi, ma gli script del progetto sì (stesso rischio dei test che la coda già esegue)
-    ...(scripts ? [fn('run_script', 'Esegue uno script del progetto (Python .py o Node .js/.mjs) nella cartella del progetto e restituisce l\'output: per generare file (es. book.html dai capitoli) o provare il codice. Solo script del progetto, niente altri comandi.', {
-      path: p('Script da eseguire, es. build_book.py'),
-    }, ['path'])] : []),
+    // task della coda: comandi sicuri nella cartella del progetto, senza conferma (stesso rischio dei test che la coda già esegue)
+    ...(scripts ? [fn('run_command', `Esegue un comando nella cartella del progetto, senza conferma, e restituisce l'output: per eseguire gli script del progetto (es. generare book.html), provare il codice, far girare i test o installare librerie che esistono davvero. Ammessi solo: ${TASK_COMMANDS_HELP}.`, {
+      command: p('Il comando, es. python build_book.py'),
+    }, ['command'])] : []),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },

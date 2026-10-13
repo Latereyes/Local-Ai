@@ -155,7 +155,7 @@ ${task.text}
 
 Rules:
 - Do only this task, complete and working; first read the existing files you need.
-- You cannot run commands. You can run the project's own scripts (.py, .js) with run_script, for example to generate a file; LocalAI runs the tests at the end of your turn.
+- Commands: with run_command you can run only safe commands in the project folder (python script.py, node script.js, the tests, pip/npm install of real libraries), for example to generate a file with a project script. LocalAI also runs the tests at the end of your turn.
 - Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
 - Files that already exist: read them with read_file first (LocalAI rejects changes to files you have not read, or that changed after you read them), then change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
 ${rules}

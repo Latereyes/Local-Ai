@@ -253,12 +253,12 @@ test('modelsTried: i modelli diversi con cui un task ha lavorato (per passare al
   assert.equal(projects.modelsTried({ modelsTried: ['qwen3.8-coder:latest', 'hf.co/x/gemma:IQ4'] }).length, 2);
 });
 
-test('run_script: offerto solo ai task della coda (scripts), non alle chat normali', async () => {
+test('run_command dei task: offerto ai task della coda (scripts), non alle chat dei progetti senza permessi', async () => {
   const { computerTools } = await import('../src/prompts.js');
   const names = (o) => computerTools(o).map((t) => t.function.name);
-  assert.ok(names({ project: true, scripts: true }).includes('run_script'));
-  assert.ok(!names({ project: true }).includes('run_script'));
-  assert.ok(!names({ canRun: true }).includes('run_script'));
+  assert.ok(names({ project: true, scripts: true }).includes('run_command'));
+  assert.ok(!names({ project: true }).includes('run_command'));
+  assert.ok(names({ canRun: true }).filter((n) => n === 'run_command').length === 1);
 });
 
 test('stateText: STATO.md con fatto (riassunto e file), problemi aperti e da fare', () => {
