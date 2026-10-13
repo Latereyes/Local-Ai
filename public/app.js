@@ -1443,6 +1443,7 @@ function renderProject() {
       <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-memory" ${p.memory ? 'checked' : ''}> Usa la <a href="/memoria" data-memory-link>memoria</a> in questo progetto (note generali e del progetto nella chat, nei task e nella bozza del piano)</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-review" ${p.reviewPlan ? 'checked' : ''}> Mostrami il piano prima di partire: i task chiesti in chat aspettano che tu prema «Avvia» (con una notifica)</label>
       <label class="pj-check-opt">Tentativi per task prima di fermarsi (o di chiamare il coordinatore): <select id="pj-attempts">${[['', `predefinito (${p.defaultAttempts})`], ...[1, 2, 3, 4, 5].map((n) => [n, n])].map(([v, l]) => `<option value="${v}" ${String(p.maxAttempts || '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
@@ -1578,6 +1579,7 @@ el.projects.addEventListener('change', (e) => {
   if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-memory') api(base, { method: 'PATCH', body: { memory: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-review') api(base, { method: 'PATCH', body: { reviewPlan: e.target.checked } }).catch((err) => alert(err.message));
 });
 
 // ---------- Memoria: note dell'utente usate nelle risposte ----------

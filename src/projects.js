@@ -361,6 +361,17 @@ export function newTask(text, type) {
   };
 }
 
+// Ricette per i tipi di progetto noti (prove del 2026-10-12/13: libro, pagina pizzeria, gestore spese): la struttura
+// che funziona con i modelli locali. Al pianificatore va solo quella del tipo riconosciuto nell'obiettivo.
+export const RECIPES = [
+  [/\b(libro|book|ebook|guida|manuale|romanzo|racconti|raccolta di articoli)\b/i, 'Libro o guida: un task [testo] per capitolo (file NN_titolo.md, «almeno N parole», la somma arriva alla lunghezza chiesta); se serve, un task [pagina] per la copertina; per il PDF un task [pagina] che crea book.html dai capitoli con uno script piccolo (eseguito con run_command) e lo stampa con html_to_pdf, con «tra X e Y pagine».'],
+  [/\b(gioco|game|videogioco|clone di)\b/i, 'Gioco nel browser: un task [codice] per la logica (game.js, senza disegno, con i test node:test), poi un task [pagina] per index.html che la usa (canvas, comandi, punteggio); eventuali task successivi aggiungono una meccanica alla volta.'],
+  [/\b(sito|pagina web|landing|pagina html|portfolio)\b/i, 'Pagina o sito: una pagina = UN task [pagina] che crea index.html completo (CSS e JS inclusi); un sito con più pagine = un task [pagina] per pagina, il primo con lo stile comune.'],
+  [/\b(script|riga di comando|cli|programma|bot|automazione|api|server)\b/i, 'Script o programma: task [codice] che costruiscono il programma una funzione alla volta, ognuno con i suoi test (tests/test_*.py o tests/*.test.js), poi un task [testo] per il README con gli esempi d\'uso.'],
+  [/\b(analizza|analisi|dati|csv|excel|log|report|statistiche)\b/i, 'Analisi di dati: un task [lettura] che legge i file e scrive report.md con i risultati; se servono calcoli ripetibili, prima un task [codice] con lo script e i test, poi il task [lettura] che lo esegue e commenta.'],
+];
+export const recipeFor = (goal) => RECIPES.find(([re]) => re.test(String(goal || '')))?.[1] || '';
+
 /** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo (notes: pacchetto della memoria, se c'è). */
 export function planPrompt(goal, files, notes = '') {
   return [
@@ -382,7 +393,7 @@ Lingua: il piano è in italiano, ma se l'obiettivo chiede il risultato in un'alt
 Prima dei task, dopo l'obiettivo, scrivi una sezione «# Regole» con le regole concrete che il risultato deve rispettare, una per riga di elenco: chi esegue i task non può chiedere. Se l'obiettivo è il clone di un gioco o di un programma noto, elenca le sue meccaniche essenziali come nell'originale (es. per Space Invaders: alieni in formazione a griglia che si muove in blocco di lato, scende di un passo a ogni bordo e accelera quando ne restano pochi; gli alieni sparano; ripari che si consumano; si perde se la formazione arriva in basso). Usa numeri concreti dove servono (righe, colonne, velocità, vite).
 In ogni task aggiungi una riga rientrata «Fatto quando: …» con il comportamento da verificare (anche nei test).
 Dopo le regole scrivi «# Task» e poi l'elenco dei task.` },
-    { role: 'user', content: `${notes ? `${notes}\n\n` : ''}Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
+    { role: 'user', content: `${notes ? `${notes}\n\n` : ''}${recipeFor(goal) ? `Ricetta per questo tipo di progetto (struttura che funziona con i modelli locali): ${recipeFor(goal)}\n\n` : ''}Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
   ];
 }
 

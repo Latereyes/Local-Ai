@@ -540,8 +540,13 @@ export async function coordinate(p, task) {
   if (!owner) return;
   task.coordinated = (task.coordinated || 0) + 1;
   if (task.coordinated > Math.max(0, config.projects.coordinatorRuns)) {
-    projects.addLog(p, `Coordinatore: «${task.title}» non riesce neanche dopo i suoi interventi, serve il tuo aiuto`);
-    projects.notify(p, { title: 'serve il tuo aiuto', body: `Il task «${task.title}» non riesce neanche dopo ${task.coordinated - 1} interventi del coordinatore. La coda è in pausa.`, level: 'warn' });
+    // domanda chiara all'utente: cosa non va (ultimo controllo fallito), cosa è già stato provato, cosa può fare
+    const lastCheck = (task.checks || []).filter((c) => c.ok === false).at(-1);
+    const tried = projects.modelsTried(task).map((m) => m.split('/').pop()).join(' e ') || String(task.model || '').split('/').pop();
+    const question = `«${task.title}» non riesce: ${task.error || lastCheck?.summary || 'la verifica non passa'}. Provato con ${tried} e ${task.coordinated - 1} interventi del coordinatore. Cosa faccio? Rispondi nella chat del progetto: riscrivere il task in un altro modo, dividerlo, saltarlo, oppure dirmi cosa cambiare.`;
+    task.question = question;
+    projects.addLog(p, `Domanda per te: ${question}`);
+    projects.notify(p, { title: 'serve una tua decisione', body: question, level: 'warn' });
     return projects.save(p);
   }
   // con Ollama spento il coordinatore non può lavorare: si aspetta che torni, senza contare l'intervento

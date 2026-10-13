@@ -550,8 +550,11 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const added = await projects.addTasks(p, args.tasks, { from: conv.id });
         if (!added.length) throw new workspace.WorkspaceError('Nessun task nuovo (vuoti o già in coda)');
         let started = false;
+        // «mostrami il piano prima di partire»: i task chiesti in chat dall'utente aspettano il suo via (il coordinatore no)
+        const review = p.reviewPlan && !conv.messages.findLast((m) => m.role === 'user')?.auto;
+        if (review) projects.notify(p, { title: 'piano pronto da controllare', body: `${added.length} task aggiunti alla coda: controllali nella pagina del progetto e premi «Avvia».`, level: 'info' });
         // la coda parte da sola (prova del 2026-10-11: l'utente doveva chiederlo ogni volta); start: false la lascia in pausa
-        if (args.start !== false && args.start !== 'false') {
+        if (!review && args.start !== false && args.start !== 'false') {
           // import al momento: runner.js importa chat.js
           const runner = await import('./runner.js');
           if (!p.active) runner.setActive(p, true); else runner.kick();

@@ -272,3 +272,12 @@ test('stateText: STATO.md con fatto (riassunto e file), problemi aperti e da far
   assert.match(s, /## Problemi aperti\n- \[codice\] Script PDF: test falliti/);
   assert.match(s, /## Da fare\n- \[pagina\] Copertina/);
 });
+
+test('recipeFor: la ricetta del tipo di progetto riconosciuto nell\'obiettivo', () => {
+  assert.match(projects.recipeFor('Libro digitale sulla mindfulness in inglese'), /un task \[testo\] per capitolo/);
+  assert.match(projects.recipeFor('Una pagina web per la pizzeria Da Gino'), /UN task \[pagina\]/);
+  assert.match(projects.recipeFor('Un gestore delle spese da riga di comando in Python'), /Script o programma/);
+  assert.match(projects.recipeFor('Un clone di Tetris'), /Gioco nel browser/);
+  assert.equal(projects.recipeFor('Riordina le foto delle vacanze'), '');
+  assert.match(projects.planPrompt('Una pagina web per la pizzeria', '')[1].content, /Ricetta per questo tipo di progetto/);
+});
