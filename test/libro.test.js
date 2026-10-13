@@ -311,3 +311,9 @@ test('pageIfOnlyHtml: un task sulla fotocamera senza file di codice nominati è 
   assert.equal(projects.newTask('[codice] Assicurati che quando l\'utente preme "Scansiona ISBN", la fotocamera si apra mostrando il flusso video').type, 'page');
   assert.equal(projects.newTask('[codice] Lettore di codici a barre da riga di comando in `scan.py` con i test').type, 'code');
 });
+
+test('fakeActions: il modello che imita il registro delle azioni senza chiamare strumenti viene scoperto', () => {
+  assert.equal(chat.fakeActions('Ho corretto index.html.\n\n[Azioni eseguite nella cartella di lavoro: letto index.html; edit_file (correzione)]'), true);
+  assert.equal(chat.fakeActions('[Registro di LocalAI, non scriverlo tu — strumenti chiamati davvero: scritto a.md]'), true);
+  assert.equal(chat.fakeActions('Ho corretto il riferimento in index.html e la verifica passa.'), false);
+});

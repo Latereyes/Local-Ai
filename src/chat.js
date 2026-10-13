@@ -202,7 +202,13 @@ function computerNote(steps = []) {
   const line = (s) => s.type === 'command'
     ? `comando \`${s.command}\` → ${s.status === 'declined' ? 'rifiutato dall\'utente' : s.status === 'error' ? `errore: ${s.error || ''}` : `uscita ${s.exitCode}`}`
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
-  return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
+  // registro scritto da LocalAI (non dal modello): dirlo esplicitamente riduce le imitazioni, fakeActions le scopre
+  return `\n\n[Registro di LocalAI, non scriverlo tu — strumenti chiamati davvero: ${done.map(line).join('; ')}]`;
+}
+
+/** Testo che racconta azioni sui file come fatte (il formato del registro di LocalAI) invece di chiamare gli strumenti. */
+export function fakeActions(text) {
+  return /\[(Azioni eseguite|Registro di LocalAI)[^\]]*\]/i.test(String(text || ''));
 }
 const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
 
@@ -1323,6 +1329,7 @@ ${mem.text}`;
         let retriedCtx = false;
         let retriedThink = false;
         let badCalls = 0;
+        let retriedFake = false;
         for (let round = 0; ; round++) {
           let roundTools = round >= maxRounds || turnGuard(msg).final ? finalTools : allTools;
           let used = ctx.fit(convo, roundTools, limit, model);
@@ -1396,6 +1403,18 @@ ${mem.text}`;
           const offered = new Set(roundTools.map((t) => t.function.name));
           const webCalls = calls.filter((c) => LOOP_TOOLS.has(c.function?.name) && offered.has(c.function.name));
           mediaCalls.push(...calls.filter((c) => !LOOP_TOOLS.has(c.function?.name)));
+          // Azioni raccontate ma non fatte: il modello imita il registro della cronologia («[Azioni eseguite…]») senza
+          // chiamare strumenti (coordinatore della libreria 2026-10-13: «ho corretto index.html», nessuna modifica).
+          // Si toglie il racconto e si ripete il passaggio una volta.
+          if (!webCalls.length && computer && !retriedFake && !ac.signal.aborted && fakeActions(msg.content.slice(contentStart))
+            && !msg.steps.some((s) => s.type === 'file' || s.type === 'command')) {
+            retriedFake = true;
+            msg.content = msg.content.slice(0, contentStart);
+            emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+            convo.push({ role: 'assistant', content: result.content || '' });
+            convo.push({ role: 'user', content: '[LocalAI: you described actions in your text (edits, checks, queue) but you did not call any tool, so NOTHING was done. Do them now by calling the tools; do not write lists of «actions done» yourself: LocalAI records the real ones.]' });
+            continue;
+          }
           if (!webCalls.length || ac.signal.aborted) break;
 
           // Il testo scritto prima di una ricerca ("Cerco…") non fa parte della risposta finale
