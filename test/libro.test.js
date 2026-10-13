@@ -306,3 +306,8 @@ test('pageIfOnlyHtml: librerie pronte ignorate; pagina con fotocamera = pagina (
   assert.equal(projects.newTask('[codice] In index.html la scansione ISBN con la fotocamera usa `scanner.js`').type, 'page');
   assert.equal(projects.newTask('[codice] Logica del gioco in `game.js` usata da `index.html`').type, 'code');
 });
+
+test('pageIfOnlyHtml: un task sulla fotocamera senza file di codice nominati è una pagina', () => {
+  assert.equal(projects.newTask('[codice] Assicurati che quando l\'utente preme "Scansiona ISBN", la fotocamera si apra mostrando il flusso video').type, 'page');
+  assert.equal(projects.newTask('[codice] Lettore di codici a barre da riga di comando in `scan.py` con i test').type, 'code');
+});

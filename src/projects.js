@@ -369,7 +369,8 @@ export function pageIfOnlyHtml(text, type) {
   const html = files.some((f) => /\.html?$/i.test(f));
   // pagina con fotocamera, microfono o posizione: i test automatici non possono provarle (i modelli scrivevano test che
   // simulavano un ISBN letto e poi fallivano con la scansione vera): si verifica la pagina e la parte hardware a mano
-  if (html && manualChecks(text).length) return 'page';
+  const code = files.some((f) => !/\.(html?|css|md|txt|json)$/i.test(f));
+  if ((html || !code) && manualChecks(text).length) return 'page';
   return files.length && files.every((f) => /\.(html?|css)$/i.test(f)) ? 'page' : type;
 }
 
