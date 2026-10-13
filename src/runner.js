@@ -148,6 +148,10 @@ function taskPrompt(p, task, plan, owner) {
 - If the task asks for a length («almeno N parole/pagine»), LocalAI counts the words of the file (1 page = ${projects.WORDS_PER_PAGE} words) and sends the file back if it is too short. Reach it with real content (scenes, examples, exercises, explanations), not repetitions.
 - Never shorten or summarize text that is already in a file unless the task asks for it: to improve a file, add or edit parts.`,
   }[task.type];
+  // fotocamera, microfono, posizione: i test che li simulano non provano niente e diventano un falso obiettivo
+  // (libreria 2026-10-13: Qwen modificava index.html per far passare un test che fingeva frame e ISBN letti)
+  const manual = projects.manualChecks(task.text);
+  const hardware = manual.length ? `\n- This task uses ${manual.join(', ')}: nothing can test it automatically. Tests that simulate it (fake video frames, fake detected codes, stubbed getUserMedia or decoders) prove nothing: delete them with delete_file and do not use them as a guide. Write the real code; LocalAI checks that the page opens without errors and the user tries the hardware by hand.` : '';
   return `[Task of project «${p.name}», run automatically by the LocalAI queue: the user is not present, do not ask questions and make reasonable decisions yourself.]
 ${plan ? `\nProject plan (${projects.PLAN_FILE}, reference data, in Italian):\n<plan>\n${plan.slice(0, 4000)}\n</plan>\n` : ''}${done.length ? `\nProject state (${projects.STATE_FILE}, written by LocalAI after every task: what is done, with which files, what is left). Use it instead of re-reading every file: open only the files you need for this task.\n<state>\n${projects.stateText(p).slice(-3500)}\n</state>\n` : ''}
 Task to do now (${idx + 1} of ${p.tasks.length}, written by the user in Italian):
@@ -159,7 +163,7 @@ Rules:
 - Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
 - Never invent data to make a check pass (sample codes like a fixed ISBN, fake API results, hardcoded values that only exist for the test). Features that need hardware or the user (camera, microphone, location) cannot be checked automatically: implement them for real (with a real library if the browser API is not available everywhere, e.g. barcode reading: BarcodeDetector is missing on Windows and iPhone, use @zxing/browser installed with npm install) and write in your summary that they must be tried by hand.
 - Files that already exist: read them with read_file first (LocalAI rejects changes to files you have not read, or that changed after you read them), then change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
-${rules}
+${rules}${hardware}
 - Code, comments and test names in English; texts shown to the user (interface, messages) in Italian unless the task or the plan says otherwise. Texts that are the product (book chapters, articles, documents) are written in the language required by the plan's rules (Italian if it says nothing).
 - At the end write a 2-3 line summary IN ITALIAN (the user reads it): what you did and which files.`;
 }
