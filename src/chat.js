@@ -210,6 +210,11 @@ function computerNote(steps = []) {
 export function fakeActions(text) {
   return /\[(Azioni eseguite|Registro di LocalAI)[^\]]*\]/i.test(String(text || ''));
 }
+
+/** Testo che dice di aver cambiato file o codice («Ho corretto la funzione…», «I fixed…»). */
+export function claimsChange(text) {
+  return /\b(ho|abbiamo) (corretto|modificato|aggiornato|aggiunto|rimosso|sistemato|sostituito|cambiato|riscritto|creato|implementato)\b|\bI(?:'ve| have)? (fixed|updated|changed|modified|added|removed|replaced|rewrote|created|implemented)\b/i.test(String(text || ''));
+}
 const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
@@ -1411,13 +1416,21 @@ ${mem.text}`;
           // Azioni raccontate ma non fatte: il modello imita il registro della cronologia («[Azioni eseguite…]») senza
           // chiamare strumenti (coordinatore della libreria 2026-10-13: «ho corretto index.html», nessuna modifica).
           // Si toglie il racconto e si ripete il passaggio una volta.
-          if (!webCalls.length && computer && !retriedFake && !ac.signal.aborted && fakeActions(msg.content.slice(contentStart))
-            && !msg.steps.some((s) => s.type === 'file' || s.type === 'command')) {
+          // Lo stesso quando dice «ho corretto…» senza aver scritto nessun file, o chiude il turno vuoto dopo aver solo letto
+          // (chat della libreria 2026-10-13: «Ho corretto fetchBookMetadata», solo una lettura; «Fai dei test…», risposta vuota)
+          const said = msg.content.slice(contentStart);
+          const changed = msg.steps.some((s) => s.type === 'command' || (s.type === 'file' && !['read', 'list'].includes(s.action) && s.status === 'done'));
+          const fake = fakeActions(said) && !msg.steps.some((s) => s.type === 'file' || s.type === 'command');
+          const claimed = claimsChange(said) && !changed;
+          const empty = !said.trim() && !msg.content.trim() && !changed;
+          if (!webCalls.length && computer && roundTools !== finalTools && !retriedFake && !ac.signal.aborted && (fake || claimed || empty)) {
             retriedFake = true;
             msg.content = msg.content.slice(0, contentStart);
             emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
             convo.push({ role: 'assistant', content: result.content || '' });
-            convo.push({ role: 'user', content: '[LocalAI: you described actions in your text (edits, checks, queue) but you did not call any tool, so NOTHING was done. Do them now by calling the tools; do not write lists of «actions done» yourself: LocalAI records the real ones.]' });
+            convo.push({ role: 'user', content: empty
+              ? '[LocalAI: you ended your turn with no answer and without doing anything. Do what the user asked now, with the tools (edit the files, run the commands or checks you need), then answer in Italian with what you did and what you found.]'
+              : '[LocalAI: you wrote that you changed or did things, but you did not call any tool that changes files, so NOTHING was done. Do it now by calling the tools (edit_file / write_file, then check). Do not describe changes you have not made: LocalAI records the real ones.]' });
             continue;
           }
           if (!webCalls.length || ac.signal.aborted) break;

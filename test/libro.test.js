@@ -326,3 +326,9 @@ test('sampleFiles: la foto di esempio messa dall\'utente si trova (per un test v
   fs.writeFileSync(path.join(d, 'node_modules', 'x', 'logo.png'), 'x');
   assert.deepEqual(projects.sampleFiles(d), ['img/isbn_test.jpg']);
 });
+
+test('claimsChange: «ho corretto…» senza modifiche si scopre (in italiano e in inglese)', () => {
+  assert.equal(chat.claimsChange('Ho corretto la funzione `fetchBookMetadata` per usare l\'endpoint giusto.'), true);
+  assert.equal(chat.claimsChange('I fixed the URL in index.html.'), true);
+  assert.equal(chat.claimsChange('Il problema è che l\'API restituisce 422: va cambiato il parametro.'), false);
+});
