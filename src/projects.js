@@ -363,7 +363,13 @@ export async function writePlan(user, p, text) {
  */
 export function pageIfOnlyHtml(text, type) {
   if (type !== 'code') return type;
-  const files = String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)\b/gi) || [];
+  // le librerie già pronte (zxing-browser.min.js, node_modules/…, vendor/…) non sono codice del task
+  const files = (String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)\b/gi) || [])
+    .filter((f) => !/\.min\.js$|(^|\/)(node_modules|vendor|lib)\//i.test(f));
+  const html = files.some((f) => /\.html?$/i.test(f));
+  // pagina con fotocamera, microfono o posizione: i test automatici non possono provarle (i modelli scrivevano test che
+  // simulavano un ISBN letto e poi fallivano con la scansione vera): si verifica la pagina e la parte hardware a mano
+  if (html && manualChecks(text).length) return 'page';
   return files.length && files.every((f) => /\.(html?|css)$/i.test(f)) ? 'page' : type;
 }
 

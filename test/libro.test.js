@@ -300,3 +300,9 @@ test('manualChecks: fotocamera, microfono e posizione vanno provati a mano', () 
   assert.deepEqual(projects.manualChecks('Registrazione con il microfono e mappa con la geolocalizzazione'), ['il microfono', 'la posizione']);
   assert.deepEqual(projects.manualChecks('Pagina del menu della pizzeria'), []);
 });
+
+test('pageIfOnlyHtml: librerie pronte ignorate; pagina con fotocamera = pagina (niente test finti)', () => {
+  assert.equal(projects.newTask('[codice] Aggiungi in index.html una riga <script src="zxing-browser.min.js"></script> per caricare la libreria').type, 'page');
+  assert.equal(projects.newTask('[codice] In index.html la scansione ISBN con la fotocamera usa `scanner.js`').type, 'page');
+  assert.equal(projects.newTask('[codice] Logica del gioco in `game.js` usata da `index.html`').type, 'code');
+});
