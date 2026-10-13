@@ -307,6 +307,16 @@ export const dirOf = (user, p) => workspace.userRoot(scoped(user, p));
 // Libro mindfulness (2026-10-12): per «capire il quadro» i modelli rileggevano tutti i capitoli e riempivano il contesto.
 // LocalAI scrive dopo ogni task un riassunto dello stato (fatto, file, problemi, da fare) che i task successivi leggono.
 export const STATE_FILE = 'STATO.md';
+
+/** Funzioni che la verifica automatica non può provare (servono hardware o una persona), nominate nel task. */
+export function manualChecks(text) {
+  const t = String(text || '');
+  return [
+    [/fotocamer|camera|webcam|scann?eri[sz]z|barcode|codic[ei] a barre|qr ?code/i, 'la fotocamera'],
+    [/microfon|microphone|registra(re|zione) (la )?voce|dettatura/i, 'il microfono'],
+    [/\bgps\b|geolocali|posizione dell'utente|geolocation/i, 'la posizione'],
+  ].filter(([re]) => re.test(t)).map(([, name]) => name);
+}
 const TYPE_NAME = { code: 'codice', page: 'pagina', read: 'lettura', chat: 'testo' };
 
 /** Testo di STATO.md, dallo stato dei task (sempre rigenerato, non cresce all'infinito). */
@@ -393,7 +403,7 @@ una o due frasi
 - [tipo] cosa fare, con nomi di file concreti
   eventuali dettagli rientrati di due spazi
 
-Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi, niente librerie esterne); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README, capitoli, articoli e testi.
+Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi; niente librerie esterne, tranne quando serve una cosa che il browser non fa ovunque, come leggere i codici a barre dalla fotocamera: allora una libreria vera, es. @zxing/browser, installata con npm install e inclusa da node_modules); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README, capitoli, articoli e testi.
 Quanti task: un progetto piccolo (una pagina web, uno script, un testo breve, un'analisi) è UN SOLO task, completo: chi lo esegue lavora come in una chat e lo finisce da solo. Un progetto più grande va in 3-8 tappe vere, in ordine di esecuzione, ognuna con un risultato che si può verificare: la prima crea qualcosa che funziona già, le successive aggiungono una cosa alla volta. Non spezzare in task separati cose che stanno in un file solo.
 Se il progetto è soprattutto testo (libro, guida, raccolta di articoli): un task [testo] per ogni capitolo o file, anche più di 8 task. Chi esegue un task scrive al massimo circa 4000 parole: dividi il testo in file e task di questa misura. In ogni task di testo indica il file e la lunghezza come «almeno N parole» (1 pagina = 250 parole): LocalAI conta le parole e rimanda indietro i file troppo corti. Lo script che assembla il libro (PDF o altro) prende solo i file del libro, nell'ordine giusto (es. introduzione.md e cap_*.md), non il piano, il README o gli appunti.
 Strumenti che chi esegue i task ha già, senza installare niente: html_to_pdf (stampa una pagina HTML in PDF con il browser, CSS di stampa compreso) e html_to_word (HTML → documento Word). Preferiscili alle librerie da installare. Per libri, guide e documenti impaginati in PDF: un task [pagina] che crea book.html dai file del testo (copertina, indice con link ai capitoli, CSS di stampa con @page per formato e margini, break-before: page all'inizio di ogni capitolo) e lo converte con html_to_pdf; niente librerie PDF come fpdf o reportlab, che costringono a calcolare a mano righe e pagine (libro mindfulness 2026-10-12: un'ora di tentativi falliti con fpdf2).

@@ -294,3 +294,9 @@ test('newTask: un task [codice] che nomina solo index.html diventa [pagina]; con
   assert.equal(projects.newTask('[codice] Logica del gioco in `game.js` usata da `index.html`').type, 'code');
   assert.equal(projects.newTask('[codice] Script `spese.py` con i test').type, 'code');
 });
+
+test('manualChecks: fotocamera, microfono e posizione vanno provati a mano', () => {
+  assert.deepEqual(projects.manualChecks('Implementa la funzione di scansione ISBN tramite fotocamera in `index.html`.'), ['la fotocamera']);
+  assert.deepEqual(projects.manualChecks('Registrazione con il microfono e mappa con la geolocalizzazione'), ['il microfono', 'la posizione']);
+  assert.deepEqual(projects.manualChecks('Pagina del menu della pizzeria'), []);
+});

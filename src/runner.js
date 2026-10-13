@@ -157,6 +157,7 @@ Rules:
 - Do only this task, complete and working; first read the existing files you need.
 - Commands: with run_command you can run only safe commands in the project folder (python script.py, node script.js, the tests, pip/npm install of real libraries), for example to generate a file with a project script. LocalAI also runs the tests at the end of your turn.
 - Respect the rules in the plan («Regole» section) and the task's «Fatto quando» line: the tests must check that behaviour, not just that the code runs.
+- Never invent data to make a check pass (sample codes like a fixed ISBN, fake API results, hardcoded values that only exist for the test). Features that need hardware or the user (camera, microphone, location) cannot be checked automatically: implement them for real (with a real library if the browser API is not available everywhere, e.g. barcode reading: BarcodeDetector is missing on Windows and iPhone, use @zxing/browser installed with npm install) and write in your summary that they must be tried by hand.
 - Files that already exist: read them with read_file first (LocalAI rejects changes to files you have not read, or that changed after you read them), then change them with edit_file (only the parts that need it), do not rewrite them from scratch. If a file is empty, truncated or broken, bring back the previous version with restore_file.
 ${rules}
 - Code, comments and test names in English; texts shown to the user (interface, messages) in Italian unless the task or the plan says otherwise. Texts that are the product (book chapters, articles, documents) are written in the language required by the plan's rules (Italian if it says nothing).
@@ -336,6 +337,14 @@ async function runTask(p, task) {
   const finish = async (status, text) => {
     task.status = status;
     task.finishedAt = Date.now();
+    // fotocamera, microfono, posizione: la verifica automatica non li prova (prova «La mia libreria» 2026-10-13: la
+    // scansione ISBN risultava fatta ma non funzionava) → l'utente sa che quella parte va provata a mano
+    const manual = status === 'done' ? projects.manualChecks(task.text) : [];
+    if (manual.length) {
+      task.manualTest = manual;
+      projects.addLog(p, `«${task.title}»: da provare a mano (${manual.join(', ')}), la verifica automatica non può farlo`);
+      projects.notify(p, { title: 'da provare a mano', body: `«${task.title}» usa ${manual.join(', ')}: LocalAI non può provarlo da solo. Aprilo dal telefono o dal PC e controlla che funzioni davvero.`, level: 'info' });
+    }
     // STATO.md: cosa è fatto, con quali file, cosa manca (lo scrive LocalAI, lo leggono i task successivi)
     if (task.conversationId) task.files = writtenFiles(store.get(task.conversationId) || { messages: [] }).slice(0, 30);
     if (owner) await projects.writeState(owner, p).catch((e) => console.warn('[coda] STATO.md:', e.message));
