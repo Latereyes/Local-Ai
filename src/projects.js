@@ -308,6 +308,23 @@ export const dirOf = (user, p) => workspace.userRoot(scoped(user, p));
 // LocalAI scrive dopo ogni task un riassunto dello stato (fatto, file, problemi, da fare) che i task successivi leggono.
 export const STATE_FILE = 'STATO.md';
 
+/** File di esempio nella cartella del progetto (immagini e audio, fino a 2 livelli, al massimo 5), percorsi relativi. */
+export function sampleFiles(dir) {
+  const out = [];
+  const walk = (rel, depth) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= 5) return;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (depth < 2 && !/^(\.git|node_modules|tests?)$/i.test(e.name)) walk(r, depth + 1); }
+      else if (/\.(jpe?g|png|webp|gif|bmp|wav|mp3|ogg|m4a)$/i.test(e.name)) out.push(r);
+    }
+  };
+  walk('', 0);
+  return out;
+}
+
 /** Funzioni che la verifica automatica non può provare (servono hardware o una persona), nominate nel task. */
 export function manualChecks(text) {
   const t = String(text || '');

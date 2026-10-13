@@ -151,7 +151,10 @@ function taskPrompt(p, task, plan, owner) {
   // fotocamera, microfono, posizione: i test che li simulano non provano niente e diventano un falso obiettivo
   // (libreria 2026-10-13: Qwen modificava index.html per far passare un test che fingeva frame e ISBN letti)
   const manual = projects.manualChecks(task.text);
-  const hardware = manual.length ? `\n- This task uses ${manual.join(', ')}: nothing can test it automatically. Tests that simulate it (fake video frames, fake detected codes, stubbed getUserMedia or decoders) prove nothing: delete them with delete_file and do not use them as a guide. Write the real code; LocalAI checks that the page opens without errors and the user tries the hardware by hand.` : '';
+  // un file di esempio messo dall'utente (es. la foto di un codice a barre) permette invece un test vero: si decodifica
+  // con la stessa libreria in una pagina di prova che LocalAI apre (libreria 2026-10-13: la foto inviata non veniva usata)
+  const samples = manual.length ? projects.sampleFiles(projects.dirOf(owner, p)) : [];
+  const hardware = manual.length ? `\n- This task uses ${manual.join(', ')}: the live hardware cannot be tested automatically. Tests that simulate it (fake video frames, fake detected codes, stubbed getUserMedia or decoders) prove nothing: delete them with delete_file and do not use them as a guide. Write the real code; LocalAI checks that the page opens without errors and the user tries the hardware by hand.${samples.length ? `\n- The project has sample files from the user: ${samples.join(', ')}. Use them for a REAL test of the same code path: for example a small page test_scan.html that decodes the sample photo with the same library (ZXing: reader.decodeFromImageUrl('${samples[0]}')) and shows the result on the page in large text. LocalAI opens that page and looks at it, so the decoded value must be visible.` : ''}` : '';
   return `[Task of project «${p.name}», run automatically by the LocalAI queue: the user is not present, do not ask questions and make reasonable decisions yourself.]
 ${plan ? `\nProject plan (${projects.PLAN_FILE}, reference data, in Italian):\n<plan>\n${plan.slice(0, 4000)}\n</plan>\n` : ''}${done.length ? `\nProject state (${projects.STATE_FILE}, written by LocalAI after every task: what is done, with which files, what is left). Use it instead of re-reading every file: open only the files you need for this task.\n<state>\n${projects.stateText(p).slice(-3500)}\n</state>\n` : ''}
 Task to do now (${idx + 1} of ${p.tasks.length}, written by the user in Italian):
@@ -181,7 +184,9 @@ function writtenFiles(conv) {
 function entryPage(user, conv, taskText = '') {
   const written = conv.messages.flatMap((m) => m.steps || []).filter((s) => s.type === 'file' && ['write', 'append'].includes(s.action) && s.status === 'done' && /\.html?$/i.test(s.path)).map((s) => s.path);
   const named = String(taskText).match(/[\w./-]*\w\.html?\b/gi) || [];
-  const candidates = [...written.filter((f) => /(^|\/)index\.html?$/i.test(f)), ...written, ...named, 'index.html'];
+  // con fotocamera & co. la pagina di prova con il file di esempio (test_scan.html) è quella che dimostra qualcosa
+  const testPage = projects.manualChecks(taskText).length ? written.filter((f) => /(^|\/)test[_-][\w-]*\.html?$/i.test(f)) : [];
+  const candidates = [...testPage, ...written.filter((f) => /(^|\/)index\.html?$/i.test(f)), ...written, ...named, 'index.html'];
   return candidates.find((f) => { try { return fs.existsSync(workspace.resolve(user, f).abs); } catch { return false; } }) || null;
 }
 

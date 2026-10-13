@@ -317,3 +317,12 @@ test('fakeActions: il modello che imita il registro delle azioni senza chiamare 
   assert.equal(chat.fakeActions('[Registro di LocalAI, non scriverlo tu — strumenti chiamati davvero: scritto a.md]'), true);
   assert.equal(chat.fakeActions('Ho corretto il riferimento in index.html e la verifica passa.'), false);
 });
+
+test('sampleFiles: la foto di esempio messa dall\'utente si trova (per un test vero, non simulato)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'localai-campioni-'));
+  fs.mkdirSync(path.join(d, 'img'));
+  fs.writeFileSync(path.join(d, 'img', 'isbn_test.jpg'), 'x');
+  fs.mkdirSync(path.join(d, 'node_modules', 'x'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'node_modules', 'x', 'logo.png'), 'x');
+  assert.deepEqual(projects.sampleFiles(d), ['img/isbn_test.jpg']);
+});
