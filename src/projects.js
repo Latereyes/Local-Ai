@@ -278,16 +278,24 @@ export async function tasksFromPlan(user, p) {
 }
 
 /**
- * Fine di un turno della chat di un progetto nuovo (prova torrent-cli del 2026-10-19): il modello ha scritto PIANO.md
- * ma non ha chiamato add_project_tasks, così il piano restava lì e la coda vuota. I task si creano dal piano.
- * Solo se il progetto non aveva task: in un progetto avviato un ritocco al piano non deve rimettere in coda niente.
+ * Fine di un turno di chat (prova torrent-cli del 2026-10-19): il modello ha scritto PIANO.md ma non ha chiamato
+ * add_project_tasks, così il piano restava lì e la coda vuota. I task si creano dal piano.
+ * Chat del progetto (project): solo se il progetto non aveva task, perché in un progetto avviato un ritocco al piano
+ * non deve rimettere in coda niente. Chat normale: PIANO.md di una cartella il cui progetto non ha ancora task.
  */
-export async function tasksAfterChatPlan(user, p, steps, { hadTasks }) {
-  if (hadTasks) return [];
+export async function tasksAfterChatPlan(user, steps, { project = null, hadTasks = false } = {}) {
   const done = (s) => s.type === 'file' && s.status === 'done';
-  const wrotePlan = steps.some((s) => done(s) && ['write', 'append', 'edit', 'restore'].includes(s.action) && String(s.path || '').toLowerCase() === PLAN_FILE.toLowerCase());
-  if (!wrotePlan || steps.some((s) => done(s) && s.action === 'tasks')) return [];
-  return tasksFromPlan(user, p).catch(() => []);
+  if (steps.some((s) => done(s) && s.action === 'tasks')) return null;
+  for (const s of steps) {
+    if (!done(s) || !['write', 'append', 'edit', 'restore'].includes(s.action)) continue;
+    const parts = String(s.path || '').replace(/\\/g, '/').split('/');
+    if (parts.at(-1).toLowerCase() !== PLAN_FILE.toLowerCase()) continue;
+    const p = project ? (parts.length === 1 && !hadTasks ? project : null) : parts.length === 2 ? get(user, parts[0]) : null;
+    if (!p || (!project && p.tasks.length)) continue;
+    const added = await tasksFromPlan(user, p).catch(() => []);
+    if (added.length) return { p, added };
+  }
+  return null;
 }
 
 /** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */

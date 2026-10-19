@@ -271,9 +271,17 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
-export function computerTools({ canRun = false, images = [], project = false, projectChat = false } = {}) {
+export function computerTools({ canRun = false, images = [], project = false, projectChat = false, folders = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
+  const addTasks = (folder) => fn('add_project_tasks', `Aggiunge task alla coda ${folder ? 'del progetto di una cartella (compare in Progetti)' : 'del progetto'}: li eseguono i modelli locali uno alla volta, con test e controllo delle pagine automatici. Per lavori grandi o in più passi.`, {
+    ...(folder ? { folder: p('Cartella del progetto, es. torrent-cli') } : {}),
+    tasks: { type: 'array', description: 'Task in ordine di esecuzione, piccoli e verificabili.', items: { type: 'object', properties: {
+      text: p('Cosa fare, con i nomi dei file (relativi alla cartella del progetto); dettagli su righe successive.'),
+      type: { type: 'string', enum: ['code', 'page', 'read', 'chat'], description: 'code = script e logica con test; page = pagine web e giochi; read = analisi di file, log, dati; chat = testi e README.' },
+    }, required: ['text'] } },
+    start: { type: 'boolean', description: 'La coda parte subito (default true). false solo se l\'utente ha chiesto di aspettare.' },
+  }, folder ? ['folder', 'tasks'] : ['tasks']);
   return [
     fn('list_files', 'Elenca file e cartelle della cartella di lavoro (o di una sua sottocartella).', { path: p('Sottocartella relativa, vuoto = tutta la cartella di lavoro.') }, []),
     fn('read_file', 'Legge un file di testo della cartella di lavoro.', { path: p('Percorso relativo, es. tetris/index.html') }, ['path']),
@@ -321,14 +329,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       cwd: p('Sottocartella della cartella di lavoro da cui eseguirlo (default: la cartella di lavoro).'),
     }, ['command'])] : []),
     // chat del progetto (l'utente è presente): coda dei task e verifica come quella della coda
+    // chat normale (prova torrent-cli del 2026-10-19): anche qui un lavoro grande diventa un progetto con la sua coda
+    ...(folders ? [addTasks(true)] : []),
     ...(projectChat ? [
-      fn('add_project_tasks', 'Aggiunge task alla coda del progetto: li eseguono i modelli locali uno alla volta, con test e controllo delle pagine automatici. Per lavori grandi o in più passi.', {
-        tasks: { type: 'array', description: 'Task in ordine di esecuzione, piccoli e verificabili.', items: { type: 'object', properties: {
-          text: p('Cosa fare, con i nomi dei file; dettagli su righe successive.'),
-          type: { type: 'string', enum: ['code', 'page', 'read', 'chat'], description: 'code = script e logica con test; page = pagine web e giochi; read = analisi di file, log, dati; chat = testi e README.' },
-        }, required: ['text'] } },
-        start: { type: 'boolean', description: 'La coda parte subito (default true). false solo se l\'utente ha chiesto di aspettare.' },
-      }, ['tasks']),
+      addTasks(false),
       fn('manage_queue', 'Gestisce la coda del progetto: rimette in coda un task da rifare (retry), solo per la verifica completa dopo averlo sistemato (verify), lo riscrive e lo rimette in coda (edit), lo segna come fatto senza verifica (done, solo se l\'utente lo chiede), lo elimina (delete), oppure avvia (start) o mette in pausa (pause) la coda.', {
         action: { type: 'string', enum: ['retry', 'verify', 'edit', 'done', 'delete', 'start', 'pause'] },
         task: { type: 'integer', minimum: 1, description: 'Numero del task (come nell\'elenco dei task del progetto), per retry, verify, edit, done e delete.' },
@@ -347,13 +351,15 @@ export function computerTools({ canRun = false, images = [], project = false, pr
 }
 
 /** Sezione del prompt di sistema per la modalità Computer. */
-export function computerPrompt({ files, canRun, os = 'Windows', project = null, projectChat = null }) {
+export function computerPrompt({ files, canRun, os = 'Windows', project = null, projectChat = null, folder = null }) {
   return `
 
 # Modalità Computer: cartella di lavoro
 ${projectChat ? projectChatPrompt(project, projectChat, canRun) : ''}${project ? `Stai lavorando al progetto «${project.name}»: hai la sua cartella sul PC dell'utente (${os}) e gli strumenti per gestirla. Puoi accedere solo ai file di questa cartella.
 - La cartella di lavoro È la cartella del progetto: scrivi i file direttamente qui (es. index.html, src/app.js, tests/test_app.py), senza creare una sottocartella con il nome del progetto. Usa percorsi relativi.` : `L'utente ha attivato la modalità Computer: hai una cartella di lavoro sul suo PC (${os}) dove creare e sviluppare progetti, e gli strumenti per gestirla. In questa modalità puoi accedere ai file della cartella di lavoro (solo a quelli).
-- Ogni progetto va nella sua sottocartella con un nome breve (es. tetris/, sito-ristorante/, script-backup/). Usa percorsi relativi: non puoi scrivere fuori dalla cartella.`}
+- Ogni progetto va nella sua sottocartella con un nome breve (es. tetris/, sito-ristorante/, script-backup/). Usa percorsi relativi: non puoi scrivere fuori dalla cartella.
+${folder ? `- In questa conversazione stai lavorando nella cartella ${folder}/: quando l'utente parla del progetto, del piano o di «avviarlo» intende questa. Non modificare file di altre cartelle se l'utente non le nomina.
+` : ''}- Lavori grandi, o se l'utente chiede un piano o di avviare il progetto: scrivi PIANO.md nella cartella del progetto (obiettivo; sezione «# Regole» con le regole concrete del risultato; poi i passi) e crea i task con add_project_tasks (folder = la cartella), nello stesso turno: la coda di LocalAI li esegue uno alla volta con test e verifica, e il progetto compare in Progetti.`}
 - Per creare qualcosa usa write_file con il contenuto COMPLETO e funzionante del file: niente segnaposto, niente "resto del codice qui".
 - La tua finestra di contesto è limitata: ogni chiamata deve restare sotto le 150 righe circa. Per un file più lungo (pagine ricche, documenti con molte sezioni, giochi) scrivi con write_file la prima parte e aggiungi il resto con append_file, un blocco per chiamata, finché il file è completo. CSS sobrio e breve.
 - Per modificare un file esistente leggilo con read_file (LocalAI rifiuta modifiche a file che non hai letto in questa conversazione o che sono cambiati dopo) e cambia solo i pezzi che servono con edit_file: non riscriverlo intero (una riscrittura a blocchi interrotta a metà lascia il file troncato). Riscrivi da capo solo un file che cambia quasi tutto.

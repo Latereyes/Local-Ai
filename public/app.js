@@ -480,7 +480,8 @@ function renderComputer(node, m) {
         // chat del progetto: task messi in coda
         const head = s.status === 'error' ? 'Task non aggiunti' : s.status === 'done' ? `${s.tasks.length === 1 ? 'Task aggiunto' : `${s.tasks.length} task aggiunti`} alla coda${s.started ? ' · coda avviata' : s.active ? '' : ' · coda in pausa'}` : 'Aggiungo i task…';
         const list = (s.tasks || []).map((t) => `<li>${esc(t.title)}</li>`).join('');
-        const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
+        const pid = s.project || state.conv?.project?.id;
+        const go = s.status === 'done' && pid ? `<button class="linkish" data-open-project="${esc(pid)}">apri il progetto</button>` : '';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
       }
       if (s.action === 'history') {

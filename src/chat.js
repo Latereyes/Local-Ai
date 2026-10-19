@@ -315,6 +315,41 @@ function requireObserved(conv, user, rel) {
   if (seen !== st.mtimeMs) throw new workspace.WorkspaceError(`«${r}» è cambiato da quando l'hai letto: rileggilo con read_file prima di modificarlo.`);
 }
 
+/**
+ * Chat normale in modalità Computer: la cartella su cui sta lavorando (prova torrent-cli del 2026-10-19: dopo aver
+ * scritto torrent-cli/*.py, alla richiesta «crea piano.md» il modello ha riscritto clone-missile-command/PIANO.md).
+ * Un file di un'altra cartella si modifica solo se l'utente nomina quella cartella nell'ultimo messaggio.
+ */
+const topFolder = (rel) => {
+  const parts = String(rel || '').replace(/\\/g, '/').replace(/^\.?\/+/, '').split('/');
+  return parts.length > 1 ? parts[0] : '';
+};
+const looseName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9à-ù]+/g, '');
+
+export function requireOwnFolder(conv, rel, exists) {
+  const top = topFolder(rel);
+  if (conv.project || !conv.folder || !top || top === conv.folder || !exists(top)) return;
+  const asked = looseName(conv.messages.findLast((m) => m.role === 'user' && !m.auto)?.content);
+  if (asked.includes(looseName(top))) return;
+  throw new workspace.WorkspaceError(`Questa chat sta lavorando nella cartella «${conv.folder}/»: «${top}/» è un altro progetto e l'utente non l'ha nominato. Scrivi in ${conv.folder}/ (es. ${conv.folder}/PIANO.md); se pensi che l'utente intenda davvero «${top}», chiediglielo.`);
+}
+
+/** Chat normale: progetto della cartella (creata se manca) per add_project_tasks. */
+async function folderProject(conv, folder) {
+  if (conv.project) return null;
+  const name = workspace.safeFolder(String(folder || conv.folder || '').trim().replace(/[\\/]+$/, ''));
+  if (!name || name.includes('/')) throw new workspace.WorkspaceError('Indica in folder la cartella del progetto (es. torrent-cli)');
+  const owner = getUser(conv.ownerId);
+  workspace.userRoot({ ...owner, project: name });
+  return projects.get(owner, name);
+}
+
+/** Dopo una scrittura riuscita: la chat normale ricorda la cartella su cui sta lavorando. */
+function noteFolder(conv, rel) {
+  const top = topFolder(rel);
+  if (!conv.project && top) conv.folder = top;
+}
+
 // Stessa chiamata con gli stessi argomenti di fila (come repeat-tool-reminder di DeepSeek Harness):
 // avviso dalla terza, dalla quinta il turno passa all'ultimo giro senza strumenti
 function repeatNote(msg, call) {
@@ -353,6 +388,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         throw new workspace.WorkspaceError('Un task della coda sta lavorando sui file del progetto: non modificarli adesso. Aggiungi la modifica come task con add_project_tasks, oppure aspetta che il task finisca.');
       }
     }
+    if (WRITE_TOOLS.has(name)) requireOwnFolder(conv, step.path, (top) => fs.existsSync(path.join(workspace.userRoot(user), top)));
     switch (name) {
       case 'list_files': {
         const files = await workspace.listFiles(user, step.path, { limit: 200 });
@@ -485,7 +521,8 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       }
       case 'add_project_tasks': {
         // chat del progetto: i task vanno nella coda, che li esegue con la verifica automatica
-        const p = conv.projectChat && projects.get(getUser(conv.ownerId), conv.project.id);
+        // chat normale (prova torrent-cli del 2026-10-19): i task vanno nel progetto della cartella indicata
+        const p = conv.projectChat ? projects.get(getUser(conv.ownerId), conv.project.id) : await folderProject(conv, args.folder);
         if (!p) throw new workspace.WorkspaceError('Solo nella chat di un progetto');
         const added = await projects.addTasks(p, args.tasks, { from: conv.id });
         if (!added.length) throw new workspace.WorkspaceError('Nessun task nuovo (vuoti o già in coda)');
@@ -497,7 +534,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
           if (!p.active) runner.setActive(p, true); else runner.kick();
           started = true;
         }
-        Object.assign(step, { path: '', tasks: added.map((t) => ({ title: t.title, type: t.type })), started, active: p.active });
+        Object.assign(step, { path: '', project: p.id, tasks: added.map((t) => ({ title: t.title, type: t.type })), started, active: p.active });
         output = JSON.stringify({ ok: true, added: added.map((t) => `${t.title} (${projects.TYPES[t.type]})`), queue: p.active ? 'attiva: i task partono uno alla volta' : 'in pausa: l\'utente la avvia dalla pagina del progetto, oppure manage_queue con action start' });
         break;
       }
@@ -664,6 +701,7 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         throw new Error(`Strumento sconosciuto: ${name}`);
     }
     step.status = 'done';
+    if (WRITE_TOOLS.has(name)) noteFolder(conv, step.path);
   } catch (e) {
     step.status = 'error';
     step.error = e.message;
@@ -1043,7 +1081,12 @@ export async function send(conv, opts) {
   const pj = conv.projectChat && owner ? projects.get(owner, conv.project.id) : null;
   const projectChat = pj ? await projects.chatContext(owner, pj) : null;
   const hadTasks = !!pj?.tasks.length;
-  const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null, projectChat } : null;
+  // conversazioni di prima della cartella ricordata: la ricava dall'ultima scrittura riuscita
+  if (computerOn && !conv.project && !conv.folder) {
+    const last = conv.messages.flatMap((m) => m.steps || []).findLast((s) => s.type === 'file' && s.status === 'done' && ['write', 'append', 'edit', 'restore'].includes(s.action) && topFolder(s.path));
+    if (last) conv.folder = topFolder(last.path);
+  }
+  const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null, projectChat, folder: conv.project ? null : conv.folder || null } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
   const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true, ...(opts.autoLabel ? { autoLabel: String(opts.autoLabel).slice(0, 200) } : {}) } : {}), createdAt: Date.now() };
@@ -1120,7 +1163,7 @@ export async function send(conv, opts) {
           // nei task dei progetti, solo i file (i test li fa la coda)
           ...(opts.auto || projectTask ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv), melody: recentMelody(conv) })
             .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
-          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat }) : []),
+          ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat, folders: !conv.project }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
         const maxRounds = computer ? Math.max(config.workspace.maxRounds, config.search.maxRounds) : config.search.maxRounds;
@@ -1308,16 +1351,16 @@ export async function send(conv, opts) {
       // 2026-10-11, lo screenshot giudicato contro il messaggio del coordinatore ha aperto una correzione inutile
       if (toJudge) visionFollowup = await judgeProjectPage(conv, msg, toJudge, owner, opts.visionFollowup || opts.auto ? '' : rawText || lastRequest(conv));
 
-      // Chat di un progetto nuovo: piano scritto senza task → i task si creano dal piano e la coda parte
-      if (pj && !projectChat.busy) {
-        const added = await projects.tasksAfterChatPlan(owner, pj, msg.steps, { hadTasks });
-        if (added.length) {
-          const runner = await import('./runner.js');
-          if (!pj.active) runner.setActive(pj, true); else runner.kick();
-          const step = { id: store.newId(), type: 'file', action: 'tasks', path: '', status: 'done', tasks: added.map((t) => ({ title: t.title, type: t.type })), started: true, active: pj.active, startedAt: Date.now() };
-          msg.steps.push(step);
-          emit(conv.id, { type: 'step', messageId: msg.id, step });
-        }
+      // Piano scritto senza task (chat di un progetto nuovo, o chat normale su una cartella senza task):
+      // i task si creano dal piano e la coda parte
+      const planned = computerOn && !projectTask && !projectChat?.busy && owner
+        ? await projects.tasksAfterChatPlan(owner, msg.steps, { project: pj, hadTasks }) : null;
+      if (planned) {
+        const runner = await import('./runner.js');
+        if (!planned.p.active) runner.setActive(planned.p, true); else runner.kick();
+        const step = { id: store.newId(), type: 'file', action: 'tasks', path: '', project: planned.p.id, status: 'done', tasks: planned.added.map((t) => ({ title: t.title, type: t.type })), started: true, active: planned.p.active, startedAt: Date.now() };
+        msg.steps.push(step);
+        emit(conv.id, { type: 'step', messageId: msg.id, step });
       }
 
       // Chat del progetto: fotografia del turno (se ha cambiato file), da cui si può tornare indietro
