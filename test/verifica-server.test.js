@@ -27,6 +27,8 @@ process.env.DATA_DIR = path.join(tmp, 'data');
 process.env.WORKSPACE_DIR = path.join(tmp, 'ws');
 process.env.OLLAMA_URL = `http://127.0.0.1:${fake.address().port}`;
 process.env.GPU_ARBITER = '0';
+// niente ComfyUI vero: sul PC c'è, e il giudizio dello screenshot con Qwen3-VL bloccava il test (prova del 2026-10-19)
+process.env.COMFY_URL = 'http://127.0.0.1:1';
 process.env.TASK_AUTO_INSTALL = '0';
 process.env.TASK_ADVICE_ROUNDS = '0';
 const freePort = () => new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => r(port)); }); });
@@ -89,4 +91,5 @@ if __name__ == '__main__':
   }
 });
 
-test.after(() => { fake.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
+// su Windows il server Python appena chiuso tiene ancora la cartella per un attimo
+test.after(() => { fake.close(); try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {} });
