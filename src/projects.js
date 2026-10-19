@@ -277,6 +277,27 @@ export async function tasksFromPlan(user, p) {
   return added;
 }
 
+/**
+ * Fine di un turno di chat (prova torrent-cli del 2026-10-19): il modello ha scritto PIANO.md ma non ha chiamato
+ * add_project_tasks, così il piano restava lì e la coda vuota. I task si creano dal piano.
+ * Chat del progetto (project): solo se il progetto non aveva task, perché in un progetto avviato un ritocco al piano
+ * non deve rimettere in coda niente. Chat normale: PIANO.md di una cartella il cui progetto non ha ancora task.
+ */
+export async function tasksAfterChatPlan(user, steps, { project = null, hadTasks = false } = {}) {
+  const done = (s) => s.type === 'file' && s.status === 'done';
+  if (steps.some((s) => done(s) && s.action === 'tasks')) return null;
+  for (const s of steps) {
+    if (!done(s) || !['write', 'append', 'edit', 'restore'].includes(s.action)) continue;
+    const parts = String(s.path || '').replace(/\\/g, '/').split('/');
+    if (parts.at(-1).toLowerCase() !== PLAN_FILE.toLowerCase()) continue;
+    const p = project ? (parts.length === 1 && !hadTasks ? project : null) : parts.length === 2 ? get(user, parts[0]) : null;
+    if (!p || (!project && p.tasks.length)) continue;
+    const added = await tasksFromPlan(user, p).catch(() => []);
+    if (added.length) return { p, added };
+  }
+  return null;
+}
+
 /** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */
 export async function testCommand(user, p) {
   if (p.testCommand) return p.testCommand;
@@ -331,7 +352,10 @@ export async function chatContext(user, p) {
     busy: p.tasks.some((t) => t.status === 'running' || t.status === 'testing'),
     active: !!p.active,
     text: [
-      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>` : `Piano: ${PLAN_FILE} è vuoto.`,
+      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>`
+        : p.tasks.length ? `Piano: ${PLAN_FILE} è vuoto.`
+        // progetto appena creato: alla prima richiesta di cosa realizzare servono piano e task, non i file scritti a mano
+        : `Progetto nuovo: ${PLAN_FILE} è vuoto e non ci sono task. Quando l'utente dice cosa realizzare, scrivi PIANO.md per «${p.name}» e crea i task con add_project_tasks nello stesso turno.`,
       tasks.length ? `Task del progetto (coda ${p.active ? 'attiva' : 'in pausa'}):\n${tasks.slice(-30).join('\n')}` : 'Nessun task.',
       log.length ? `Ultime voci della cronologia:\n${log.join('\n')}` : '',
     ].filter(Boolean).join('\n\n'),

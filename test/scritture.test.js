@@ -122,3 +122,16 @@ test('installazione: nomi che pip o npm leggerebbero come opzioni o percorsi non
   assert.deepEqual(r.installed, []);
   assert.deepEqual(r.skipped.map((x) => x.why), ['nome non valido', 'nome non valido', 'nome non valido', 'nome non valido']);
 });
+
+test('chat normale: niente scritture in un\'altra cartella che l\'utente non ha nominato (prova torrent-cli 2026-10-19)', () => {
+  const conv = { folder: 'torrent-cli', messages: [{ role: 'user', content: 'per completare il progetto e renderlo robusto crea piano.md' }] };
+  const exists = () => true;
+  assert.throws(() => chat.requireOwnFolder(conv, 'clone-missile-command/PIANO.md', exists), /sta lavorando nella cartella «torrent-cli\/»/);
+  chat.requireOwnFolder(conv, 'torrent-cli/PIANO.md', exists);
+  chat.requireOwnFolder(conv, 'nuova-cartella/app.py', () => false); // una cartella nuova si può creare
+  chat.requireOwnFolder(conv, 'PIANO.md', exists); // file alla radice: nessuna cartella
+  chat.requireOwnFolder({ ...conv, folder: undefined }, 'clone-missile-command/PIANO.md', exists);
+  chat.requireOwnFolder({ ...conv, project: { folder: 'x' } }, 'clone-missile-command/PIANO.md', exists);
+  // l'utente nomina l'altra cartella (anche con spazi al posto dei trattini): si può
+  chat.requireOwnFolder({ ...conv, messages: [{ role: 'user', content: 'aggiorna il piano di clone missile command' }] }, 'clone-missile-command/PIANO.md', exists);
+});
