@@ -383,8 +383,12 @@ export function recoverInterrupted() {
       if (!p) continue;
       const stuck = p.tasks.filter((t) => t.status === 'running' || t.status === 'testing');
       if (!stuck.length && !p.active) continue;
-      for (const t of stuck) { t.status = 'queued'; t.attempts = 0; }
-      if (stuck.length) addLog(p, 'LocalAI riavviato: il task in corso è tornato in coda');
+      // riavvio durante la verifica: il lavoro del modello c'è già, alla ripresa si rifà solo la verifica
+      // (prova torrent-cli del 2026-10-19: test superati, poi riavvio, e il task sarebbe ripartito da zero)
+      const verifying = stuck.filter((t) => t.status === 'testing');
+      for (const t of stuck) Object.assign(t, { status: 'queued', attempts: 0 }, t.status === 'testing' ? { verifyOnly: true, fixedBy: 'restart' } : {});
+      if (verifying.length) addLog(p, 'LocalAI riavviato durante la verifica: il task è tornato in coda e alla ripresa rifà solo la verifica');
+      else if (stuck.length) addLog(p, 'LocalAI riavviato: il task in corso è tornato in coda');
       if (p.active && p.autoResume) addLog(p, 'LocalAI riavviato: la coda riparte da sola');
       else if (p.active) { p.active = false; addLog(p, 'Coda in pausa dopo il riavvio: premi «Avvia» per riprendere'); }
       save(p, { touch: false });

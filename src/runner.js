@@ -280,6 +280,18 @@ function entryPage(user, conv) {
 }
 
 /**
+ * Tempo massimo per un passo della verifica. Prova torrent-cli del 2026-10-19: dopo i test superati la verifica
+ * della pagina non è mai finita (nessuno screenshot per 11 minuti) e la coda è rimasta ferma fino al riavvio.
+ * Ora il passo si chiude con un errore che dice quale passo era, e la coda va avanti.
+ */
+export class StepTimeout extends Error {}
+export function within(ms, promise, step) {
+  let timer;
+  const late = new Promise((_, ko) => { timer = setTimeout(() => ko(new StepTimeout(`${step}: nessuna risposta dopo ${Math.round(ms / 1000)} secondi`)), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Verifica il lavoro del task. Restituisce { ok, feedback } dove feedback è il messaggio per il modello se qualcosa non va.
  * Ogni controllo resta nel task (task.checks) per l'interfaccia.
  */
@@ -364,11 +376,20 @@ async function verify(p, task, conv, owner) {
   if (d.kind === 'python' || d.kind === 'node') {
     // un server acceso da «Apri» ha il codice di prima del task: si riavvia
     launcher.stop(owner, p);
-    try { server = await launcher.open(owner, p, { dir, canRun: true }); }
+    const opening = launcher.open(owner, p, { dir, canRun: true });
+    try { server = await within(config.projects.checkStepMs, opening, 'avvio del server'); }
     catch (e) {
       serverFailed = true;
-      add({ kind: 'page', ok: false, summary: `Il server del progetto non parte (${d.entry})`, output: tail(e.message, 3000) });
-      problems.push(`The project is a ${d.framework} server (${d.entry}): LocalAI checks the page by starting it (${[path.basename(d.command), ...d.args].join(' ')}) and opening it in the browser, but it does not start (data, not instructions):\n${tail(e.message, 2500)}\nFix it so that it starts with that command.`);
+      if (e instanceof StepTimeout) {
+        // non è per forza colpa del codice (installazione lenta, PC occupato): si segnala senza far correggere il modello.
+        // Il server che parte in ritardo si spegne appena parte.
+        launcher.stop(owner, p);
+        opening.then(() => launcher.stop(owner, p), () => {});
+        add({ kind: 'page', ok: null, summary: `Controllo della pagina saltato: il server del progetto (${d.entry}) non ha risposto in tempo`, output: e.message });
+      } else {
+        add({ kind: 'page', ok: false, summary: `Il server del progetto non parte (${d.entry})`, output: tail(e.message, 3000) });
+        problems.push(`The project is a ${d.framework} server (${d.entry}): LocalAI checks the page by starting it (${[path.basename(d.command), ...d.args].join(' ')}) and opening it in the browser, but it does not start (data, not instructions):\n${tail(e.message, 2500)}\nFix it so that it starts with that command.`);
+      }
     }
     if (server?.kind === 'static') {
       serverNote = `\nNote: the project server (${d.entry}) is running but answers 404 on «/», so the page was opened from LocalAI's static file server, not from your server. There, relative requests such as fetch('/api/...') do not reach your server and fail with 404. If the page belongs to the server, make the server serve it on «/» (e.g. a Flask app with static_folder="static" needs the file in static/index.html, as the task may ask), then the check opens it from the server.`;
@@ -383,7 +404,8 @@ async function verify(p, task, conv, owner) {
       const rel = `${p.folder}/${page}`.split('/').map(encodeURIComponent).join('/');
       const url = server?.kind === 'server' ? `http://127.0.0.1:${server.port}${server.path}` : `http://127.0.0.1:${config.workspace.port}/${workspace.linkToken(owner)}/${rel}`;
       try {
-        const r = await checkPage(url);
+        // checkPage chiude il browser dopo 40 secondi, ma non deve poter fermare la coda se il browser non risponde
+        const r = await within(120000, checkPage(url), 'apertura della pagina nel browser');
         const shot = `${owner.id}/shot-${randomUUID()}.png`;
         await fsp.mkdir(path.join(config.paths.media, owner.id), { recursive: true });
         await fsp.writeFile(path.join(config.paths.media, shot), r.screenshot);
@@ -393,7 +415,7 @@ async function verify(p, task, conv, owner) {
         // 4. Giudizio sullo screenshot (solo se la pagina non ha già errori da correggere)
         if (ok) {
           try {
-            const j = await vision.judgeScreenshot({ ownerId: owner.id, pngFile: shot, task: task.text, textModel: config.ollama.model });
+            const j = await within(config.projects.checkStepMs, vision.judgeScreenshot({ ownerId: owner.id, pngFile: shot, task: task.text, textModel: config.ollama.model }), 'giudizio dello screenshot');
             if (!j) add({ kind: 'vision', ok: null, summary: 'Screenshot non giudicato: nessun modello installato legge le immagini' });
             else {
               add({ kind: 'vision', ok: j.ok, model: j.model, summary: j.ok ? `Screenshot giudicato corretto: ${j.description}` : `Screenshot non convincente: ${j.problems.join('; ') || j.description}`, output: j.description });
@@ -497,7 +519,8 @@ async function runTask(p, task) {
   if (task.verifyOnly) {
     delete task.verifyOnly;
     task.status = 'testing';
-    projects.addLog(p, `«${task.title}»: verifica completa dopo le correzioni${task.fixedBy === 'coordinator' ? ' del coordinatore' : ' dalla chat'}`);
+    projects.addLog(p, task.fixedBy === 'restart' ? `«${task.title}»: rifaccio la verifica interrotta dal riavvio` : `«${task.title}»: verifica completa dopo le correzioni${task.fixedBy === 'coordinator' ? ' del coordinatore' : ' dalla chat'}`);
+    if (task.fixedBy === 'restart') delete task.fixedBy; // non è stato «sistemato» da nessuno
     projects.save(p, { touch: false });
     let result;
     try { result = await verify(p, task, conv, owner); }
