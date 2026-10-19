@@ -95,3 +95,17 @@ test('piano: la sezione «Regole» è riferimento per i task, non un elenco di t
   const plan = '# Obiettivo\nClone di Space Invaders\n\n# Regole\n- alieni in griglia 5x11 che si muove in blocco\n- scendono a ogni bordo\n\n# Task\n- [pagina] index.html con il canvas\n  Fatto quando: si vede la formazione\n- [codice] logica in game.js';
   assert.deepEqual(projects.parsePlan(plan).map((t) => t.text), ['[pagina] index.html con il canvas\nFatto quando: si vede la formazione', '[codice] logica in game.js']);
 });
+
+test('chat di un progetto nuovo: piano scritto senza task → task creati dal piano (prova torrent-cli 2026-10-19)', async () => {
+  const p = await projects.create(user, 'torrent-cli');
+  assert.match((await projects.chatContext(user, p)).text, /Progetto nuovo: PIANO\.md è vuoto.*«torrent-cli»/);
+  await projects.writePlan(user, p, '# Obiettivo\nUn client torrent da riga di comando\n\n# Task\n- [codice] parser dei file .torrent in torrent.py con i test\n- [testo] README');
+  const steps = [{ type: 'file', action: 'write', path: 'PIANO.md', status: 'done' }];
+  // in un progetto già avviato, o se la chat ha già creato i task, non si aggiunge niente
+  assert.equal((await projects.tasksAfterChatPlan(user, p, steps, { hadTasks: true })).length, 0);
+  assert.equal((await projects.tasksAfterChatPlan(user, p, [...steps, { type: 'file', action: 'tasks', status: 'done' }], { hadTasks: false })).length, 0);
+  assert.equal((await projects.tasksAfterChatPlan(user, p, [{ ...steps[0], path: 'main.py' }], { hadTasks: false })).length, 0);
+  const added = await projects.tasksAfterChatPlan(user, p, steps, { hadTasks: false });
+  assert.deepEqual(added.map((t) => [t.title, t.type]), [['parser dei file .torrent in torrent.py con i test', 'code'], ['README', 'chat']]);
+  assert.doesNotMatch((await projects.chatContext(user, p)).text, /Progetto nuovo/);
+});

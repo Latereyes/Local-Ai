@@ -277,6 +277,19 @@ export async function tasksFromPlan(user, p) {
   return added;
 }
 
+/**
+ * Fine di un turno della chat di un progetto nuovo (prova torrent-cli del 2026-10-19): il modello ha scritto PIANO.md
+ * ma non ha chiamato add_project_tasks, così il piano restava lì e la coda vuota. I task si creano dal piano.
+ * Solo se il progetto non aveva task: in un progetto avviato un ritocco al piano non deve rimettere in coda niente.
+ */
+export async function tasksAfterChatPlan(user, p, steps, { hadTasks }) {
+  if (hadTasks) return [];
+  const done = (s) => s.type === 'file' && s.status === 'done';
+  const wrotePlan = steps.some((s) => done(s) && ['write', 'append', 'edit', 'restore'].includes(s.action) && String(s.path || '').toLowerCase() === PLAN_FILE.toLowerCase());
+  if (!wrotePlan || steps.some((s) => done(s) && s.action === 'tasks')) return [];
+  return tasksFromPlan(user, p).catch(() => []);
+}
+
 /** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */
 export async function testCommand(user, p) {
   if (p.testCommand) return p.testCommand;
@@ -331,7 +344,10 @@ export async function chatContext(user, p) {
     busy: p.tasks.some((t) => t.status === 'running' || t.status === 'testing'),
     active: !!p.active,
     text: [
-      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>` : `Piano: ${PLAN_FILE} è vuoto.`,
+      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>`
+        : p.tasks.length ? `Piano: ${PLAN_FILE} è vuoto.`
+        // progetto appena creato: alla prima richiesta di cosa realizzare servono piano e task, non i file scritti a mano
+        : `Progetto nuovo: ${PLAN_FILE} è vuoto e non ci sono task. Quando l'utente dice cosa realizzare, scrivi PIANO.md per «${p.name}» e crea i task con add_project_tasks nello stesso turno.`,
       tasks.length ? `Task del progetto (coda ${p.active ? 'attiva' : 'in pausa'}):\n${tasks.slice(-30).join('\n')}` : 'Nessun task.',
       log.length ? `Ultime voci della cronologia:\n${log.join('\n')}` : '',
     ].filter(Boolean).join('\n\n'),

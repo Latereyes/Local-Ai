@@ -1042,6 +1042,7 @@ export async function send(conv, opts) {
   // stato del progetto (piano, task, cronologia) ricalcolato a ogni messaggio della chat del progetto
   const pj = conv.projectChat && owner ? projects.get(owner, conv.project.id) : null;
   const projectChat = pj ? await projects.chatContext(owner, pj) : null;
+  const hadTasks = !!pj?.tasks.length;
   const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null, projectChat } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
@@ -1306,6 +1307,18 @@ export async function send(conv, opts) {
       // i turni automatici (coordinatore) non hanno una richiesta dell'utente su cui giudicare la pagina: prova Space Invaders
       // 2026-10-11, lo screenshot giudicato contro il messaggio del coordinatore ha aperto una correzione inutile
       if (toJudge) visionFollowup = await judgeProjectPage(conv, msg, toJudge, owner, opts.visionFollowup || opts.auto ? '' : rawText || lastRequest(conv));
+
+      // Chat di un progetto nuovo: piano scritto senza task → i task si creano dal piano e la coda parte
+      if (pj && !projectChat.busy) {
+        const added = await projects.tasksAfterChatPlan(owner, pj, msg.steps, { hadTasks });
+        if (added.length) {
+          const runner = await import('./runner.js');
+          if (!pj.active) runner.setActive(pj, true); else runner.kick();
+          const step = { id: store.newId(), type: 'file', action: 'tasks', path: '', status: 'done', tasks: added.map((t) => ({ title: t.title, type: t.type })), started: true, active: pj.active, startedAt: Date.now() };
+          msg.steps.push(step);
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        }
+      }
 
       // Chat del progetto: fotografia del turno (se ha cambiato file), da cui si può tornare indietro
       if (pj && !projectChat.busy) {

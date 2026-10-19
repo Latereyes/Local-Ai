@@ -1385,8 +1385,10 @@ function renderTask(t, i, p) {
 function renderProject() {
   const p = state.project;
   if (!p) return;
+  // il piano che si sta scrivendo resta solo se è di questo progetto: prova torrent-cli del 2026-10-19, aperto dal
+  // link di una chat mostrava (e salvava) il piano di Missile Command rimasto nella pagina nascosta
   const keepPlan = $('#pj-plan');
-  const draft = keepPlan && keepPlan.dataset.dirty === '1' ? keepPlan.value : null;
+  const draft = keepPlan && keepPlan.dataset.dirty === '1' && keepPlan.dataset.project === p.id ? keepPlan.value : null;
   const admin = state.user?.role === 'admin';
   const hasIndex = p.files.some((f) => f.path === 'index.html');
   const queued = p.tasks.filter((t) => t.status === 'queued').length;
@@ -1414,7 +1416,7 @@ function renderProject() {
 
     <section class="pj-card">
       <div class="pj-card-head"><h3>Piano</h3><span class="faint">${esc(p.folder)}/PIANO.md · ogni punto «- …» diventa un task; tipo forzabile con [codice], [pagina], [lettura], [testo]</span></div>
-      <textarea id="pj-plan" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
+      <textarea id="pj-plan" data-project="${esc(p.id)}" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
       <div class="pj-row-btns"><button class="btn" data-pj="draft-plan" title="Un modello locale scrive il piano partendo da quello che c'è nel riquadro (anche solo l'obiettivo)">Scrivi il piano con l'AI</button><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
     </section>
 
@@ -1489,7 +1491,7 @@ el.projects.addEventListener('click', async (e) => {
   const p = state.project;
   if (!p) return;
   const base = `/api/projects/${encodeURIComponent(p.id)}`;
-  const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } } catch (err) { alert(err.message); } };
+  const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } return true; } catch (err) { alert(err.message); return false; } };
   const rs = e.target.closest('[data-restore]');
   if (rs) {
     if (!confirm(`Riportare la cartella alla versione «${rs.dataset.label}»? Lo stato attuale resta nella storia e si può ripristinare.`)) return;
@@ -1522,7 +1524,9 @@ el.projects.addEventListener('click', async (e) => {
     }
     case 'save-plan': case 'plan-tasks': {
       const plan = $('#pj-plan');
-      await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }));
+      // salvato: il riquadro torna a mostrare PIANO.md (prima restava «in scrittura» per sempre)
+      plan.dataset.dirty = '';
+      if (!await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }))) { plan.dataset.dirty = '1'; return; }
       if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
       return;
     }
