@@ -175,7 +175,15 @@ export async function list(user) {
     const p = read(user.id, decodeURIComponent(f.slice(0, -5)));
     if (p && !out.has(p.id) && fs.existsSync(path.join(root, p.folder))) out.set(p.id, p);
   }
-  return [...out.values()].map(summary).sort((a, b) => b.active - a.active || b.updatedAt - a.updatedAt);
+  // ordine per ultima modifica (richiesta dell'utente, 2026-10-19): la più recente tra i dati del progetto (task,
+  // piano, cronologia) e i file della cartella, così sale anche un progetto toccato a mano o da una chat Computer
+  const rows = await Promise.all([...out.values()].map(async (p) => {
+    const files = await workspace.listFiles(scoped(user, p), '', { limit: 1500 }).catch(() => []);
+    const newest = Math.max(0, ...files.map((f) => f.mtime || 0));
+    const saved = fs.existsSync(fileFor(user.id, p.id)) ? p.updatedAt || 0 : 0;
+    return { ...summary(p), modifiedAt: Math.max(saved, newest) || p.updatedAt };
+  }));
+  return rows.sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
 
 /** Progetto dell'utente (creato al volo se la cartella esiste ma non ha ancora dati). */
