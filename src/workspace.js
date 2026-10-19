@@ -409,11 +409,18 @@ export function runCommand(user, command, { cwd = '', timeout = 120000, signal }
     // Su Windows l'output della console è in UTF-8 solo dopo chcp 65001
     const line = IS_WIN ? `chcp 65001>nul & ${command}` : command;
     const p = spawn(line, { cwd: dir.abs, shell: true, windowsHide: true, detached: !IS_WIN, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' } });
+    // si tengono l'inizio e la fine: prova torrent-cli del 2026-10-19, con «unittest -v» i 12000 caratteri iniziali
+    // erano tutti «... ok» e il riepilogo degli errori (in fondo) non arrivava mai a Qwen, che correggeva alla cieca
     let out = '';
+    let end = '';
     let cut = false;
+    const HEAD = 2500;
     const add = (b) => {
-      if (out.length < MAX_OUTPUT) out += b.toString('utf8');
-      else cut = true;
+      let t = b.toString('utf8');
+      if (out.length < HEAD) { const n = HEAD - out.length; out += t.slice(0, n); t = t.slice(n); }
+      if (!t) return;
+      end += t;
+      if (end.length > MAX_OUTPUT - HEAD) { end = end.slice(-(MAX_OUTPUT - HEAD)); cut = true; }
     };
     p.stdout.on('data', add);
     p.stderr.on('data', add);
@@ -424,7 +431,7 @@ export function runCommand(user, command, { cwd = '', timeout = 120000, signal }
     const finish = (code, error) => {
       clearTimeout(t);
       signal?.removeEventListener('abort', onAbort);
-      if (out.length > MAX_OUTPUT) { out = out.slice(0, MAX_OUTPUT); cut = true; }
+      if (end) out += cut ? `\n[… output intermedio omesso …]\n${end.replace(/^[^\n]*\n/, '')}` : end;
       done({ exitCode: code, output: out.replace(/\r\n/g, '\n'), truncated: cut, timedOut, error, cwd: dir.rel, ms: Date.now() - started });
     };
     p.on('error', (e) => finish(null, e.message));

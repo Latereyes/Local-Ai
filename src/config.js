@@ -89,6 +89,11 @@ export default {
     // Librerie mancanti (numpy, pygame…): la verifica le installa da sola se esistono su PyPI/npm (solo amministratore).
     // TASK_AUTO_INSTALL=0 le lascia da installare a mano (prova Missile Command 2026-10-11: la coda si fermava su numpy)
     autoInstall: !['0', 'false', 'no'].includes(String(env.TASK_AUTO_INSTALL || '').toLowerCase()),
+    // Consigli contro i loop (2026-10-19): dopo questi tentativi falliti un altro modello (TASK_ADVICE_MODEL, vuoto =
+    // quello per lettura e analisi, Gemma 26B) analizza l'errore e scrive CONSIGLI.md; al massimo TASK_ADVICE_ROUNDS volte per task
+    adviceAfter: Number(env.TASK_ADVICE_AFTER || 2),
+    adviceRounds: Number(env.TASK_ADVICE_ROUNDS ?? 2),
+    adviceModel: env.TASK_ADVICE_MODEL || '',
     // Ciclo di riscrittura: stesso file riscritto intero più di così in un task (o lo stesso contenuto 3 volte) → task fermato
     maxRewrites: Number(env.TASK_MAX_REWRITES || 10),
     // Modello che giudica gli screenshot delle pagine; vuoto = il primo che ha passato la verifica visiva

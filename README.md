@@ -157,7 +157,13 @@ Con il tasto **Computer** nel composer l'assistente lavora in una cartella del P
 
 ## Progetti: piano, coda di task e verifica automatica
 
-La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartella della cartella di lavoro (`workspace\<utente>\<progetto>\`) con un piano, una coda di task e la cronologia. Le cartelle create in chat con **Computer** compaiono anche qui.
+La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartella della cartella di lavoro (`workspace\<utente>\<progetto>\`) con un piano, una coda di task e la cronologia. Le cartelle create in chat con **Computer** compaiono anche qui. L'elenco è in ordine di **ultima modifica**, la più recente in alto: conta sia il lavoro della coda sia l'ultimo file cambiato nella cartella, anche a mano.
+
+- **Apri** capisce che cosa è il progetto:
+  - una **pagina o un gioco** (`index.html`) si apre come prima dal server dei file;
+  - un **server web** (Flask, FastAPI, `http.server` o un altro server Python, Node con express o `http`) viene **avviato sul PC**: LocalAI lancia il file giusto (es. `python app.py`, oppure `python -m flask --app app run` se il file non si avvia da solo), installa prima le librerie mancanti che esistono, aspetta la porta che il server apre davvero e apre `http://<indirizzo da cui usi l'app>:<porta>/`. Dal telefono con Tailscale è quindi l'indirizzo Tailscale del PC. Se il server ascolta solo su `127.0.0.1` (Flask di serie), LocalAI gira la stessa porta dagli altri indirizzi del PC, così si vede lo stesso;
+  - se il server risponde «non trovato» sulla pagina principale (solo API) e c'è `index.html`, si apre la pagina e il server resta acceso dietro;
+  - il server resta acceso finché non premi **Ferma server**, elimini il progetto o chiudi LocalAI. Se non parte, l'errore mostra le ultime righe del suo output. Avviare un server esegue il codice del progetto, quindi è solo per gli amministratori; un programma da riga di comando (es. `torrent-cli`) non ha niente da aprire e il tasto non compare.
 
 - **Parla con il progetto**: nel riquadro in cima alla pagina del progetto scrivi una domanda, una modifica o una nuova funzione, per esempio «aggiungi un tasto pausa», «il punteggio non sale quando completo una riga» o «come funziona il salvataggio?». Si apre la **chat del progetto**: una chat normale, con la barra del progetto in cima, che lavora solo nella sua cartella e a ogni messaggio vede il piano, i task con il loro esito e la cronologia.
   - Il lavoro lo guida lui: non serve dirgli ogni passo. Sceglie da solo cosa fare subito e cosa mettere in coda.
@@ -179,7 +185,7 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
   - un file pieno non può essere sovrascritto con un contenuto vuoto (per toglierlo serve `delete_file`);
   - prima di ogni modifica, e prima di eliminarlo, LocalAI salva una **copia del file** (le ultime 5, in `data/backups/`, fuori dalla cartella del progetto). `restore_file` la rimette, e anche il ripristino si annulla;
   - per cambiare un file esistente il modello usa `edit_file`, che sostituisce solo il pezzo che cambia. Prima lo riscriveva intero a blocchi e, se si fermava a metà, il file restava troncato. Se una riscrittura accorcia di più della metà un file lungo, il modello riceve un avviso;
-  - **ciclo di riscrittura**: se in un task lo stesso file viene riscritto da capo più di 10 volte (`TASK_MAX_REWRITES`), se viene scritto 3 volte lo stesso contenuto o se il segnaposto viene rifiutato 2 volte, il turno si ferma. Il task si ferma con il motivo scritto («Ciclo di riscrittura: il modello ha…»), arriva una notifica e interviene il coordinatore, invece di consumare tentativi.
+  - **ciclo di riscrittura**: se in un task lo stesso file viene riscritto da capo più di 10 volte (`TASK_MAX_REWRITES`), se viene scritto 3 volte lo stesso contenuto o se il segnaposto viene rifiutato 2 volte, il turno si ferma. Prima di fermare il task LocalAI chiede i **consigli** a Gemma 26B (vedi *Consigli contro i loop*) e riprova; se i consigli sono finiti il task si ferma con il motivo scritto («Ciclo di riscrittura: il modello ha…»), arriva una notifica e interviene il coordinatore.
 - **Giri e letture ripetute** (prova di Space Invaders, 2026-10-11: un task ha riletto `game.js` 70 volte in 33 minuti, e lo ha cambiato e rimesso com'era più volte):
   - oltre il tetto dei giri di un turno (`WORKSPACE_MAX_ROUNDS`, 16) le chiamate agli strumenti vengono ignorate e il turno finisce. Prima il modello continuava a chiamarli anche quando non gli venivano più offerti;
   - dalla terza lettura dello stesso file invariato nello stesso turno il modello riceve un avviso. Alla quinta passa all'ultimo giro, senza strumenti, dove scrive il riepilogo, e poi decide la verifica;
@@ -218,6 +224,11 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
   - *pagina* (task di tipo pagina o gioco): Edge headless apre `index.html` (o la pagina scritta nel task) dal server dei file, raccoglie gli errori JavaScript e della console (la favicon mancante non conta) e fa uno screenshot, visibile nel task;
   - *screenshot*: se la pagina non ha errori, un modello che vede le immagini giudica se mostra quanto richiesto.
   Se qualcosa non va, l'esito torna al modello nella stessa chat e lui corregge, fino a 3 tentativi (`TASK_MAX_ATTEMPTS`, oppure il valore scelto nel riquadro *Verifica* del progetto, da 1 a 5).
+  Dei test falliti il modello riceve la parte con gli errori (da `FAIL:`/`ERROR:` di unittest, dai blocchi di pytest, da `not ok` di node:test). Prima riceveva l'inizio dell'output: con `unittest -v` erano solo righe «… ok» e correggeva alla cieca (prova torrent-cli, 2026-10-19). Anche l'output dei comandi ora tiene l'inizio e la fine.
+- **Consigli contro i loop** (prova torrent-cli, 2026-10-19: Qwen riprovava la stessa correzione fino alla fine dei tentativi): dopo 2 verifiche fallite dello stesso task (`TASK_ADVICE_AFTER`), o subito dopo un ciclo di riscrittura, LocalAI chiede a **Gemma 26B** (il modello per lettura e analisi, `TASK_ADVICE_MODEL`) di analizzare l'errore. Gemma riceve il task, l'esito della verifica, l'ultima risposta di Qwen e i file toccati o citati nell'errore, e risponde con la causa, cosa fare file per file e cosa non rifare.
+  - I consigli finiscono in **`CONSIGLI.md`** nella cartella del progetto (le 8 voci più recenti, in alto l'ultima) e nel messaggio del tentativo successivo. I task successivi sanno che il file esiste e lo leggono se si incastrano su un errore simile.
+  - Si vedono anche nel task, alla voce *Consigli* tra le verifiche, e nella cronologia.
+  - **Giri limitati**: al massimo 2 consigli per task (`TASK_ADVICE_ROUNDS`, `0` li spegne). Dopo l'ultimo consiglio c'è sempre un tentativo per metterlo in pratica, anche oltre il numero di tentativi, ma uno solo: con 3 tentativi sono al massimo 4 giri di Qwen e 2 di Gemma, poi il task passa al coordinatore, che vede anche l'ultimo consiglio.
 - **Quale modello legge davvero le immagini**: non basta che Ollama dichiari la capacità `vision`, quindi si misura. LocalAI fotografa con Edge una pagina con una parola e un numero a caso e chiede a ogni candidato di leggerli: i modelli Ollama che dichiarano la visione e Qwen3-VL di ComfyUI. Per giudicare gli screenshot si usa il più veloce tra quelli che hanno letto giusto. La verifica parte da sola al primo task di tipo pagina, oppure dal riquadro *Verifica* di un progetto (**Verifica ora**, solo amministratori); il risultato resta in `data/vision-check.json`. Con Qwen3-VL lo screenshot viene descritto e poi giudicato dal modello predefinito.
 
 | Variabile | Default |
@@ -232,6 +243,9 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
 | `TASK_COORDINATOR_RUNS` | `2` (interventi del coordinatore per task) |
 | `TASK_AUTO_INSTALL` | `1` (librerie mancanti installate dalla verifica; `0` = a mano) |
 | `TASK_MAX_REWRITES` | `10` (riscritture intere dello stesso file in un task prima di fermarlo) |
+| `TASK_ADVICE_AFTER` | `2` (verifiche fallite prima di chiedere i consigli) |
+| `TASK_ADVICE_ROUNDS` | `2` (consigli per task; `0` = spenti) |
+| `TASK_ADVICE_MODEL` | vuoto = il modello per lettura e analisi (Gemma 26B) |
 | `NTFY_URL` / `NTFY_TOKEN` | vuoto (notifiche sul telefono con ntfy) |
 | `APP_URL` | vuoto (indirizzo HTTPS dell'app, per il link nelle notifiche) |
 | `VISION_MODEL` | vuoto = scelto dalla verifica (es. `gemma4-12b-uncensored:latest`, oppure `comfy:qwen3-vl`) |
