@@ -143,7 +143,7 @@ export function notify(p, { title, body = '', level = 'info' }) {
       ...(appUrl ? { click: `${appUrl}/progetti/${encodeURIComponent(p.id)}` } : {}),
     }),
     signal: AbortSignal.timeout(10000),
-  }).then((r) => { if (!r.ok) console.warn(`[notifiche] ntfy → ${r.status}`); }).catch((e) => console.warn(`[notifiche] ntfy: ${e.message}`));
+  }).then((r) => { r.body?.cancel().catch(() => {}); if (!r.ok) console.warn(`[notifiche] ntfy → ${r.status}`); }).catch((e) => console.warn(`[notifiche] ntfy: ${e.message}`));
 }
 
 export function addLog(p, text) {

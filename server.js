@@ -22,6 +22,16 @@ import * as runner from './src/runner.js';
 import * as launcher from './src/launcher.js';
 import * as vision from './src/vision.js';
 
+// Un errore fuori da ogni richiesta non deve chiudere LocalAI (e con lui la coda dei progetti): si scrive in
+// data/errori.log e si va avanti. Prova torrent-cli del 2026-10-19: un assert di undici chiudeva tutto senza traccia.
+const logCrash = (kind) => (e) => {
+  const text = `${new Date().toISOString()} ${kind}: ${e?.stack || e}\n`;
+  console.error(`[${kind}]`, e);
+  fs.appendFile(path.join(config.paths.data, 'errori.log'), text).catch(() => {});
+};
+process.on('uncaughtException', logCrash('uncaughtException'));
+process.on('unhandledRejection', logCrash('unhandledRejection'));
+
 const app = express();
 app.set('trust proxy', false);
 app.use(express.json({ limit: '2mb' }));

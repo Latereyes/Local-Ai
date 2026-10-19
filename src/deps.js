@@ -91,6 +91,7 @@ async function missingPython(names, cwd) {
 async function existsOn(url) {
   try {
     const r = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } });
+    await r.body?.cancel().catch(() => {}); // serve solo lo stato: il corpo non letto può far cadere undici (vedi launcher.js)
     if (r.status === 404) return false;
     return r.ok ? true : null;
   } catch { return null; }
