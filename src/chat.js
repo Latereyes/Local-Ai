@@ -39,7 +39,7 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 // in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history', 'project_server']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
 const WRITE_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'restore_file', 'delete_file', 'save_chat_image', 'create_audio_file', 'html_to_word', 'html_to_pdf']);
 const FORCE_NOTE = {
@@ -218,7 +218,7 @@ export const stripFakeNote = (text) => String(text || '').replace(new RegExp(FAK
 const START_QUEUE = /\b(avvi[ao]?|riavvi[ao]?|fai (ri)?partire|far (ri)?partire|riprendi|rilancia|lancia|parti|riparti|start|restart|resume|run)\b[^.?!\n]{0,30}\b(la |the )?(coda|queue)\b|\b(coda|queue)\b[^.?!\n]{0,15}\b(avvia|riparti|parti|riprendi|start|resume|go)\b/i;
 export const asksQueueStart = (text) => START_QUEUE.test(String(text || ''));
 
-const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
+const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto', server: 'server del progetto' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
 const pendingCommands = new Map();
@@ -386,7 +386,7 @@ function repeatNote(msg, call) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history', project_server: 'server' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -514,6 +514,9 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
       case 'run_command': {
         if (!canRun) throw new workspace.WorkspaceError('Solo l\'amministratore può eseguire comandi');
         if (!step.command) throw new workspace.WorkspaceError('Comando vuoto');
+        // prova torrent-cli del 2026-10-22: dopo «Stop server» LocalAI si è chiuso di colpo, senza errori (un taskkill)
+        const kills = workspace.killsLocalAI(step.command, { pids: [process.pid, process.ppid], ports: [config.port, config.workspace.port] });
+        if (kills) throw new workspace.WorkspaceError(`Comando rifiutato: ${kills}. Per il server del progetto usa project_server (stop)`);
         if (!workspace.isSafeCommand(step.command)) {
           // Fuori dalla lista sicura: si chiede all'utente (la risposta arriva da POST …/commands/:stepId)
           step.status = 'confirm';
@@ -529,6 +532,8 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
           step.approved = true;
           step.startedAt = Date.now();
           emitStep();
+          // il comando resta nella conversazione anche se chiude LocalAI: prima si salvava solo a fine giro
+          await store.save(conv, { touch: false });
         }
         const r = await workspace.runCommand(user, step.command, { cwd: step.cwd, signal });
         Object.assign(step, { exitCode: r.exitCode, output: r.output.slice(-4000), timedOut: r.timedOut, ms: r.ms });
@@ -618,6 +623,31 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         await projects.save(p);
         Object.assign(step, { path: '', what, active: p.active });
         output = JSON.stringify({ ok: true, done: what, queue: p.active ? 'attiva' : 'in pausa', tasks: p.tasks.map((x, i) => `${i + 1}. [${x.status}] ${x.title}`).slice(-20) });
+        break;
+      }
+      case 'project_server': {
+        // server del progetto (Flask, Node…) come il tasto «Apri»: LocalAI sa quale processo è, il modello no
+        const owner = getUser(conv.ownerId);
+        const p = conv.projectChat && projects.get(owner, conv.project.id);
+        if (!p) throw new workspace.WorkspaceError('Solo nella chat di un progetto');
+        const action = String(args.action || 'status');
+        let what;
+        if (action === 'stop') {
+          what = launcher.stop(owner, p) ? 'fermato' : 'non era acceso (LocalAI ferma solo i server avviati da lui: uno avviato a mano si chiude dalla sua finestra)';
+          if (what === 'fermato') projects.addLog(p, 'Server fermato dalla chat');
+        } else if (action === 'start') {
+          if (!canRun) throw new workspace.WorkspaceError('Avviare il server del progetto è solo per l\'amministratore');
+          const out = await launcher.open(owner, p, { dir: projects.dirOf(owner, p), canRun });
+          if (out.kind === 'server' && !out.already) projects.addLog(p, `Server avviato sulla porta ${out.port} dalla chat`);
+          const port = out.port || out.server?.port;
+          what = port ? `acceso su http://127.0.0.1:${port}${out.path || '/'}` : 'nessun server: il progetto è una pagina statica';
+        } else if (action === 'status') {
+          const st = launcher.status(owner, p);
+          what = st ? `acceso su http://127.0.0.1:${st.port}${st.path || '/'} (${st.command})` : 'spento';
+        } else throw new workspace.WorkspaceError('Azione sconosciuta: start, stop o status');
+        await projects.save(p);
+        Object.assign(step, { path: '', what });
+        output = JSON.stringify({ ok: true, server: what, log: action === 'status' ? launcher.status(owner, p)?.log : undefined });
         break;
       }
       case 'project_history': {

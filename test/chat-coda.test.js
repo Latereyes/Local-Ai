@@ -8,6 +8,8 @@ import http from 'node:http';
 // Ollama finto che risponde solo con testo e si inventa la nota delle azioni (prova torrent-cli 2026-10-20:
 // Gemma 26B scriveva «[Azioni eseguite nella cartella di lavoro: … modificato index.html]» senza chiamare strumenti)
 const requests = [];
+// chiamate di strumenti da restituire prima del testo (una per richiesta)
+let script = [];
 const reply = 'Ho sistemato index.html e avviato la coda.\n\n[Azioni eseguite nella cartella di lavoro: letto index.html; modificato index.html (aggiunta protezione `location.protocol`); verificato progetto con `check_project`]';
 const fake = http.createServer((req, res) => {
   let body = '';
@@ -18,6 +20,8 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/api/tags' || req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }));
     if (req.url !== '/api/chat') return res.end('{"version":"0.0.0"}');
     requests.push(JSON.parse(body));
+    const next = script.shift();
+    if (next) return res.end(`${JSON.stringify({ message: { role: 'assistant', content: '', tool_calls: [{ function: next }] }, done: false })}\n${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
     res.end(`${JSON.stringify({ message: { role: 'assistant', content: reply }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
   });
 });
@@ -61,4 +65,22 @@ test('nota delle azioni inventata dal modello: tolta dalla risposta e dalla cron
   await (await chat.send(conv, { text: 'Grazie', model: 'finto:latest', computer: true })).finished;
   const past = turn().messages.filter((m) => m.role === 'assistant').map((m) => m.content).join('\n');
   assert.doesNotMatch(past, /Azioni eseguite/);
+});
+
+test('«Stop server»: il server si ferma con project_server, un taskkill che chiuderebbe LocalAI non parte', async () => {
+  const owner = adminUser();
+  const p = await projects.create(owner, 'Server');
+  const conv = store.create(owner.id);
+  Object.assign(conv, { computer: true, projectChat: true, project: { id: p.id, folder: p.folder, name: p.name } });
+  script = [
+    { name: 'run_command', arguments: { command: 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :5000\') do taskkill /F /PID %a' } },
+    { name: 'project_server', arguments: { action: 'stop' } },
+  ];
+  const msg = await (await chat.send(conv, { text: 'Stop server', model: 'finto:latest', computer: true })).finished;
+  assert.equal(msg.status, 'done');
+  const [cmd, srv] = msg.steps;
+  assert.equal(cmd.status, 'error');
+  assert.match(cmd.error, /Comando rifiutato.*project_server/);
+  assert.equal(srv.action, 'server');
+  assert.match(srv.what, /non era acceso/);
 });

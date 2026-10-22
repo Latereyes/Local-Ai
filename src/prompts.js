@@ -343,6 +343,9 @@ export function computerTools({ canRun = false, images = [], project = false, pr
         action: { type: 'string', enum: ['list', 'diff', 'restore'] },
         version: p('Per diff e restore: il codice della versione (le prime 7 cifre bastano), dall\'elenco di list.'),
       }, ['action']),
+      ...(canRun ? [fn('project_server', 'Server del progetto (Flask, FastAPI, Node…), come il tasto «Apri»: start lo avvia e dice l\'indirizzo, stop lo ferma, status dice se è acceso e le ultime righe del suo output. Per fermare il server usa sempre questo, mai taskkill o altri comandi che chiudono processi: LocalAI stesso è un processo node e ascolta anche sulla porta del server.', {
+        action: { type: 'string', enum: ['start', 'stop', 'status'] },
+      }, ['action'])] : []),
       fn('check_project', 'Verifica il progetto come fa la coda: esegue i test automatici (se ci sono e se l\'utente è amministratore) e apre la pagina in un browser raccogliendo gli errori JavaScript. Da usare dopo aver modificato codice o pagine.', {
         page: p('Pagina da aprire, relativa al progetto (default: index.html se esiste).'),
       }, []),

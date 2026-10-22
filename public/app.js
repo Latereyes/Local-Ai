@@ -492,6 +492,10 @@ function renderComputer(node, m) {
         const head = s.status === 'error' ? 'Coda non modificata' : s.status === 'done' ? `Coda: ${esc(s.what || '')}` : 'Gestisco la coda…';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : ''}</div>${err}</div>`;
       }
+      if (s.action === 'server') {
+        const head = s.status === 'error' ? 'Server del progetto: non riuscito' : s.status === 'done' ? `Server del progetto: ${esc(s.what || '')}` : 'Server del progetto…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('play', 14)}<span>${head}</span>${spin}</div>${err}</div>`;
+      }
       if (s.action === 'check') {
         // chat del progetto: test e pagina nel browser, come la verifica della coda
         const checks = (s.checks || []).map((c) => `<div class="${c.ok === true ? 'ws-ok' : c.ok === false ? 'step-err' : 'faint'}">${c.ok === true ? '✓' : c.ok === false ? '✗' : '–'} ${esc(c.summary)}</div>`).join('');
