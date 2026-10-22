@@ -400,6 +400,22 @@ export function killTree(p) {
   else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); }
 }
 
+/**
+ * Comandi che chiuderebbero LocalAI stesso: il motivo, oppure null. LocalAI è un processo node e, per il telefono,
+ * ascolta anche sulla porta del server del progetto (inoltro in launcher.js): un taskkill trovato con netstat sulla
+ * porta del progetto, o su tutti i node, lo chiude di colpo senza lasciare errori.
+ */
+export function killsLocalAI(command, { pids = [], ports = [] } = {}) {
+  const c = String(command || '');
+  if (!/\b(taskkill|stop-process|kill|pkill|killall|tskill|kill-port|fkill)\b|\bwmic\b[^\n]*\b(delete|terminate)\b|\.kill\(\)/i.test(c)) return null;
+  if (/\bnode(\.exe)?\b/i.test(c)) return 'chiuderebbe anche LocalAI, che è un processo node';
+  if (/\bfor\s+\/f\b|\||\$\(|foreach|%\{|get-nettcpconnection|netstat/i.test(c)) return 'i processi da chiudere vanno scritti per numero (PID): cercati per porta o con un ciclo prenderebbero anche LocalAI';
+  const nums = (c.match(/\b\d+\b/g) || []).map(Number);
+  if (pids.filter(Boolean).some((p) => nums.includes(p))) return 'quel PID è LocalAI';
+  if (ports.filter(Boolean).some((p) => nums.includes(p))) return 'quella porta è di LocalAI';
+  return null;
+}
+
 /** Esegue un comando nella cartella dell'utente (o in una sua sottocartella). */
 export function runCommand(user, command, { cwd = '', timeout = 120000, signal } = {}) {
   const dir = resolve(user, cwd);
@@ -409,11 +425,18 @@ export function runCommand(user, command, { cwd = '', timeout = 120000, signal }
     // Su Windows l'output della console è in UTF-8 solo dopo chcp 65001
     const line = IS_WIN ? `chcp 65001>nul & ${command}` : command;
     const p = spawn(line, { cwd: dir.abs, shell: true, windowsHide: true, detached: !IS_WIN, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' } });
+    // si tengono l'inizio e la fine: prova torrent-cli del 2026-10-19, con «unittest -v» i 12000 caratteri iniziali
+    // erano tutti «... ok» e il riepilogo degli errori (in fondo) non arrivava mai a Qwen, che correggeva alla cieca
     let out = '';
+    let end = '';
     let cut = false;
+    const HEAD = 2500;
     const add = (b) => {
-      if (out.length < MAX_OUTPUT) out += b.toString('utf8');
-      else cut = true;
+      let t = b.toString('utf8');
+      if (out.length < HEAD) { const n = HEAD - out.length; out += t.slice(0, n); t = t.slice(n); }
+      if (!t) return;
+      end += t;
+      if (end.length > MAX_OUTPUT - HEAD) { end = end.slice(-(MAX_OUTPUT - HEAD)); cut = true; }
     };
     p.stdout.on('data', add);
     p.stderr.on('data', add);
@@ -424,7 +447,7 @@ export function runCommand(user, command, { cwd = '', timeout = 120000, signal }
     const finish = (code, error) => {
       clearTimeout(t);
       signal?.removeEventListener('abort', onAbort);
-      if (out.length > MAX_OUTPUT) { out = out.slice(0, MAX_OUTPUT); cut = true; }
+      if (end) out += cut ? `\n[… output intermedio omesso …]\n${end.replace(/^[^\n]*\n/, '')}` : end;
       done({ exitCode: code, output: out.replace(/\r\n/g, '\n'), truncated: cut, timedOut, error, cwd: dir.rel, ms: Date.now() - started });
     };
     p.on('error', (e) => finish(null, e.message));

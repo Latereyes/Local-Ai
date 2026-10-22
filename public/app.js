@@ -489,7 +489,8 @@ function renderComputer(node, m) {
         // chat del progetto: task messi in coda
         const head = s.status === 'error' ? 'Task non aggiunti' : s.status === 'done' ? `${s.tasks.length === 1 ? 'Task aggiunto' : `${s.tasks.length} task aggiunti`} alla coda${s.started ? ' · coda avviata' : s.active ? '' : ' · coda in pausa'}` : 'Aggiungo i task…';
         const list = (s.tasks || []).map((t) => `<li>${esc(t.title)}</li>`).join('');
-        const go = s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : '';
+        const pid = s.project || state.conv?.project?.id;
+        const go = s.status === 'done' && pid ? `<button class="linkish" data-open-project="${esc(pid)}">apri il progetto</button>` : '';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${go}</div>${list ? `<ol class="ws-tasks">${list}</ol>` : ''}${err}</div>`;
       }
       if (s.action === 'history') {
@@ -499,6 +500,10 @@ function renderComputer(node, m) {
       if (s.action === 'queue') {
         const head = s.status === 'error' ? 'Coda non modificata' : s.status === 'done' ? `Coda: ${esc(s.what || '')}` : 'Gestisco la coda…';
         return `<div class="ws-act"><div class="ws-act-head">${icon('folder', 14)}<span>${head}</span>${spin}${s.status === 'done' && state.conv?.project ? `<button class="linkish" data-open-project="${esc(state.conv.project.id)}">apri il progetto</button>` : ''}</div>${err}</div>`;
+      }
+      if (s.action === 'server') {
+        const head = s.status === 'error' ? 'Server del progetto: non riuscito' : s.status === 'done' ? `Server del progetto: ${esc(s.what || '')}` : 'Server del progetto…';
+        return `<div class="ws-act"><div class="ws-act-head">${icon('play', 14)}<span>${head}</span>${spin}</div>${err}</div>`;
       }
       if (s.action === 'check') {
         // chat del progetto: test e pagina nel browser, come la verifica della coda
@@ -1324,7 +1329,7 @@ async function openProjects(push = true) {
     <div class="pj-new"><input id="pj-name" placeholder="Nome del nuovo progetto (es. Tetris, Sito ristorante)" maxlength="80"><button class="btn primary" id="pj-create">Crea progetto</button></div>
     ${list.length ? list.map((p) => `<button class="project pj-row" data-open="${esc(p.id)}">
       <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait">in attesa di Ollama</span>' : ''}</h3>
-      <div class="faint-note" style="margin:0">${p.total ? `${p.done} di ${p.total} task fatti${p.queued ? ` · ${p.queued} in coda` : ''}${p.failed ? ` · ${p.failed} non riusciti` : ''}` : 'Nessun task'}${p.running ? ` · ora: ${esc(p.running)}` : ''} · ${when(p.updatedAt)}</div>
+      <div class="faint-note" style="margin:0">${p.total ? `${p.done} di ${p.total} task fatti${p.queued ? ` · ${p.queued} in coda` : ''}${p.failed ? ` · ${p.failed} non riusciti` : ''}` : 'Nessun task'}${p.running ? ` · ora: ${esc(p.running)}` : ''} · modificato ${when(p.modifiedAt || p.updatedAt)}</div>
     </button>`).join('') : '<div class="empty">Ancora nessun progetto. Creane uno qui sopra, oppure in una chat attiva <b>Computer</b> e chiedi, per esempio, «crea un gioco tipo Tetris».</div>'}`;
   const create = async () => {
     const name = $('#pj-name').value.trim();
@@ -1362,7 +1367,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', text: 'Testo' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', text: 'Testo', files: 'File', advice: 'Consigli' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
@@ -1391,11 +1396,32 @@ function renderTask(t, i, p) {
   </div>`;
 }
 
+/** Indirizzo di un server del progetto: stesso nome del PC da cui si usa l'app (anche Tailscale), porta del server, in http. */
+const serverUrl = (port, path = '/') => `${location.protocol === 'https:' ? 'http:' : location.protocol}//${location.hostname}:${port}${path || '/'}`;
+const SERVER_NAME = { flask: 'Flask', fastapi: 'FastAPI', 'http.server': 'server Python', web: 'server Python', node: 'Node' };
+
+/** Tasto «Apri»: pagina statica come prima; per i server (Flask, Node…) LocalAI avvia il programma e apre la porta. */
+function openButton(p, hasIndex) {
+  const l = p.launch || {};
+  const admin = state.user?.role === 'admin';
+  if (p.server) {
+    // server di sole API (404 sulla radice): si apre index.html, il server resta acceso dietro
+    const href = p.server.path ? serverUrl(p.server.port, p.server.path) : wsUrl(`${p.folder}/index.html`);
+    return `<a class="btn" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(p.server.command)} · porta ${p.server.port}">${icon('play', 14)}Apri${p.server.path ? ` :${p.server.port}` : ''}</a><button class="btn ghost" data-pj="server-stop" title="Ferma ${esc(p.server.command)}">Ferma server</button>`;
+  }
+  if ((l.kind === 'python' || l.kind === 'node') && admin) {
+    return `<button class="btn" data-pj="open" title="Avvia ${esc(l.entry || '')} (${esc(SERVER_NAME[l.framework] || 'server')}) e apre la pagina">${icon('play', 14)}Apri</button>`;
+  }
+  return hasIndex ? `<a class="btn" href="${esc(wsUrl(`${p.folder}/index.html`))}" target="_blank" rel="noopener">${icon('play', 14)}Apri</a>` : '';
+}
+
 function renderProject() {
   const p = state.project;
   if (!p) return;
+  // il piano che si sta scrivendo resta solo se è di questo progetto: prova torrent-cli del 2026-10-19, aperto dal
+  // link di una chat mostrava (e salvava) il piano di Missile Command rimasto nella pagina nascosta
   const keepPlan = $('#pj-plan');
-  const draft = keepPlan && keepPlan.dataset.dirty === '1' ? keepPlan.value : null;
+  const draft = keepPlan && keepPlan.dataset.dirty === '1' && keepPlan.dataset.project === p.id ? keepPlan.value : null;
   const admin = state.user?.role === 'admin';
   const hasIndex = p.files.some((f) => f.path === 'index.html');
   const queued = p.tasks.filter((t) => t.status === 'queued').length;
@@ -1406,7 +1432,7 @@ function renderProject() {
       <h2>${esc(p.name)}</h2>
       ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait" title="Ollama non risponde: la coda riparte da sola quando torna">in attesa di Ollama</span>' : ''}
       <span class="spacer"></span>
-      ${hasIndex ? `<a class="btn" href="${esc(wsUrl(`${p.folder}/index.html`))}" target="_blank" rel="noopener">${icon('play', 14)}Apri</a>` : ''}
+      ${openButton(p, hasIndex)}
       ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}
       <button class="btn ghost" data-pj="delete" title="Elimina progetto e cartella">${icon('trash', 14)}</button>
     </div>
@@ -1419,11 +1445,11 @@ function renderProject() {
       ${(p.chats || []).length ? `<div class="pj-chats">${p.chats.slice(0, 5).map((c, i) => `<a href="/c/${c.id}" data-conv="${c.id}">${icon('chat', 13)}${esc(c.title)}<span class="faint">${c.running ? 'risponde…' : when(c.updatedAt)}${i === 0 ? ' · i nuovi messaggi vanno qui' : ''}</span></a>`).join('')}<button class="linkish" data-pj="new-chat">Nuova chat del progetto</button></div>` : ''}
     </section>
 
-    <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge.</p>
+    <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge. Se si incastra sullo stesso errore, ${esc(modelLabel(p.models.read))} lo analizza e gli scrive dei consigli in CONSIGLI.md.</p>
 
     <section class="pj-card">
       <div class="pj-card-head"><h3>Piano</h3><span class="faint">${esc(p.folder)}/PIANO.md · ogni punto «- …» diventa un task; tipo forzabile con [codice], [pagina], [lettura], [testo]</span></div>
-      <textarea id="pj-plan" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
+      <textarea id="pj-plan" data-project="${esc(p.id)}" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
       <div class="pj-row-btns"><button class="btn" data-pj="draft-plan" title="Un modello locale scrive il piano partendo da quello che c'è nel riquadro (anche solo l'obiettivo)">Scrivi il piano con l'AI</button><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
     </section>
 
@@ -1500,7 +1526,7 @@ el.projects.addEventListener('click', async (e) => {
   const p = state.project;
   if (!p) return;
   const base = `/api/projects/${encodeURIComponent(p.id)}`;
-  const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } } catch (err) { alert(err.message); } };
+  const run = async (fn) => { try { const out = await fn(); if (out?.tasks) { state.project = out; renderProject(); } return true; } catch (err) { alert(err.message); return false; } };
   const rs = e.target.closest('[data-restore]');
   if (rs) {
     if (!confirm(`Riportare la cartella alla versione «${rs.dataset.label}»? Lo stato attuale resta nella storia e si può ripristinare.`)) return;
@@ -1533,7 +1559,9 @@ el.projects.addEventListener('click', async (e) => {
     }
     case 'save-plan': case 'plan-tasks': {
       const plan = $('#pj-plan');
-      await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }));
+      // salvato: il riquadro torna a mostrare PIANO.md (prima restava «in scrittura» per sempre)
+      plan.dataset.dirty = '';
+      if (!await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }))) { plan.dataset.dirty = '1'; return; }
       if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
       return;
     }
@@ -1554,6 +1582,20 @@ el.projects.addEventListener('click', async (e) => {
       if (!text) return $('#pj-task-text').focus();
       return run(() => api(`${base}/tasks`, { body: { text, type: $('#pj-task-type').value || undefined } }));
     }
+    case 'open': {
+      // la finestra si apre subito (dopo l'attesa il browser del telefono la bloccherebbe) e va all'indirizzo quando il server risponde
+      const w = window.open('', '_blank');
+      try { w?.document.write('<p style="font:16px system-ui;padding:20px">Avvio del server del progetto…</p>'); } catch {}
+      b.disabled = true;
+      b.textContent = 'Avvio del server…';
+      try {
+        const out = await api(`${base}/open`, { method: 'POST' });
+        const url = out.kind === 'server' ? serverUrl(out.port, out.path) : wsUrl(`${p.folder}/${out.path}`);
+        if (w) w.location.href = url; else window.open(url, '_blank');
+      } catch (err) { w?.close(); alert(err.message); }
+      return refreshProject();
+    }
+    case 'server-stop': return run(() => api(`${base}/open/stop`, { method: 'POST' }));
     case 'notify':
       try { await Notification.requestPermission(); } catch {}
       return renderProject();

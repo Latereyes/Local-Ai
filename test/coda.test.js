@@ -60,3 +60,10 @@ test('errori di collegamento riconosciuti (non vanno al coordinatore)', () => {
 });
 
 test.after(() => { fake.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
+
+test('passo della verifica che non risponde: si chiude con un errore che dice quale passo era', async () => {
+  // prova torrent-cli del 2026-10-19: la verifica della pagina restava ferma e con lei tutta la coda
+  await assert.rejects(runner.within(30, new Promise(() => {}), 'apertura della pagina nel browser'),
+    (e) => e instanceof runner.StepTimeout && /apertura della pagina nel browser/.test(e.message));
+  assert.equal(await runner.within(1000, Promise.resolve('ok'), 'x'), 'ok');
+});

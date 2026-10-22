@@ -231,7 +231,7 @@ export function notify(p, { title, body = '', level = 'info' }) {
       ...(appUrl ? { click: `${appUrl}/progetti/${encodeURIComponent(p.id)}` } : {}),
     }),
     signal: AbortSignal.timeout(10000),
-  }).then((r) => { if (!r.ok) console.warn(`[notifiche] ntfy → ${r.status}`); }).catch((e) => console.warn(`[notifiche] ntfy: ${e.message}`));
+  }).then((r) => { r.body?.cancel().catch(() => {}); if (!r.ok) console.warn(`[notifiche] ntfy → ${r.status}`); }).catch((e) => console.warn(`[notifiche] ntfy: ${e.message}`));
 }
 
 export function addLog(p, text) {
@@ -263,7 +263,15 @@ export async function list(user) {
     const p = read(user.id, decodeURIComponent(f.slice(0, -5)));
     if (p && !out.has(p.id) && fs.existsSync(path.join(root, p.folder))) out.set(p.id, p);
   }
-  return [...out.values()].map(summary).sort((a, b) => b.active - a.active || b.updatedAt - a.updatedAt);
+  // ordine per ultima modifica (richiesta dell'utente, 2026-10-19): la più recente tra i dati del progetto (task,
+  // piano, cronologia) e i file della cartella, così sale anche un progetto toccato a mano o da una chat Computer
+  const rows = await Promise.all([...out.values()].map(async (p) => {
+    const files = await workspace.listFiles(scoped(user, p), '', { limit: 1500 }).catch(() => []);
+    const newest = Math.max(0, ...files.map((f) => f.mtime || 0));
+    const saved = fs.existsSync(fileFor(user.id, p.id)) ? p.updatedAt || 0 : 0;
+    return { ...summary(p), modifiedAt: Math.max(saved, newest) || p.updatedAt };
+  }));
+  return rows.sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
 
 /** Progetto dell'utente (creato al volo se la cartella esiste ma non ha ancora dati). */
@@ -455,6 +463,27 @@ export async function tasksFromPlan(user, p) {
   return added;
 }
 
+/**
+ * Fine di un turno di chat (prova torrent-cli del 2026-10-19): il modello ha scritto PIANO.md ma non ha chiamato
+ * add_project_tasks, così il piano restava lì e la coda vuota. I task si creano dal piano.
+ * Chat del progetto (project): solo se il progetto non aveva task, perché in un progetto avviato un ritocco al piano
+ * non deve rimettere in coda niente. Chat normale: PIANO.md di una cartella il cui progetto non ha ancora task.
+ */
+export async function tasksAfterChatPlan(user, steps, { project = null, hadTasks = false } = {}) {
+  const done = (s) => s.type === 'file' && s.status === 'done';
+  if (steps.some((s) => done(s) && s.action === 'tasks')) return null;
+  for (const s of steps) {
+    if (!done(s) || !['write', 'append', 'edit', 'restore'].includes(s.action)) continue;
+    const parts = String(s.path || '').replace(/\\/g, '/').split('/');
+    if (parts.at(-1).toLowerCase() !== PLAN_FILE.toLowerCase()) continue;
+    const p = project ? (parts.length === 1 && !hadTasks ? project : null) : parts.length === 2 ? get(user, parts[0]) : null;
+    if (!p || (!project && p.tasks.length)) continue;
+    const added = await tasksFromPlan(user, p).catch(() => []);
+    if (added.length) return { p, added };
+  }
+  return null;
+}
+
 /** Comando di test del progetto: quello impostato, altrimenti dedotto dai file presenti. */
 export async function testCommand(user, p) {
   if (p.testCommand) return p.testCommand;
@@ -523,7 +552,10 @@ export async function chatContext(user, p) {
     busy: p.tasks.some((t) => t.status === 'running' || t.status === 'testing'),
     active: !!p.active,
     text: [
-      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>` : `Piano: ${PLAN_FILE} è vuoto.`,
+      plan ? `Piano (${PLAN_FILE}):\n<piano>\n${plan.slice(0, 3000)}${plan.length > 3000 ? '\n[…]' : ''}\n</piano>`
+        : p.tasks.length ? `Piano: ${PLAN_FILE} è vuoto.`
+        // progetto appena creato: alla prima richiesta di cosa realizzare servono piano e task, non i file scritti a mano
+        : `Progetto nuovo: ${PLAN_FILE} è vuoto e non ci sono task. Quando l'utente dice cosa realizzare, scrivi PIANO.md per «${p.name}» e crea i task con add_project_tasks nello stesso turno.`,
       tasks.length ? `Task del progetto (coda ${p.active ? 'attiva' : 'in pausa'}):\n${tasks.slice(-30).join('\n')}` : 'Nessun task.',
       log.length ? `Ultime voci della cronologia:\n${log.join('\n')}` : '',
     ].filter(Boolean).join('\n\n'),
@@ -543,8 +575,12 @@ export function recoverInterrupted() {
       if (!p) continue;
       const stuck = p.tasks.filter((t) => t.status === 'running' || t.status === 'testing');
       if (!stuck.length && !p.active) continue;
-      for (const t of stuck) { t.status = 'queued'; t.attempts = 0; }
-      if (stuck.length) addLog(p, 'LocalAI riavviato: il task in corso è tornato in coda');
+      // riavvio durante la verifica: il lavoro del modello c'è già, alla ripresa si rifà solo la verifica
+      // (prova torrent-cli del 2026-10-19: test superati, poi riavvio, e il task sarebbe ripartito da zero)
+      const verifying = stuck.filter((t) => t.status === 'testing');
+      for (const t of stuck) Object.assign(t, { status: 'queued', attempts: 0 }, t.status === 'testing' ? { verifyOnly: true, fixedBy: 'restart' } : {});
+      if (verifying.length) addLog(p, 'LocalAI riavviato durante la verifica: il task è tornato in coda e alla ripresa rifà solo la verifica');
+      else if (stuck.length) addLog(p, 'LocalAI riavviato: il task in corso è tornato in coda');
       if (p.active && p.autoResume) addLog(p, 'LocalAI riavviato: la coda riparte da sola');
       else if (p.active) { p.active = false; addLog(p, 'Coda in pausa dopo il riavvio: premi «Avvia» per riprendere'); }
       save(p, { touch: false });

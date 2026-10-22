@@ -19,9 +19,20 @@ import * as snapshots from './src/snapshots.js';
 import * as workspace from './src/workspace.js';
 import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
+import * as launcher from './src/launcher.js';
 import * as vision from './src/vision.js';
 import * as memory from './src/memory.js';
 import * as plancheck from './src/plancheck.js';
+
+// Un errore fuori da ogni richiesta non deve chiudere LocalAI (e con lui la coda dei progetti): si scrive in
+// data/errori.log e si va avanti. Prova torrent-cli del 2026-10-19: un assert di undici chiudeva tutto senza traccia.
+const logCrash = (kind) => (e) => {
+  const text = `${new Date().toISOString()} ${kind}: ${e?.stack || e}\n`;
+  console.error(`[${kind}]`, e);
+  fs.appendFile(path.join(config.paths.data, 'errori.log'), text).catch(() => {});
+};
+process.on('uncaughtException', logCrash('uncaughtException'));
+process.on('unhandledRejection', logCrash('unhandledRejection'));
 
 const app = express();
 app.set('trust proxy', false);
@@ -221,6 +232,9 @@ const fullProject = async (req, p) => ({
     .map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: c.messages.filter((m) => m.role === 'user').length, running: chat.isRunning(c.id) }))
     .sort((a, b) => b.updatedAt - a.updatedAt),
   models: Object.fromEntries(await Promise.all(Object.keys(projects.TYPES).map(async (k) => [k, await projects.modelFor(k)]))),
+  // tasto «Apri»: pagina statica o server da avviare (launcher.js), e il server già acceso
+  launch: await launcher.detect(projects.dirOf(req.user, p)).then((d) => ({ kind: d.kind, framework: d.framework || null, entry: d.entry || null, index: d.index })).catch(() => ({ kind: null })),
+  server: launcher.status(req.user, p),
 });
 
 app.get('/api/projects', projectErr(async (req, res) => res.json(await projects.list(req.user))));
@@ -246,6 +260,7 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
 app.delete('/api/projects/:id', projectErr(async (req, res) => {
   const p = ownProject(req);
   runner.stopProject(p);
+  launcher.stop(req.user, p);
   await projects.remove(req.user, p);
   res.json({ ok: true });
 }));
@@ -342,6 +357,20 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
 app.post('/api/projects/:id/chat', projectErr(async (req, res) => {
   const c = await runner.projectChat(ownProject(req), req.user, { fresh: !!req.body?.new });
   res.json({ id: c.id });
+}));
+// Tasto «Apri»: avvia il server del progetto (Flask, FastAPI, Node…) e dice su che porta risponde, oppure la pagina statica
+app.post('/api/projects/:id/open', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  try {
+    const out = await launcher.open(req.user, p, { dir: projects.dirOf(req.user, p), canRun: req.user.role === 'admin' });
+    if (out.kind === 'server' && !out.already) projects.addLog(p, `Server avviato sulla porta ${out.port}`);
+    res.json({ ...out, server: launcher.status(req.user, p) });
+  } catch (e) { throw httpError(422, e.message); }
+}));
+app.post('/api/projects/:id/open/stop', projectErr(async (req, res) => {
+  const p = ownProject(req);
+  if (launcher.stop(req.user, p)) projects.addLog(p, 'Server fermato');
+  res.json(await fullProject(req, p));
 }));
 // Ripristino di una versione della storia (fotografie git del progetto)
 app.post('/api/projects/:id/restore', projectErr(async (req, res) => {

@@ -97,3 +97,39 @@ test('piano: la sezione «Regole» è riferimento per i task, non un elenco di t
   const plan = '# Obiettivo\nClone di Space Invaders\n\n# Regole\n- alieni in griglia 5x11 che si muove in blocco\n- scendono a ogni bordo\n\n# Task\n- [pagina] index.html con il canvas\n  Fatto quando: si vede la formazione\n- [codice] logica in game.js';
   assert.deepEqual(projects.parsePlan(plan).map((t) => t.text), ['[pagina] index.html con il canvas\nFatto quando: si vede la formazione', '[codice] logica in game.js']);
 });
+
+test('piano scritto senza task → task creati dal piano (prova torrent-cli 2026-10-19)', async () => {
+  // chat del progetto nuovo
+  const p = await projects.create(user, 'torrent-cli');
+  assert.match((await projects.chatContext(user, p)).text, /Progetto nuovo: PIANO\.md è vuoto.*«torrent-cli»/);
+  await projects.writePlan(user, p, '# Obiettivo\nUn client torrent da riga di comando\n\n# Task\n- [codice] parser dei file .torrent in torrent.py con i test\n- [testo] README');
+  const steps = [{ type: 'file', action: 'write', path: 'PIANO.md', status: 'done' }];
+  // in un progetto già avviato, o se la chat ha già creato i task, non si aggiunge niente
+  assert.equal(await projects.tasksAfterChatPlan(user, steps, { project: p, hadTasks: true }), null);
+  assert.equal(await projects.tasksAfterChatPlan(user, [...steps, { type: 'file', action: 'tasks', status: 'done' }], { project: p }), null);
+  assert.equal(await projects.tasksAfterChatPlan(user, [{ ...steps[0], path: 'main.py' }], { project: p }), null);
+  const r = await projects.tasksAfterChatPlan(user, steps, { project: p });
+  assert.equal(r.p, p);
+  assert.deepEqual(r.added.map((t) => [t.title, t.type]), [['parser dei file .torrent in torrent.py con i test', 'code'], ['README', 'chat']]);
+  assert.doesNotMatch((await projects.chatContext(user, p)).text, /Progetto nuovo/);
+
+  // chat normale: PIANO.md scritto in una cartella (anche «piano.md») diventa il progetto di quella cartella
+  const dir = path.join(process.env.WORKSPACE_DIR, 'prova', 'cerca-film');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'PIANO.md'), '# Obiettivo\nCerca film\n\n- [codice] search.py con i test');
+  const free = await projects.tasksAfterChatPlan(user, [{ type: 'file', action: 'write', path: 'cerca-film/piano.md', status: 'done' }]);
+  assert.equal(free.p.folder, 'cerca-film');
+  assert.deepEqual(free.added.map((t) => t.title), ['search.py con i test']);
+  // la seconda volta il progetto ha già i task: niente doppioni
+  assert.equal(await projects.tasksAfterChatPlan(user, [{ type: 'file', action: 'write', path: 'cerca-film/PIANO.md', status: 'done' }]), null);
+});
+
+test('chat normale: coda dei task per cartella e cartella di lavoro nel prompt', () => {
+  const tool = computerTools({ folders: true }).find((t) => t.function.name === 'add_project_tasks');
+  assert.deepEqual(tool.function.parameters.required, ['folder', 'tasks']);
+  assert.ok(!computerTools({}).some((t) => t.function.name === 'add_project_tasks'));
+  const prompt = computerPrompt({ files: '(vuota)', canRun: false, folder: 'torrent-cli' });
+  assert.match(prompt, /stai lavorando nella cartella torrent-cli\//);
+  assert.match(prompt, /add_project_tasks \(folder = la cartella\)/);
+  assert.doesNotMatch(computerPrompt({ files: '(vuota)', canRun: false }), /stai lavorando nella cartella/);
+});

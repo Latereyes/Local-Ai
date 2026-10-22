@@ -100,4 +100,16 @@ test('riavvio: la coda resta attiva solo nei progetti con «riprendi dopo un ria
   assert.match(a.log.at(-1).text, /riparte da sola/);
 });
 
+test('riavvio durante la verifica: il task torna in coda e alla ripresa rifà solo la verifica', async () => {
+  const p = await projects.create(user, 'Verifica interrotta');
+  p.active = true;
+  p.tasks.push({ ...projects.newTask('[pagina] run.py'), status: 'testing', attempts: 1 }, { ...projects.newTask('[codice] dopo'), status: 'queued' });
+  await projects.save(p);
+  projects.recoverInterrupted();
+  await projects.save(p, { touch: false });
+  assert.deepEqual([p.tasks[0].status, p.tasks[0].attempts, p.tasks[0].verifyOnly, p.tasks[0].fixedBy], ['queued', 0, true, 'restart']);
+  assert.equal(p.tasks[1].verifyOnly, undefined);
+  assert.ok(p.log.some((l) => /durante la verifica/.test(l.text)));
+});
+
 test.after(() => { ntfy.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
