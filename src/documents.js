@@ -114,13 +114,33 @@ export async function longModelFor(doc) {
   return (doc.chars || 0) <= charsFor(room, found.name) ? found.name : null;
 }
 
-/** Legge le righe «[pp. a-b] riassunto» della risposta del modello per i documenti lunghi. */
+/**
+ * Legge i riassunti «[pp. a-b] …» della risposta del modello per i documenti lunghi: il testo di una sezione
+ * va fino al prossimo «[pp.», anche a capo (prova sul PC 2026-10-22: LFM2.5 mette l'intervallo su una riga e il testo sotto).
+ */
 export function parseSections(text, parts) {
   const found = new Map();
-  for (const m of String(text || '').matchAll(/^\s*[-*]?\s*\[pp?\.\s*(\d+)\s*[-–]\s*(\d+)\]\s*[:—-]?\s*(.+)$/gm)) {
-    found.set(`${m[1]}-${m[2]}`, m[3].trim());
-  }
+  const marks = [...String(text || '').matchAll(/^[ \t]*(?:[-*]|\d+[.)])?[ \t]*\**\[pp?\.\s*(\d+)\s*[-–]\s*(\d+)\]\**[ \t]*[:—–-]?/gm)];
+  marks.forEach((m, i) => {
+    const body = text.slice(m.index + m[0].length, marks[i + 1]?.index ?? text.length).replace(/\s+/g, ' ').trim();
+    if (body) found.set(`${m[1]}-${m[2]}`, body);
+  });
   return parts.map((p) => ({ from: p.from, to: p.to, summary: found.get(`${p.from}-${p.to}`) || '' }));
+}
+
+// Intestazione «Sintesi» o «Sezioni» in qualunque forma: «## Sintesi», «**Sintesi**», «Sintesi:» (LFM2.5 usa il grassetto)
+const heading = (word) => new RegExp(`^[ \\t]*(?:#{1,4}[ \\t]*)?\\**[ \\t]*${word}\\b[^\\n*#:]{0,30}\\**[ \\t]*:?[ \\t]*\\**[ \\t]*$`, 'im');
+
+/** Divide la risposta del modello per i documenti lunghi in sintesi e sezioni. */
+export function splitWhole(out, parts) {
+  out = String(out || '');
+  const a = heading('Sintesi').exec(out);
+  const b = heading('Sezioni').exec(out);
+  const start = a ? a.index + a[0].length : 0;
+  const end = b && b.index >= start ? b.index : out.length;
+  // senza intestazione «Sintesi» vale il testo prima delle sezioni, solo se le sezioni ci sono
+  const summary = a || b ? out.slice(start, end).trim() : '';
+  return { summary, sections: parseSections(b ? out.slice(b.index + b[0].length) : out, parts) };
 }
 
 /**
@@ -139,9 +159,9 @@ async function digestWhole(doc, pages, parts, longModel) {
       { role: 'user', content: `Documento: "${doc.name}" (${pages.length} pagine)\nSezioni da riassumere: ${ranges}\n\n${withPageMarks(pages)}` },
     ],
   });
-  const m = /##\s*Sintesi\s*\n([\s\S]*?)(?:\n##\s*Sezioni\b|$)/i.exec(out);
-  const tail = /##\s*Sezioni\b[\s\S]*$/i.exec(out)?.[0] || '';
-  return { summary: (m?.[1] || '').trim(), sections: parseSections(tail, parts) };
+  const whole = splitWhole(out, parts);
+  if (!whole.summary) console.warn(`[documenti] ${longModel} non ha scritto la sintesi di «${doc.name}» nel formato chiesto (${out.length} caratteri): riassunto a blocchi`);
+  return whole;
 }
 
 /**

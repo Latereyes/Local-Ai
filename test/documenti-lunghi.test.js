@@ -55,7 +55,7 @@ test('num_predict almeno 16384 per i modelli che ragionano sempre', () => {
 test('parseSections: righe [pp. a-b], anche in elenco o con il trattino lungo', () => {
   const parts = [{ from: 1, to: 3 }, { from: 4, to: 6 }, { from: 7, to: 9 }];
   const s = documents.parseSections('## Sezioni\n- [pp. 1-3] inizio\n[pp. 4–6]: centro\naltro', parts);
-  assert.deepEqual(s.map((x) => x.summary), ['inizio', 'centro', '']);
+  assert.deepEqual(s.map((x) => x.summary), ['inizio', 'centro altro', '']);
 });
 
 test('digest con LFM2.5: sintesi dal documento intero, sezioni mancanti dal modello della chat', async () => {
@@ -73,6 +73,16 @@ test('digest con LFM2.5: sintesi dal documento intero, sezioni mancanti dal mode
   assert.equal(calls[0].options.num_ctx, 131072);
   assert.ok(calls[0].options.num_predict >= 16384);
   assert.equal(calls.length, 4);
+});
+
+test('splitWhole: intestazioni in grassetto e intervallo su una riga con il testo sotto (risposta vera di LFM2.5)', () => {
+  const parts = [{ from: 1, to: 5 }, { from: 6, to: 10 }, { from: 41, to: 42 }];
+  const out = '**Sintesi**\n\nUn libro.\n### Struttura\nCapitoli.\n\n**Sezioni**\n\n[pp. 1-5]\nInizio del\nlibro.\n\n- **[pp. 6-10]** — centro\n\n[pp. 41-42]\nfine';
+  const w = documents.splitWhole(out, parts);
+  assert.equal(w.summary, 'Un libro.\n### Struttura\nCapitoli.');
+  assert.deepEqual(w.sections.map((x) => x.summary), ['Inizio del libro.', 'centro', 'fine']);
+  assert.equal(documents.splitWhole('## Sintesi del documento\nX\n## Sezioni\n[pp. 1-5] a', parts).summary, 'X');
+  assert.equal(documents.splitWhole('Sintesi: breve, poi altro', parts).summary, '');
 });
 
 test('digest con LFM2.5 che non risponde come chiesto: riassunto a blocchi completo', async () => {
