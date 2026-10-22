@@ -18,6 +18,7 @@ import * as plancheck from './plancheck.js';
 import * as documents from './documents.js';
 import { gpu } from './gpu.js';
 import * as launcher from './launcher.js';
+import * as proposte from './proposte.js';
 
 // Errori di collegamento (Ollama spento, riavviato o irraggiungibile): non sono colpa del task e il coordinatore
 // non può farci niente. La coda del progetto aspetta Ollama e riparte da sola quando torna (watchServices).
@@ -219,6 +220,8 @@ function pickNext() {
       p.active = false;
       const allDone = p.tasks.length && p.tasks.every((x) => x.status === 'done');
       projects.addLog(p, allDone ? 'Tutti i task completati' : 'Coda finita');
+      // memoria: a progetto chiuso Gemma rilegge com'è andata e propone note da confermare (a GPU libera)
+      proposte.queueProject(getUser(p.ownerId), p);
       projects.notify(p, allDone
         ? { title: 'tutti i task completati', body: `${p.tasks.length} task fatti.`, level: 'ok' }
         : { title: 'coda finita', body: 'Non ci sono altri task in coda.', level: 'info' });
@@ -534,6 +537,8 @@ async function runTask(p, task) {
       p.active = false;
       projects.addLog(p, 'Coda del progetto in pausa');
     }
+    // memoria: resoconto del task per le note proposte (solo se c'è qualcosa da imparare; lo legge Gemma a GPU libera)
+    if (!current.cancelled) proposte.queueTask(owner, p, task);
     if ((status === 'failed' || status === 'error') && !current.cancelled) {
       if (p.coordinator !== false) current.coordinate = true;
       else projects.notify(p, { title: `task «${task.title}» non riuscito`, body: `${task.error || text}. La coda è in pausa.`, level: 'warn' });

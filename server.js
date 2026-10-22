@@ -22,6 +22,7 @@ import * as runner from './src/runner.js';
 import * as launcher from './src/launcher.js';
 import * as vision from './src/vision.js';
 import * as memory from './src/memory.js';
+import * as proposte from './src/proposte.js';
 import * as plancheck from './src/plancheck.js';
 
 // Un errore fuori da ogni richiesta non deve chiudere LocalAI (e con lui la coda dei progetti): si scrive in
@@ -404,6 +405,8 @@ app.get('/api/memory', memoryErr(async (req, res) => {
     enabled: memory.isEnabled(req.user.id),
     types: memory.TYPES,
     notes: memory.list(req.user.id, { q: String(q), scope: scopeOf(scope), status: memory.STATUSES.includes(status) ? status : undefined }),
+    // note proposte dopo i task: sempre in cima alla pagina, qualunque filtro
+    proposed: memory.list(req.user.id, { status: memory.PROPOSED, limit: 50 }),
     projects: (await projects.list(req.user).catch(() => [])).map((p) => ({ id: p.id, name: p.name })),
   });
 }));
@@ -555,6 +558,8 @@ const server = app.listen(config.port, config.host, () => {
   console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
+  // note proposte per la memoria: a GPU libera e con la coda dei progetti ferma
+  proposte.start({ isBusy: () => !!runner.state() || projects.activeProjects().length > 0 });
   // Workflow utilizzabili = quelli con tutti i modelli presenti su ComfyUI (ricontrollo ogni 5 minuti)
   const refresh = () => checkAvailability(comfy.listModels, comfy.hasNode).then((list) => {
     const off = list.filter((w) => w.available === false);
