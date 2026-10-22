@@ -240,7 +240,9 @@ export async function open(user, p, { dir, canRun = false, timeoutMs = 45000 } =
   r.forward = forward(r.port);
   // server che risponde 404 sulla radice (solo API) e c'è index.html: si apre la pagina, il server resta acceso
   if (d.index) {
-    const code = await fetch(`http://127.0.0.1:${r.port}/`, { signal: AbortSignal.timeout(5000) }).then((x) => x.status).catch(() => 0);
+    // il corpo va consumato (qui si annulla): prova torrent-cli sul PC del 2026-10-19, Flask risponde con
+    // «Connection: close» e se il corpo resta non letto undici lancia un assert fuori dalla promessa, che chiudeva LocalAI
+    const code = await fetch(`http://127.0.0.1:${r.port}/`, { signal: AbortSignal.timeout(5000) }).then(async (x) => { await x.body?.cancel().catch(() => {}); return x.status; }).catch(() => 0);
     if (code === 404 || code === 405) r.path = null;
   }
   return r.path ? { kind: 'server', port: r.port, path: r.path, framework: d.framework } : { kind: 'static', path: 'index.html', server: { port: r.port, framework: d.framework } };
