@@ -155,7 +155,7 @@ function history(conv, opts) {
     const calls = new Map();
     for (const md of media) if (!calls.has(md.callIndex)) calls.set(md.callIndex, md);
     if (!m.content && !calls.size) continue;
-    const am = { role: 'assistant', content: (m.content || '') + computerNote(m.steps) };
+    const am = { role: 'assistant', content: stripFakeNote(m.content || '') + computerNote(m.steps) };
     if (calls.size) {
       am.tool_calls = [...calls.values()].map((md) => ({ function: { name: md.toolName, arguments: md.args || {} } }));
     }
@@ -202,6 +202,22 @@ function computerNote(steps = []) {
     : `${FILE_VERB[s.action] || s.action} ${s.path || ''}${s.status === 'error' ? ` (errore: ${s.error || ''})` : ''}`;
   return `\n\n[Azioni eseguite nella cartella di lavoro: ${done.map(line).join('; ')}]`;
 }
+/**
+ * Torrent-cli 2026-10-20: Gemma 26B ha chiuso una risposta con «[Azioni eseguite nella cartella di lavoro: letto…;
+ * modificato index.html; verificato progetto]» senza chiamare nessuno strumento. Imitava la nota che LocalAI aggiunge
+ * ai messaggi passati, e l'utente ha creduto al lavoro fatto. La nota scritta dal modello si toglie: vale solo quella vera.
+ */
+const FAKE_NOTE = /\n*\[Azioni eseguite nella cartella di lavoro:[^\n]*\]/;
+export const stripFakeNote = (text) => String(text || '').replace(new RegExp(FAKE_NOTE.source, 'g'), '').trimEnd();
+
+/**
+ * Torrent-cli 2026-10-20: a «Sistema le task e avvia la coda» Qwen ha letto quattro file e il turno si è interrotto
+ * senza chiamare manage_queue: la coda è rimasta in pausa. Quando l'utente chiede di avviare la coda, la avvia LocalAI
+ * alla fine del turno (dopo le eventuali correzioni ai task), senza dipendere dal modello.
+ */
+const START_QUEUE = /\b(avvi[ao]?|riavvi[ao]?|fai (ri)?partire|far (ri)?partire|riprendi|rilancia|lancia|parti|riparti|start|restart|resume|run)\b[^.?!\n]{0,30}\b(la |the )?(coda|queue)\b|\b(coda|queue)\b[^.?!\n]{0,15}\b(avvia|riparti|parti|riprendi|start|resume|go)\b/i;
+export const asksQueueStart = (text) => START_QUEUE.test(String(text || ''));
+
 const FILE_VERB = { list: 'elencato', read: 'letto', write: 'scritto', append: 'continuato', edit: 'modificato', restore: 'ripristinato', install: 'installato librerie', delete: 'eliminato', word: 'creato il Word', pdf: 'creato il PDF', image: 'salvato l\'immagine', audio: 'creato l\'audio', tasks: 'aggiunto task alla coda', check: 'verificato il progetto', queue: 'gestito la coda', history: 'consultato la storia del progetto' };
 
 // Comandi in attesa di conferma: id del passaggio -> { convId, resolve }
@@ -1194,6 +1210,7 @@ export async function send(conv, opts) {
         let limit = numCtx - ctx.outputReserve(numCtx, think);
         const convo = history(conv, opts);
         const lastU = convo.findLast((m) => m.role === 'user');
+        if (pj && !pj.active && asksQueueStart(rawText)) lastU.content += '\n\n[LocalAI avvia la coda alla fine di questa risposta: sistema prima i task se serve (manage_queue retry, edit, done, delete), poi rispondi.]';
         // spazio per documenti e pagine web: tolti prompt di sistema, strumenti e ultima domanda (la cronologia si accorcia)
         const free = () => limit - ctx.promptTokens([convo[0], lastU], allTools, model);
 
@@ -1321,6 +1338,13 @@ export async function send(conv, opts) {
           store.save(conv, { touch: false });
         }
 
+        // nota delle azioni scritta dal modello invece di eseguirle: si toglie, e se non ha fatto niente lo si dice
+        if (computer && FAKE_NOTE.test(msg.content)) {
+          msg.content = stripFakeNote(msg.content);
+          if (!msg.steps.length) msg.content += '\n\n*[Nessuna azione eseguita in questo turno: il modello ha descritto modifiche che non ha fatto.]*';
+          emit(conv.id, { type: 'content', messageId: msg.id, content: msg.content });
+        }
+
         // Chiamate a immagini/video (o strumento forzato ignorato dal modello)
         let calls = mediaCalls;
         if (!calls.length && (opts.tool === 'image' || opts.tool === 'video')) {
@@ -1380,6 +1404,22 @@ export async function send(conv, opts) {
         const step = { id: store.newId(), type: 'file', action: 'tasks', path: '', project: planned.p.id, status: 'done', tasks: planned.added.map((t) => ({ title: t.title, type: t.type })), started: true, active: planned.p.active, startedAt: Date.now() };
         msg.steps.push(step);
         emit(conv.id, { type: 'step', messageId: msg.id, step });
+      }
+
+      // Chat del progetto: l'utente ha chiesto di avviare la coda e il modello non l'ha fatto
+      if (pj && !pj.active && asksQueueStart(rawText) && !msg.steps.some((s) => s.action === 'queue' && s.active)) {
+        const runner = await import('./runner.js');
+        try {
+          runner.setActive(pj, true);
+          const step = { id: store.newId(), type: 'file', action: 'queue', path: '', project: pj.id, what: 'coda avviata', active: true, status: 'done', startedAt: Date.now() };
+          msg.steps.push(step);
+          emit(conv.id, { type: 'step', messageId: msg.id, step });
+        } catch (e) {
+          // niente in coda: lo si dice sotto la risposta invece di fingere che sia partita
+          const note = `\n\n*[Coda non avviata: ${e.message}.]*`;
+          msg.content += note;
+          emit(conv.id, { type: 'delta', messageId: msg.id, content: note });
+        }
       }
 
       // Chat del progetto: fotografia del turno (se ha cambiato file), da cui si può tornare indietro
