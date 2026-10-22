@@ -400,6 +400,22 @@ export function killTree(p) {
   else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); }
 }
 
+/**
+ * Comandi che chiuderebbero LocalAI stesso: il motivo, oppure null. LocalAI è un processo node e, per il telefono,
+ * ascolta anche sulla porta del server del progetto (inoltro in launcher.js): un taskkill trovato con netstat sulla
+ * porta del progetto, o su tutti i node, lo chiude di colpo senza lasciare errori.
+ */
+export function killsLocalAI(command, { pids = [], ports = [] } = {}) {
+  const c = String(command || '');
+  if (!/\b(taskkill|stop-process|kill|pkill|killall|tskill|kill-port|fkill)\b|\bwmic\b[^\n]*\b(delete|terminate)\b|\.kill\(\)/i.test(c)) return null;
+  if (/\bnode(\.exe)?\b/i.test(c)) return 'chiuderebbe anche LocalAI, che è un processo node';
+  if (/\bfor\s+\/f\b|\||\$\(|foreach|%\{|get-nettcpconnection|netstat/i.test(c)) return 'i processi da chiudere vanno scritti per numero (PID): cercati per porta o con un ciclo prenderebbero anche LocalAI';
+  const nums = (c.match(/\b\d+\b/g) || []).map(Number);
+  if (pids.filter(Boolean).some((p) => nums.includes(p))) return 'quel PID è LocalAI';
+  if (ports.filter(Boolean).some((p) => nums.includes(p))) return 'quella porta è di LocalAI';
+  return null;
+}
+
 /** Esegue un comando nella cartella dell'utente (o in una sua sottocartella). */
 export function runCommand(user, command, { cwd = '', timeout = 120000, signal } = {}) {
   const dir = resolve(user, cwd);
