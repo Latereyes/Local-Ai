@@ -188,6 +188,8 @@ function history(conv, opts) {
     images: !opts.auto && recentImages(conv, 1).length > 0,
     // in modalità Computer generate_music non c'è (l'audio va nei file con create_audio_file)
     melody: !opts.computer && !!recentMelody(conv),
+    // modalità voce: la risposta viene letta ad alta voce, quindi breve e senza Markdown
+    voice: !!conv.messages.findLast((m) => m.role === 'user')?.voice,
   };
   const system = systemPrompt(opts.assistantName, sections) + (opts.computer ? computerPrompt(opts.computer) : '');
   return [{ role: 'system', content: system }, ...msgs];
@@ -1154,7 +1156,7 @@ export async function send(conv, opts) {
   const computer = computerOn ? { files: await workspace.overview(user), canRun, os: process.platform === 'win32' ? 'Windows' : process.platform, project: conv.project || null, projectChat, folder: conv.project ? null : conv.folder || null } : null;
   opts = { ...opts, vision, numCtx, assistantName, hasNewAttachment: images.length > 0, computer };
 
-  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.auto ? { auto: true, ...(opts.autoLabel ? { autoLabel: String(opts.autoLabel).slice(0, 200) } : {}) } : {}), createdAt: Date.now() };
+  const userMsg = { id: store.newId(), role: 'user', content: rawText, attachments: attachments.length ? attachments : undefined, tool: opts.tool || null, ...(opts.voice ? { voice: true } : {}), ...(opts.auto ? { auto: true, ...(opts.autoLabel ? { autoLabel: String(opts.autoLabel).slice(0, 200) } : {}) } : {}), createdAt: Date.now() };
   const msg = { id: store.newId(), role: 'assistant', content: '', thinking: '', steps: [], media: [], model, status: 'pending', createdAt: Date.now() };
   conv.messages.push(userMsg, msg);
   await store.save(conv);

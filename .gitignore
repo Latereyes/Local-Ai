@@ -41,3 +41,8 @@ __pycache__/
 
 # Cartella di lavoro dell'assistente (progetti creati in modalità Computer)
 workspace/
+
+# Servizio voce: ambiente Python, voci e modelli Whisper (tools/installa-voce.ps1)
+voice/.venv/
+voice/voci/
+voice/modelli/

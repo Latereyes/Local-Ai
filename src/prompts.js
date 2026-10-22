@@ -14,7 +14,7 @@ const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', da
  * Prompt di sistema. Le sezioni su documenti e immagini allegate entrano solo quando la conversazione ne ha:
  * sono ~1.500 token che altrimenti occuperebbero la finestra di contesto senza servire.
  */
-export function systemPrompt(name = config.assistantName, { documents = true, images = true, melody = false } = {}) {
+export function systemPrompt(name = config.assistantName, { documents = true, images = true, melody = false, voice = false } = {}) {
   return `Sei ${name}, un assistente AI che gira interamente in locale sul computer dell'utente. Oggi è ${today()}.
 
 # Come rispondi
@@ -81,6 +81,14 @@ ${melody && workflows('audio', 'melody').length ? `- Melodie canticchiate: l'ute
 - REGOLA: se l'utente parla di una persona già presente in un'immagine della chat («questa persona», «lui», «lei», «la stessa ragazza», «di nuovo lui») e la vuole in un'altra scena, usa SEMPRE photo_with_face e MAI generate_image: con generate_image verrebbe una persona diversa. Vale anche quando chiede una foto «realistica».
 - upscale_image (se disponibile) aumenta la risoluzione senza cambiare il contenuto: per «migliora la qualità», «ingrandisci», «rendila più nitida», «in HD». Usa quality="massima" (ridisegno del dettaglio) solo su immagini generate e solo se l'utente chiede la massima qualità o più dettaglio; sulle foto allegate l'ingrandimento è sempre fedele.
 - Se l'utente vuole un'immagine nuova ispirata a quella allegata (non una rielaborazione), usa generate_image con una descrizione completa.
+` : ''}${voice ? `
+# Conversazione a voce
+L'utente ti sta parlando a voce: il suo messaggio è trascritto in automatico e la tua risposta viene letta ad alta voce, frase per frase, mentre la scrivi.
+- Rispondi come in una telefonata: frasi brevi e naturali, di norma 1-3 frasi. Approfondisci solo se l'utente lo chiede.
+- Niente Markdown, elenchi, tabelle, titoli, emoji, LaTeX o link: suonano male letti. Se servono più punti, dilli in una frase («primo…, poi…»).
+- Scrivi i numeri e i simboli come si pronunciano quando può esserci dubbio (es. «3 euro e 50», «20 gradi»).
+- La trascrizione può contenere errori: se una parola non ha senso, interpreta la frase più probabile; se non capisci, chiedi di ripetere.
+- Codice o testi lunghi: scrivili pure, l'utente li vede sullo schermo, ma prima dì in una frase cosa stai scrivendo.
 ` : ''}`.trim();
 }
 

@@ -65,6 +65,15 @@
         <button class="to-bottom" id="to-bottom" hidden data-icon="down" title="Vai in fondo"></button>
 
         <div class="composer-wrap">
+          <div class="voice-panel" id="voice-panel" hidden>
+            <button type="button" class="voice-orb" id="voice-orb" title="Tocca per interrompere"><span></span></button>
+            <div class="voice-info"><b id="voice-state">Ti ascolto…</b><span id="voice-heard"></span></div>
+            <div class="voice-tools">
+              <label class="select-chip" title="Voce"><select id="voice-pick"></select></label>
+              <label class="voice-opt" title="Se parli mentre risponde, smette e ti ascolta (meglio con le cuffie)"><input type="checkbox" id="voice-barge"> Interrompi parlando</label>
+              <button type="button" class="voice-end" id="voice-end">Fine</button>
+            </div>
+          </div>
           <form class="composer" id="composer">
             <div class="attachments" id="attachments" hidden></div>
             <textarea id="input" rows="1" placeholder="Scrivi un messaggio…" autocomplete="off"></textarea>
@@ -73,6 +82,7 @@
                 <button type="button" class="icon-chip" id="btn-attach" title="Allega immagini o documenti (PDF, TXT, MD)" data-icon="clip"></button>
                 <button type="button" class="icon-chip camera-only" id="btn-camera" title="Scatta una foto" data-icon="camera"></button>
                 <button type="button" class="icon-chip" id="btn-hum" title="Canticchia una melodia: diventa un brano" data-icon="mic" hidden></button>
+                <button type="button" class="icon-chip" id="btn-voice" title="Parla con l'IA: conversazione a voce" data-icon="voice" hidden></button>
                 <input type="file" id="file-input" accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown,audio/*" multiple hidden>
                 <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
                 <input type="file" id="hum-input" accept="audio/*" capture hidden>

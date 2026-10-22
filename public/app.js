@@ -1,4 +1,5 @@
 // LocalAI — frontend (vanilla JS, nessun build step)
+import { VoiceMode } from './voice.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -46,6 +47,7 @@ const P = {
   play: '<path d="M7 4v16l13-8z"/>',
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  voice: '<path d="M2 10v4"/><path d="M6 6v12"/><path d="M10 3v18"/><path d="M14 8v8"/><path d="M18 5v14"/><path d="M22 10v4"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
@@ -809,6 +811,7 @@ function onEvent(evt) {
       const m = upsertMsg(evt.message);
       // risposta partita dal server (ripresa automatica in modalità Computer): il tasto diventa «Ferma»
       if (m.role === 'assistant' && m.status === 'pending' && state.conv) { state.conv.running = true; updateSend(); }
+      if (m.role === 'assistant') voice.follow(m.id);
       renderMessage(m);
       scrollToBottom(m.role === 'user');
       break;
@@ -824,6 +827,7 @@ function onEvent(evt) {
       m.status = 'streaming';
       if (evt.content) m.content += evt.content;
       if (evt.thinking) m.thinking = (m.thinking || '') + evt.thinking;
+      if (evt.content) voice.update(m.id, m.content);
       scheduleRender(m);
       break;
     }
@@ -839,6 +843,7 @@ function onEvent(evt) {
     case 'content': {
       const m = findMsg(evt.messageId); if (!m) break;
       m.content = evt.content;
+      voice.update(m.id, m.content);
       scheduleRender(m);
       break;
     }
@@ -880,6 +885,7 @@ function onEvent(evt) {
       const m = findMsg(evt.messageId); if (!m) break;
       m.status = evt.status; m.error = evt.error; m.stats = evt.stats;
       state.conv.running = false;
+      voice.update(m.id, m.content || '', true);
       renderMessage(m);
       updateSend();
       break;
@@ -1153,6 +1159,66 @@ function updateHum() {
   $('#btn-hum').hidden = !(state.config?.workflows || []).some((w) => w.type === 'audio' && w.mode === 'melody' && w.available !== false);
 }
 
+// ---------- Conversazione a voce (public/voice.js) ----------
+const VOICE_STATE = {
+  listening: 'Ti ascolto…', recording: 'Ti ascolto…', transcribing: 'Trascrivo…',
+  thinking: 'Penso…', speaking: 'Rispondo · tocca il cerchio per interrompere', error: 'Qualcosa non va',
+};
+const voicePanel = $('#voice-panel'), voiceOrb = $('#voice-orb');
+const voice = new VoiceMode({
+  send: (text) => sendMessage(text, null, { voice: true }),
+  stop: () => state.conv && api(`/api/conversations/${state.conv.id}/stop`, { method: 'POST' }).catch(() => {}),
+  onState: (st, info) => {
+    voicePanel.dataset.state = st;
+    $('#voice-state').textContent = st === 'thinking' && state.gpu?.active && state.gpu.active.who !== 'ollama' ? 'Aspetto la GPU…' : VOICE_STATE[st] || st;
+    if (info.heard) $('#voice-heard').textContent = `«${info.heard}»`;
+    if (info.error) $('#voice-heard').textContent = info.error;
+    if (st === 'listening') voiceOrb.style.setProperty('--lv', 0);
+  },
+  onLevel: (rms) => { if (voice.state === 'listening' || voice.state === 'recording') voiceOrb.style.setProperty('--lv', Math.min(1, rms * 12).toFixed(2)); },
+});
+voice.voice = prefs.voice || '';
+voice.bargeIn = !!prefs.voiceBarge;
+$('#voice-barge').checked = voice.bargeIn;
+$('#voice-barge').onchange = (e) => { voice.bargeIn = prefs.voiceBarge = e.target.checked; savePrefs(); };
+$('#voice-pick').onchange = (e) => { voice.voice = prefs.voice = e.target.value; savePrefs(); };
+
+/** Il tasto della voce compare solo se il servizio voce del PC risponde (tools/installa-voce.ps1). */
+async function updateVoice() {
+  const info = await api('/api/voice').catch(() => null);
+  const ok = !!info?.ok;
+  $('#btn-voice').hidden = !ok;
+  if (!ok) return;
+  const list = info.voices || [];
+  if (!list.some((v) => v.id === voice.voice)) voice.voice = info.tts?.default || '';
+  $('#voice-pick').innerHTML = list.map((v) => `<option value="${esc(v.id)}" ${v.id === voice.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('#voice-pick').closest('label').hidden = list.length < 2;
+}
+
+function setVoicePanel(on) {
+  voicePanel.hidden = !on;
+  el.composer.classList.toggle('voice-on', on);
+  $('#btn-voice').classList.toggle('on', on);
+  if (!on) $('#voice-heard').textContent = '';
+}
+
+$('#btn-voice').onclick = async () => {
+  if (voice.active) { voice.stopAll(); return setVoicePanel(false); }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    alert("Il microfono nel browser funziona solo su http://localhost o in HTTPS: dal telefono apri l'indirizzo HTTPS di Tailscale (vedi README).");
+    return;
+  }
+  setVoicePanel(true);
+  try { await voice.start(); }
+  catch (err) {
+    voice.stopAll();
+    setVoicePanel(false);
+    alert(err.name === 'NotAllowedError' ? 'Permesso del microfono negato: consentilo dalle impostazioni del sito.' : `Microfono non disponibile (${err.message})`);
+  }
+};
+$('#voice-end').onclick = () => { voice.stopAll(); setVoicePanel(false); };
+voiceOrb.onclick = () => voice.interrupt();
+
 $('#btn-attach').onclick = () => fileInput.click();
 $('#btn-camera').onclick = () => cameraInput.click();
 for (const inp of [fileInput, cameraInput]) inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
@@ -1223,7 +1289,7 @@ el.composer.addEventListener('submit', async (e) => {
   await sendMessage(text, state.tool);
 });
 
-async function sendMessage(text, tool) {
+async function sendMessage(text, tool, extra = {}) {
   const atts = state.attachments.filter((a) => a.file);
   el.input.value = ''; autosize();
   state.attachments = [];
@@ -1242,7 +1308,7 @@ async function sendMessage(text, tool) {
     updateSend();
     state.stick = true;
     const body = {
-      text, tool, model: currentModel(), think: state.think, computer: state.computer,
+      text, tool, model: currentModel(), think: state.think && !extra.voice, computer: state.computer, ...extra,
       imageModel: prefs.imageModel || 'auto',
       aspect: tool === 'video' ? (prefs.vaspect || 'auto') : tool === 'image' ? (prefs.aspect || 'auto') : 'auto',
       duration: tool === 'video' ? (prefs.duration || 'auto') : 'auto',
@@ -1253,6 +1319,7 @@ async function sendMessage(text, tool) {
     scrollToBottom(true);
   } catch (err) {
     if (state.conv) state.conv.running = false;
+    if (extra.voice) { updateSend(); throw err; }
     el.input.value = text; autosize();
     state.attachments = atts;
     renderAttachments();
@@ -1796,6 +1863,7 @@ async function startApp() {
   if (prefs.model && !state.config.models.some((m) => m.name === prefs.model)) delete prefs.model;
   renderModel();
   renderOpts();
+  updateVoice();
   await loadConvs();
   route();
 }

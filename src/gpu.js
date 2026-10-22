@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import * as ollama from './ollama.js';
 import * as comfy from './comfy.js';
 import * as agent from './gpu-agent.js';
+import * as voice from './voice.js';
 
 // Mentre un'altra app usa la GPU non si dice quale né per cosa
 const BUSY = 'GPU occupata, attendere...';
@@ -82,6 +83,8 @@ class GpuArbiter extends EventEmitter {
         } else {
           await this.#switchTo(who);
         }
+        // il servizio voce sta in VRAM accanto a Gemma; a ComfyUI (video, Qwen-Edit) serve tutta
+        if (who === 'comfy') await voice.unload();
         this.active = base;
         this.#emit();
         return await fn();
