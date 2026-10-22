@@ -21,6 +21,8 @@ test('comandi che chiuderebbero LocalAI: rifiutati, gli altri no', () => {
     'powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 5000 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"',
     'powershell -NoProfile -Command "Stop-Process -Name node -Force"',
     'npx kill-port 3000',
+    // il comando vero del 22/10 alle 20:48 (registro eventi di PowerShell sul PC)
+    "powershell -NoProfile -Command Get-Process -Name python, pythonw, py -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*torrent*' } | Stop-Process -Force; Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Host 'Fatto'",
   ]) assert.ok(killsLocalAI(c, me), c);
   for (const c of ['taskkill /PID 5123 /F', 'python -m unittest discover -v -s tests', 'python run.py', 'netstat -ano', 'tasklist'])
     assert.equal(killsLocalAI(c, me), null, c);
