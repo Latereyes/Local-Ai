@@ -432,6 +432,24 @@ details.msg-auto pre { text-align: left; white-space: pre-wrap; font: inherit; f
 .icon-chip:hover { background: var(--hover); color: var(--text); }
 .icon-chip.on { background: var(--err); border-color: transparent; color: #fff; animation: rec-pulse 1.4s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity: .65; } }
+/* Conversazione a voce: il pannello prende il posto della casella di testo */
+.voice-panel { display: flex; align-items: center; gap: 14px; padding: 12px 14px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); box-shadow: var(--shadow); }
+.voice-panel[hidden] { display: none; }
+.voice-orb { --lv: 0; position: relative; width: 52px; height: 52px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); }
+.voice-orb span { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); transform: scale(calc(1 + var(--lv) * .7)); transition: transform .08s linear; }
+.voice-panel[data-state="recording"] .voice-orb span { background: var(--err); }
+.voice-panel[data-state="transcribing"] .voice-orb span, .voice-panel[data-state="thinking"] .voice-orb span { animation: rec-pulse 1s ease-in-out infinite; }
+.voice-panel[data-state="speaking"] .voice-orb span { background: var(--ok); animation: voice-talk .5s ease-in-out infinite alternate; }
+.voice-panel[data-state="error"] .voice-orb span { background: var(--warn); }
+@keyframes voice-talk { to { transform: scale(1.35); } }
+.voice-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.voice-info b { font-weight: 600; }
+.voice-info span { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.voice-opt { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); }
+.voice-end { padding: 6px 14px; border-radius: 99px; background: var(--text); color: var(--bg); font-weight: 500; }
+.composer.voice-on textarea { display: none; }
+@media (max-width: 560px) { .voice-panel { flex-wrap: wrap; } .voice-tools { width: 100%; justify-content: space-between; } }
 .camera-only { display: none; }
 @media (pointer: coarse) { .camera-only { display: inline-grid; } }
 .attachments { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
