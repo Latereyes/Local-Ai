@@ -1,6 +1,7 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
 import { MAX as LONG_VIDEO } from './videochain.js';
+import { TASK_COMMANDS_HELP } from './taskcmd.js';
 
 // musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
 const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
@@ -271,7 +272,7 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
-export function computerTools({ canRun = false, images = [], project = false, projectChat = false, folders = false } = {}) {
+export function computerTools({ canRun = false, images = [], project = false, projectChat = false, scripts = false, folders = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
   const addTasks = (folder) => fn('add_project_tasks', `Aggiunge task alla coda ${folder ? 'del progetto di una cartella (compare in Progetti)' : 'del progetto'}: li eseguono i modelli locali uno alla volta, con test e controllo delle pagine automatici. Per lavori grandi o in più passi.`, {
@@ -316,10 +317,14 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       path: p(project ? 'Percorso del file .mp3 nel progetto, es. audio/musica.mp3, audio/riga.mp3' : 'Percorso del file .mp3, es. tetris/audio/musica.mp3'),
       ...computerAudioProps(),
     }, ['kind', 'path', 'description', 'duration'])] : []),
-    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF (formato A4), con la grafica della pagina.', {
+    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF con la grafica della pagina: formato A4, oppure quello del CSS @page (es. @page { size: A5; margin: 20mm }); i salti pagina seguono break-before: page. È il modo più semplice per impaginare libri e documenti: niente librerie PDF.', {
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    // task della coda: comandi sicuri nella cartella del progetto, senza conferma (stesso rischio dei test che la coda già esegue)
+    ...(scripts ? [fn('run_command', `Esegue un comando nella cartella del progetto, senza conferma, e restituisce l'output: per eseguire gli script del progetto (es. generare book.html), provare il codice, far girare i test o installare librerie che esistono davvero. Ammessi solo: ${TASK_COMMANDS_HELP}.`, {
+      command: p('Il comando, es. python build_book.py'),
+    }, ['command'])] : []),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },

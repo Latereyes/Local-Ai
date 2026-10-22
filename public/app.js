@@ -147,7 +147,7 @@ const el = {
   convList: $('#conv-list'), modelName: $('#model-name'), modelMenu: $('#model-menu'),
   gpuPill: $('#gpu-pill'), gpuLabel: $('#gpu-label'), gpuMenu: $('#gpu-menu'),
   toBottom: $('#to-bottom'), gallery: $('#gallery'), lightbox: $('#lightbox'), lbBody: $('#lb-body'),
-  projects: $('#projects'),
+  projects: $('#projects'), memory: $('#memory'),
 };
 
 // ---------- Sidebar ----------
@@ -163,6 +163,7 @@ $('#scrim').onclick = () => setSidebar(false);
 $('#btn-new').onclick = () => { newChat(); if (isMobile()) setSidebar(false); };
 $('#btn-gallery').onclick = () => { openGallery(); if (isMobile()) setSidebar(false); };
 $('#btn-projects').onclick = () => { openProjects(); if (isMobile()) setSidebar(false); };
+$('#btn-memory').onclick = () => { openMemory(); if (isMobile()) setSidebar(false); };
 
 function groupLabel(ts) {
   const d = new Date(ts), now = new Date();
@@ -234,8 +235,10 @@ function showView(v) {
   $('#view-chat').hidden = v !== 'chat';
   $('#view-gallery').hidden = v !== 'gallery';
   $('#view-projects').hidden = v !== 'projects';
+  $('#view-memory').hidden = v !== 'memory';
   $('#btn-gallery').classList.toggle('active', v === 'gallery');
   $('#btn-projects').classList.toggle('active', v === 'projects');
+  $('#btn-memory').classList.toggle('active', v === 'memory');
 }
 
 function newChat(push = true) {
@@ -279,6 +282,7 @@ function route() {
   else if (location.pathname.startsWith('/galleria')) openGallery(false);
   else if (location.pathname.startsWith('/progetti/')) openProject(decodeURIComponent(location.pathname.slice(10)), false);
   else if (location.pathname.startsWith('/progetti')) openProjects(false);
+  else if (location.pathname.startsWith('/memoria')) openMemory(false);
   else newChat(false);
 }
 
@@ -405,7 +409,9 @@ function renderSteps(node, m, live) {
   const searches = steps.filter((s) => s.type === 'search').length;
   const visions = steps.filter((s) => s.type === 'vision').length;
   const docSteps = steps.filter((s) => s.type === 'document');
+  const memNotes = steps.filter((s) => s.type === 'memory').reduce((n, s) => n + (s.notes?.length || 0), 0);
   const parts = [];
+  if (memNotes) parts.push(memNotes === 1 ? '1 nota dalla memoria' : `${memNotes} note dalla memoria`);
   if (docSteps.length) parts.push('Documento consultato');
   if (visions) parts.push(visions === 1 ? 'Immagine analizzata' : `${visions} immagini analizzate`);
   if (searches) parts.push(`${searches} ${searches === 1 ? 'ricerca' : 'ricerche'}`);
@@ -413,11 +419,14 @@ function renderSteps(node, m, live) {
   $('.steps-title', box).textContent = running
     ? (running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
     : parts.join(' · ');
-  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length ? 'doc' : 'eye', 14);
+  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length ? 'doc' : memNotes && !visions ? 'brain' : 'eye', 14);
   box.classList.toggle('live', !!running);
   if (box.dataset.auto !== 'off') box.open = live && !m.content;
   $('.steps-list', box).innerHTML = steps.map((s) => {
     const state = s.status === 'running' ? '<span class="spin"></span>' : s.status === 'error' ? `<span class="step-err" title="${esc(s.error || '')}">non riuscita</span>` : '';
+    if (s.type === 'memory') {
+      return `<div class="step">${icon('brain', 14)}<div class="step-body"><div>Note dalla <a href="/memoria" data-memory-link>memoria</a></div>${(s.notes || []).map((n) => `<div class="faint">#${n.id} · ${esc(n.type)}${n.scope ? ' · progetto' : ''}: ${esc(n.text)}</div>`).join('')}</div></div>`;
+    }
     if (s.type === 'document') {
       return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>${s.status === 'running' ? 'Analisi' : 'Documento'}: <b>${esc(s.title || '')}</b> ${state}</div>${s.text ? `<div class="faint" style="white-space:pre-wrap">${esc(s.text)}</div>` : ''}</div></div>`;
     }
@@ -453,7 +462,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', script: 'Script eseguito' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -1358,7 +1367,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', advice: 'Consigli' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', text: 'Testo', files: 'File', advice: 'Consigli' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
@@ -1459,6 +1468,8 @@ function renderProject() {
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-memory" ${p.memory ? 'checked' : ''}> Usa la <a href="/memoria" data-memory-link>memoria</a> in questo progetto (note generali e del progetto nella chat, nei task e nella bozza del piano)</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-review" ${p.reviewPlan ? 'checked' : ''}> Mostrami il piano prima di partire: i task chiesti in chat aspettano che tu prema «Avvia» (con una notifica)</label>
       <label class="pj-check-opt">Tentativi per task prima di fermarsi (o di chiamare il coordinatore): <select id="pj-attempts">${[['', `predefinito (${p.defaultAttempts})`], ...[1, 2, 3, 4, 5].map((n) => [n, n])].map(([v, l]) => `<option value="${v}" ${String(p.maxAttempts || '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
@@ -1609,6 +1620,135 @@ el.projects.addEventListener('change', (e) => {
   if (e.target.id === 'pj-attempts') api(base, { method: 'PATCH', body: { maxAttempts: e.target.value || 0 } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-memory') api(base, { method: 'PATCH', body: { memory: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-review') api(base, { method: 'PATCH', body: { reviewPlan: e.target.checked } }).catch((err) => alert(err.message));
+});
+
+// ---------- Memoria: note dell'utente usate nelle risposte ----------
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-memory-link]');
+  if (!a || e.ctrlKey || e.metaKey) return;
+  e.preventDefault();
+  openMemory();
+});
+const memState = { q: '', scope: 'tutte', status: '', editing: null, data: null };
+async function openMemory(push = true) {
+  showView('memory');
+  state.conv = null;
+  state.project = null;
+  renderConvList();
+  if (push && location.pathname !== '/memoria') history.pushState(null, '', '/memoria');
+  document.title = 'Memoria · LocalAI';
+  await loadMemory();
+}
+async function loadMemory() {
+  const qs = new URLSearchParams({ q: memState.q, scope: memState.scope, status: memState.status });
+  try { memState.data = await api(`/api/memory?${qs}`); }
+  catch (err) { el.memory.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  renderMemory();
+}
+const scopeLabel = (scope) => (scope ? `Progetto: ${memState.data.projects.find((p) => p.id === scope)?.name || scope}` : 'Generale');
+const scopeOptions = (sel, all = false) => [...(all ? [['tutte', 'Tutti gli ambiti']] : []), ['', 'Generale (tutte le chat)'], ...memState.data.projects.map((p) => [p.id, `Progetto: ${p.name}`])]
+  .map(([v, l]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+const typeOptions = (sel) => Object.entries(memState.data.types).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
+
+const PROPOSED = 'da confermare';
+function renderMemory() {
+  const d = memState.data;
+  // note proposte dopo i task: Conferma (entra nel prompt), Modifica (salvare la conferma), Scarta (si elimina)
+  const proposed = (n) => memState.editing === n.id ? note(n) : `<div class="project mem-note mem-proposed" data-note="${n.id}">
+        <div class="mem-body">${esc(n.text)}</div>
+        <div class="mem-row faint-note"><span class="pj-pill on">${esc(d.types[n.type] || n.type)}</span><span class="pj-pill">${esc(scopeLabel(n.scope))}</span>
+          <span>#${n.id} · ${esc(n.source)} · ${when(n.createdAt)}</span>
+          <span class="spacer"></span>
+          <button class="btn primary" data-mem="confirm">Conferma</button>
+          <button class="btn ghost" data-mem="edit">Modifica</button>
+          <button class="btn ghost" data-mem="discard">Scarta</button></div>
+      </div>`;
+  const note = (n) => memState.editing === n.id
+    ? `<div class="project mem-note" data-note="${n.id}">
+        <textarea class="mem-text" rows="3" maxlength="1000">${esc(n.text)}</textarea>
+        <div class="mem-row"><select class="mem-type">${typeOptions(n.type)}</select><select class="mem-scope">${scopeOptions(n.scope)}</select>
+        <span class="spacer"></span><button class="btn" data-mem="cancel">Annulla</button><button class="btn primary" data-mem="save">${n.status === PROPOSED ? 'Salva e conferma' : 'Salva'}</button></div>
+      </div>`
+    : `<div class="project mem-note${n.status === 'archiviata' ? ' off' : ''}" data-note="${n.id}">
+        <div class="mem-body">${esc(n.text)}</div>
+        <div class="mem-row faint-note"><span class="pj-pill on">${esc(d.types[n.type] || n.type)}</span><span class="pj-pill">${esc(scopeLabel(n.scope))}</span>${n.status === 'archiviata' ? '<span class="pj-pill">disattivata</span>' : ''}
+          <span>#${n.id} · ${esc(n.source)} · ${when(n.updatedAt)}${n.uses ? ` · usata ${n.uses} ${n.uses === 1 ? 'volta' : 'volte'}` : ''}</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" data-mem="edit">Modifica</button>
+          <button class="btn ghost" data-mem="toggle">${n.status === 'archiviata' ? 'Riattiva' : 'Disattiva'}</button>
+          <button class="btn ghost" data-mem="delete">Elimina</button></div>
+      </div>`;
+  const filtered = memState.q || memState.scope !== 'tutte' || memState.status;
+  const notes = memState.status === PROPOSED ? d.notes : d.notes.filter((n) => n.status !== PROPOSED);
+  const pending = memState.status === PROPOSED ? [] : d.proposed || [];
+  el.memory.innerHTML = `<div class="pj-head"><h2>Memoria</h2></div>
+    <p class="faint-note" style="margin:0">Note che l'assistente usa quando c'entrano con la domanda: preferenze, fatti, procedure e correzioni. A ogni messaggio si cercano le note pertinenti (per parole chiave) e se ne aggiungono poche al prompt, con il numero della nota. Le note di un progetto valgono solo nelle chat, nei task e nel piano di quel progetto. Chiavi, password e token vengono tolti prima di salvare.</p>
+    <label class="pj-check-opt"><input type="checkbox" id="mem-enabled" ${d.enabled ? 'checked' : ''}> Usa la memoria nelle risposte${d.enabled ? '' : ' <b>(spenta: le note restano salvate ma non vengono usate)</b>'}</label>
+    ${pending.length ? `<section class="pj-card"><h3 style="margin:0 0 4px">Note proposte da confermare (${pending.length})</h3>
+      <p class="faint-note" style="margin:0 0 8px">Le ha proposte un modello locale dopo i task dei progetti (errori, correzioni, cose che hanno funzionato). Non vengono usate finché non le confermi.</p>
+      ${pending.map(proposed).join('')}</section>` : ''}
+    <section class="pj-card mem-add">
+      <textarea id="mem-new" rows="2" maxlength="1000" placeholder="Nuova nota, es. «Preferisco risposte brevi con un esempio» oppure «Il NAS di casa è su 192.168.1.20»"></textarea>
+      <div class="mem-row"><select id="mem-new-type">${typeOptions('preferenza')}</select><select id="mem-new-scope">${scopeOptions('')}</select><span class="spacer"></span><button class="btn primary" data-mem="add">Aggiungi</button></div>
+    </section>
+    <div class="mem-row mem-filters"><input id="mem-q" type="search" placeholder="Cerca nelle note" value="${esc(memState.q)}">
+      <select id="mem-f-scope">${scopeOptions(memState.scope, true)}</select>
+      <select id="mem-f-status">${[['', 'Attive e disattivate'], ['attiva', 'Solo attive'], ['archiviata', 'Solo disattivate'], [PROPOSED, 'Da confermare']].map(([v, l]) => `<option value="${v}" ${v === memState.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${notes.length ? notes.map((n) => (n.status === PROPOSED ? proposed(n) : note(n))).join('') : `<div class="empty">${filtered ? 'Nessuna nota trovata.' : 'Ancora nessuna nota. Scrivine una qui sopra: per esempio come preferisci le risposte o un fatto da ricordare.'}</div>`}`;
+}
+el.memory.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-mem]');
+  if (!b) return;
+  const card = b.closest('[data-note]');
+  const id = card ? Number(card.dataset.note) : null;
+  const n = id && [...memState.data.notes, ...(memState.data.proposed || [])].find((x) => x.id === id);
+  const warn = (out) => { if (out.removed) alert(`Tolti dalla nota ${out.removed} ${out.removed === 1 ? 'dato segreto' : 'dati segreti'} (chiavi, password o token).`); };
+  try {
+    switch (b.dataset.mem) {
+      case 'add': {
+        const text = $('#mem-new').value.trim();
+        if (!text) return $('#mem-new').focus();
+        warn(await api('/api/memory', { body: { text, type: $('#mem-new-type').value, scope: $('#mem-new-scope').value } }));
+        break;
+      }
+      case 'edit': memState.editing = id; return renderMemory();
+      case 'cancel': memState.editing = null; return renderMemory();
+      case 'save':
+        warn(await api(`/api/memory/${id}`, { method: 'PATCH', body: { text: $('.mem-text', card).value, type: $('.mem-type', card).value, scope: $('.mem-scope', card).value, ...(n?.status === PROPOSED ? { status: 'attiva' } : {}) } }));
+        memState.editing = null;
+        break;
+      case 'confirm': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: 'attiva' } }); break;
+      case 'discard': await api(`/api/memory/${id}`, { method: 'DELETE' }); break;
+      case 'toggle': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: n.status === 'archiviata' ? 'attiva' : 'archiviata' } }); break;
+      case 'delete':
+        if (!confirm('Eliminare questa nota? Non si può annullare (per tenerla senza usarla, disattivala).')) return;
+        await api(`/api/memory/${id}`, { method: 'DELETE' });
+        break;
+      default: return;
+    }
+    await loadMemory();
+  } catch (err) { alert(err.message); }
+});
+el.memory.addEventListener('change', async (e) => {
+  try {
+    if (e.target.id === 'mem-enabled') { await api('/api/memory/settings', { method: 'PUT', body: { enabled: e.target.checked } }); return loadMemory(); }
+    if (e.target.id === 'mem-f-scope') { memState.scope = e.target.value; return loadMemory(); }
+    if (e.target.id === 'mem-f-status') { memState.status = e.target.value; return loadMemory(); }
+  } catch (err) { alert(err.message); }
+});
+let memSearch = null;
+el.memory.addEventListener('input', (e) => {
+  if (e.target.id !== 'mem-q') return;
+  clearTimeout(memSearch);
+  memSearch = setTimeout(async () => {
+    memState.q = e.target.value.trim();
+    await loadMemory();
+    const q = $('#mem-q');
+    q.focus();
+    q.setSelectionRange(q.value.length, q.value.length);
+  }, 300);
 });
 
 // ---------- Lightbox ----------

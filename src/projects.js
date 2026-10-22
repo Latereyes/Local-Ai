@@ -45,10 +45,81 @@ export function classify(text) {
   if (tag && TAGS[tag[1]]) return TAGS[tag[1]];
   // chi comincia con un verbo di lettura è un'analisi anche se parla di codice («analizza il log di app.js»)
   if (/^\s*(riassumi|riassunto|analizza|estrai|leggi|classifica|elenca|confronta|sintetizza|trova nei log)\b/.test(t)) return 'read';
+  // testi da scrivere (capitoli, articoli, racconti) in file .md/.txt: niente codice né test anche se nominano «funzioni»
+  // o la verifica (libro mindfulness 2026-10-12: «Scrivi i capitoli 3 e 4…» era finito a Qwen Coder con i test del PDF)
+  if (/^\s*(scrivi|riscrivi|completa|allunga|amplia|traduci|write|rewrite|translate)\b/.test(t)
+    && /\b(capitol[oi]|chapters?|libro|book|articol[oi]|racconto|storia|testo|testi|introduzione|prefazione|conclusione|epilogo|poesi[ae])\b/.test(t)
+    && !/\.(py|js|mjs|ts|html?|css|ps1|bat)\b|\b(script|codice|python|javascript|programma|pdf|html)\b/.test(t)) return 'chat';
   if (/\b(pagin[ae]|html|sito|gioc[ho]i?|videogioco|game|canvas|css|landing|interfaccia web)\b/.test(t)) return 'page';
   if (/\b(codice|script|funzion[ei]|test|python|javascript|typescript|node|programma|implementa|bug|refactor|classe|modulo|libreria|api|cli)\b|\.(py|js|ts|ps1|bat)\b/.test(t)) return 'code';
   if (/\b(riassum|riassunt|sintesi|analizz|log|estra[ei]|json|classific|elenc|confront|report|document[oi])/.test(t)) return 'read';
   return 'chat';
+}
+
+// ---------------- Verifica dei task di testo ----------------
+// Libro mindfulness (2026-10-12): i task di testo non avevano nessuna verifica. Il piano chiedeva capitoli di almeno
+// 10 pagine, i modelli ne scrivevano 3-4 (1000-2500 parole) e il task risultava fatto. Ora la lunghezza chiesta nel
+// task («almeno 3000 parole», «almeno 10 pagine») si controlla sui file di testo scritti dal task.
+export const WORDS_PER_PAGE = 250;
+const NUM = (s) => Number(String(s).replace(/[.,'’\s]/g, ''));
+
+/** Parole minime chieste dal task («almeno 3000 parole», «at least 12 pages»), 0 se non c'è una lunghezza. */
+export function wordTarget(text) {
+  let best = 0;
+  const re = /\b(?:almeno|minimo|non meno di|at least|minimum(?: of)?)\s+(\d{1,3}(?:[.,'’ ]\d{3})+|\d+)\s*(parole|words|pagine|pages)\b/gi;
+  for (const m of String(text || '').matchAll(re)) {
+    const n = NUM(m[1]) * (/^pag/i.test(m[2]) ? WORDS_PER_PAGE : 1);
+    if (n > best) best = n;
+  }
+  return best;
+}
+
+/** File di testo nominati nel task (cap_03.md, testi/intro.txt). */
+export function textFiles(text) {
+  return [...new Set((String(text || '').match(/[\w./-]*\w\.(?:md|markdown|txt)\b/gi) || []).map((f) => f.replace(/^\.\//, '')))];
+}
+
+export const countWords = (s) => (String(s || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || []).length;
+
+/**
+ * Controllo dei file di testo di un task. written: file di testo scritti dal task; read(path) → contenuto o null.
+ * Restituisce { checks: [{ file, words, ok }], problems: [testo per il modello] }.
+ */
+export function textCheck(taskText, written, read) {
+  const target = wordTarget(taskText);
+  const notPlan = (f) => f.toUpperCase() !== PLAN_FILE.toUpperCase();
+  const mentioned = textFiles(taskText).filter(notPlan);
+  // un solo file nominato è il file del task: si controlla sempre, anche se l'ha scritto qualcun altro (il coordinatore
+  // dalla chat del progetto: libro mindfulness, capitolo 3 di 1374 parole su 2000 risultato fatto). Con più file
+  // nominati quelli già presenti possono essere letture (struttura_libro.md) e contano solo se il task li scrive.
+  const own = mentioned.length === 1 ? mentioned : mentioned.filter((f) => read(f) == null);
+  const files = [...new Set([...written.filter(notPlan), ...own])];
+  const checks = [];
+  const problems = [];
+  for (const file of files) {
+    const content = read(file);
+    if (content == null) {
+      checks.push({ file, words: 0, ok: false });
+      problems.push(`${file} was not created. Write it with write_file (the first part) and append_file (the rest).`);
+      continue;
+    }
+    const words = countWords(content);
+    const ok = !target || words >= target * 0.9;
+    checks.push({ file, words, ok });
+    if (!ok) problems.push(`${file} has ${words} words, the task asks for at least ${target}. Continue it: read the end of the file, then add new sections with append_file (about 800-1200 words per call) until it reaches the length. Do not rewrite, summarize or shorten what is already there.`);
+  }
+  return { target, checks, problems };
+}
+
+/**
+ * Output di un comando da mostrare al modello: senza byte binari. Libro mindfulness (2026-10-12): i test stampavano il
+ * contenuto del PDF e l'errore arrivava a Qwen e al coordinatore come caratteri illeggibili, quindi nessuno lo correggeva.
+ */
+export function printable(s) {
+  const text = String(s ?? '');
+  const bad = (text.match(/[^\t\n\r\x20-\x7e -ɏ -⁯←-⇿─-◿]/g) || []).length;
+  const clean = text.replace(/[^\t\n\r\x20-\x7e -ɏ -⁯←-⇿─-◿]+/g, '·').replace(/(?:·\s*){4,}/g, ' [byte binari omessi] ');
+  return bad > text.length * 0.1 ? `${clean}\n[Nota di LocalAI: gran parte di questo output erano byte binari (per esempio un PDF stampato nel terminale): fai stampare ai test e allo script solo testo]` : clean;
 }
 
 /** Toglie il tag iniziale dal testo del task. */
@@ -88,6 +159,23 @@ export async function modelFor(type) {
   const found = installed.find((m) => m.tools && norm(m.name) === norm(want));
   return found ? found.name : config.ollama.model;
 }
+
+/**
+ * L'altro modello locale per un task che non riesce: Qwen Coder ↔ Gemma 26B (i modelli per codice e lettura).
+ * null se non è installato o se è lo stesso.
+ */
+export async function otherModel(current) {
+  const norm = (n) => String(n || '').replace(/:latest$/, '');
+  const installed = await ollama.listModels().catch(() => []);
+  for (const want of [config.projects.models.code, config.projects.models.read]) {
+    const found = installed.find((m) => m.tools && norm(m.name) === norm(want));
+    if (found && norm(found.name) !== norm(current)) return found.name;
+  }
+  return null;
+}
+
+/** Modelli diversi con cui il task ha già lavorato. */
+export const modelsTried = (task) => [...new Set((task.modelsTried || []).map((m) => String(m).replace(/:latest$/, '')))];
 
 function blank(ownerId, folder, name) {
   const now = Date.now();
@@ -223,6 +311,64 @@ export const scoped = (user, p) => ({ ...user, project: p.folder });
 /** Cartella del progetto sul disco. */
 export const dirOf = (user, p) => workspace.userRoot(scoped(user, p));
 
+// ---------------- STATO.md ----------------
+// Libro mindfulness (2026-10-12): per «capire il quadro» i modelli rileggevano tutti i capitoli e riempivano il contesto.
+// LocalAI scrive dopo ogni task un riassunto dello stato (fatto, file, problemi, da fare) che i task successivi leggono.
+export const STATE_FILE = 'STATO.md';
+
+/** File di esempio nella cartella del progetto (immagini e audio, fino a 2 livelli, al massimo 5), percorsi relativi. */
+export function sampleFiles(dir) {
+  const out = [];
+  const walk = (rel, depth) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= 5) return;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (depth < 2 && !/^(\.git|node_modules|tests?)$/i.test(e.name)) walk(r, depth + 1); }
+      else if (/\.(jpe?g|png|webp|gif|bmp|wav|mp3|ogg|m4a)$/i.test(e.name)) out.push(r);
+    }
+  };
+  walk('', 0);
+  return out;
+}
+
+/** Funzioni che la verifica automatica non può provare (servono hardware o una persona), nominate nel task. */
+export function manualChecks(text) {
+  const t = String(text || '');
+  return [
+    [/fotocamer|camera|webcam|scann?eri[sz]z|barcode|codic[ei] a barre|qr ?code/i, 'la fotocamera'],
+    [/microfon|microphone|registra(re|zione) (la )?voce|dettatura/i, 'il microfono'],
+    [/\bgps\b|geolocali|posizione dell'utente|geolocation/i, 'la posizione'],
+  ].filter(([re]) => re.test(t)).map(([, name]) => name);
+}
+const TYPE_NAME = { code: 'codice', page: 'pagina', read: 'lettura', chat: 'testo' };
+
+/** Testo di STATO.md, dallo stato dei task (sempre rigenerato, non cresce all'infinito). */
+export function stateText(p) {
+  const line = (t) => `- [${TYPE_NAME[t.type] || t.type}] ${t.title}`;
+  const done = p.tasks.filter((t) => t.status === 'done');
+  const open = p.tasks.filter((t) => ['failed', 'error'].includes(t.status));
+  const todo = p.tasks.filter((t) => ['queued', 'running', 'testing'].includes(t.status));
+  const out = [`# Stato del progetto «${p.name}»`, '', `Scritto da LocalAI dopo ogni task: non modificarlo a mano. Ultimo aggiornamento: ${new Date().toLocaleString('it-IT')}.`];
+  if (done.length) {
+    out.push('', '## Fatto');
+    for (const t of done) {
+      out.push(line(t));
+      if (t.summary) out.push(`  ${t.summary.replace(/\s+/g, ' ').slice(0, 300)}`);
+      if (t.files?.length) out.push(`  File: ${t.files.join(', ')}`);
+    }
+  }
+  if (open.length) out.push('', '## Problemi aperti', ...open.map((t) => `${line(t)}: ${t.error || 'non riuscito'}`));
+  if (todo.length) out.push('', '## Da fare', ...todo.map(line));
+  return `${out.join('\n')}\n`;
+}
+
+/** Scrive STATO.md nella cartella del progetto. */
+export async function writeState(user, p) {
+  await fsp.writeFile(path.join(dirOf(user, p), STATE_FILE), stateText(p));
+}
+
 /** Fotografia della cartella del progetto (snapshots.js): commit solo se è cambiato qualcosa; null senza git. */
 export const snap = (user, p, message) => snapshots.snapshot(dirOf(user, p), message);
 
@@ -236,11 +382,28 @@ export async function writePlan(user, p, text) {
   await save(p);
 }
 
+/**
+ * Un task di codice che nomina solo pagine (HTML/CSS) è una pagina: si verifica aprendola nel browser, non con i test
+ * (prova «La mia libreria» 2026-10-13: app in un solo index.html, task marcati [codice] dal pianificatore).
+ */
+export function pageIfOnlyHtml(text, type) {
+  if (type !== 'code') return type;
+  // le librerie già pronte (zxing-browser.min.js, node_modules/…, vendor/…) non sono codice del task
+  const files = (String(text || '').match(/[\w./-]*\w\.(?:html?|css|js|mjs|ts|py|json|md|txt)\b/gi) || [])
+    .filter((f) => !/\.min\.js$|(^|\/)(node_modules|vendor|lib)\//i.test(f));
+  const html = files.some((f) => /\.html?$/i.test(f));
+  // pagina con fotocamera, microfono o posizione: i test automatici non possono provarle (i modelli scrivevano test che
+  // simulavano un ISBN letto e poi fallivano con la scansione vera): si verifica la pagina e la parte hardware a mano
+  const code = files.some((f) => !/\.(html?|css|md|txt|json)$/i.test(f));
+  if ((html || !code) && manualChecks(text).length) return 'page';
+  return files.length && files.every((f) => /\.(html?|css)$/i.test(f)) ? 'page' : type;
+}
+
 export function newTask(text, type) {
   const body = stripTag(text);
   return {
     id: randomUUID(),
-    type: TYPES[type] ? type : classify(text),
+    type: pageIfOnlyHtml(body, TYPES[type] ? type : classify(text)),
     text: body,
     title: body.split('\n')[0].slice(0, 100),
     status: 'queued',
@@ -250,8 +413,19 @@ export function newTask(text, type) {
   };
 }
 
-/** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo. */
-export function planPrompt(goal, files) {
+// Ricette per i tipi di progetto noti (prove del 2026-10-12/13: libro, pagina pizzeria, gestore spese): la struttura
+// che funziona con i modelli locali. Al pianificatore va solo quella del tipo riconosciuto nell'obiettivo.
+export const RECIPES = [
+  [/\b(libro|book|ebook|guida|manuale|romanzo|racconti|raccolta di articoli)\b/i, 'Libro o guida: un task [testo] per capitolo (file NN_titolo.md, «almeno N parole», la somma arriva alla lunghezza chiesta); se serve, un task [pagina] per la copertina; per il PDF un task [pagina] che crea book.html dai capitoli con uno script piccolo (eseguito con run_command) e lo stampa con html_to_pdf, con «tra X e Y pagine».'],
+  [/\b(gioco|game|videogioco|clone di)\b/i, 'Gioco nel browser: un task [codice] per la logica (game.js, senza disegno, con i test node:test), poi un task [pagina] per index.html che la usa (canvas, comandi, punteggio); eventuali task successivi aggiungono una meccanica alla volta.'],
+  [/\b(sito|pagina web|landing|pagina html|portfolio)\b/i, 'Pagina o sito: una pagina = UN task [pagina] che crea index.html completo (CSS e JS inclusi); un sito con più pagine = un task [pagina] per pagina, il primo con lo stile comune.'],
+  [/\b(script|riga di comando|cli|programma|bot|automazione|api|server)\b/i, 'Script o programma: task [codice] che costruiscono il programma una funzione alla volta, ognuno con i suoi test (tests/test_*.py o tests/*.test.js), poi un task [testo] per il README con gli esempi d\'uso.'],
+  [/\b(analizza|analisi|dati|csv|excel|log|report|statistiche)\b/i, 'Analisi di dati: un task [lettura] che legge i file e scrive report.md con i risultati; se servono calcoli ripetibili, prima un task [codice] con lo script e i test, poi il task [lettura] che lo esegue e commenta.'],
+];
+export const recipeFor = (goal) => RECIPES.find(([re]) => re.test(String(goal || '')))?.[1] || '';
+
+/** Prompt per far scrivere il piano a un modello locale a partire dall'obiettivo (notes: pacchetto della memoria, se c'è). */
+export function planPrompt(goal, files, notes = '') {
   return [
     { role: 'system', content: `Scrivi il piano di lavoro di un progetto software che verrà eseguito da modelli AI locali, un task alla volta, in una cartella del PC (Windows). Ogni task deve essere piccolo, autonomo e verificabile: chi lo esegue vede solo il piano, i task già fatti e i file della cartella.
 Formato (Markdown, in italiano, niente altro):
@@ -261,13 +435,17 @@ una o due frasi
 - [tipo] cosa fare, con nomi di file concreti
   eventuali dettagli rientrati di due spazi
 
-Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi, niente librerie esterne); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README e testi.
-Da 3 a 8 task, in ordine di esecuzione. Il primo crea qualcosa che funziona già; i successivi aggiungono una cosa alla volta.
+Tipi: [pagina] per pagine web e giochi nel browser (index.html con CSS e JS inclusi; niente librerie esterne, tranne quando serve una cosa che il browser non fa ovunque, come leggere i codici a barre dalla fotocamera: allora una libreria vera, es. @zxing/browser, installata con npm install e inclusa da node_modules); [codice] per script e logica, con i test automatici (Python unittest in tests/test_*.py, JavaScript node:test in tests/*.test.js); [lettura] per analizzare file, log o dati esistenti; [testo] per README, capitoli, articoli e testi.
+Quanti task: un progetto piccolo (una pagina web, uno script, un testo breve, un'analisi) è UN SOLO task, completo: chi lo esegue lavora come in una chat e lo finisce da solo. Un progetto più grande va in 3-8 tappe vere, in ordine di esecuzione, ognuna con un risultato che si può verificare: la prima crea qualcosa che funziona già, le successive aggiungono una cosa alla volta. Non spezzare in task separati cose che stanno in un file solo.
+Se il progetto è soprattutto testo (libro, guida, raccolta di articoli): un task [testo] per ogni capitolo o file, anche più di 8 task. Chi esegue un task scrive al massimo circa 4000 parole: dividi il testo in file e task di questa misura. In ogni task di testo indica il file e la lunghezza come «almeno N parole» (1 pagina = 250 parole): LocalAI conta le parole e rimanda indietro i file troppo corti. Lo script che assembla il libro (PDF o altro) prende solo i file del libro, nell'ordine giusto (es. introduzione.md e cap_*.md), non il piano, il README o gli appunti.
+Strumenti che chi esegue i task ha già, senza installare niente: html_to_pdf (stampa una pagina HTML in PDF con il browser, CSS di stampa compreso) e html_to_word (HTML → documento Word). Preferiscili alle librerie da installare. Per libri, guide e documenti impaginati in PDF: un task [pagina] che crea book.html dai file del testo (copertina, indice con link ai capitoli, CSS di stampa con @page per formato e margini, break-before: page all'inizio di ogni capitolo) e lo converte con html_to_pdf; niente librerie PDF come fpdf o reportlab, che costringono a calcolare a mano righe e pagine (libro mindfulness 2026-10-12: un'ora di tentativi falliti con fpdf2).
+Se l'obiettivo dà una lunghezza totale (pagine o parole), la somma degli «almeno N parole» dei task deve raggiungerla: per esempio 125 pagine = circa 31000 parole = 11-12 task da 2500-3000 parole. Non ridurre il progetto e non tralasciare nessuna parte chiesta dall'obiettivo (copertina, PDF, esercizi…): ognuna ha il suo task.
+Lingua: il piano è in italiano, ma se l'obiettivo chiede il risultato in un'altra lingua (es. «libro in inglese») scrivilo nelle Regole, come prima regola, e ripetilo nei task che producono testo.
 
 Prima dei task, dopo l'obiettivo, scrivi una sezione «# Regole» con le regole concrete che il risultato deve rispettare, una per riga di elenco: chi esegue i task non può chiedere. Se l'obiettivo è il clone di un gioco o di un programma noto, elenca le sue meccaniche essenziali come nell'originale (es. per Space Invaders: alieni in formazione a griglia che si muove in blocco di lato, scende di un passo a ogni bordo e accelera quando ne restano pochi; gli alieni sparano; ripari che si consumano; si perde se la formazione arriva in basso). Usa numeri concreti dove servono (righe, colonne, velocità, vite).
 In ogni task aggiungi una riga rientrata «Fatto quando: …» con il comportamento da verificare (anche nei test).
 Dopo le regole scrivi «# Task» e poi l'elenco dei task.` },
-    { role: 'user', content: `Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
+    { role: 'user', content: `${notes ? `${notes}\n\n` : ''}${recipeFor(goal) ? `Ricetta per questo tipo di progetto (struttura che funziona con i modelli locali): ${recipeFor(goal)}\n\n` : ''}Obiettivo del progetto: ${String(goal).slice(0, 3000)}${files ? `\n\nFile già presenti nella cartella:\n${files}` : ''}` },
   ];
 }
 
@@ -322,6 +500,20 @@ export async function testCommand(user, p) {
     // i test aggiungono da soli la cartella del progetto a sys.path (vedi taskPrompt in runner.js)
     return dir === '.' ? 'python -m unittest discover -v' : `python -m unittest discover -v -s ${dir}`;
   }
+  return null;
+}
+
+/**
+ * Comando per i soli test scritti o modificati dal task (JavaScript con node --test, Python con unittest), oppure null
+ * se il task non ne ha toccati o sono misti. Libreria 2026-10-13: il task di books.js eseguiva tutta la suite, compreso
+ * un vecchio test che simulava la fotocamera, e il modello passava i tentativi a sistemare quello.
+ */
+export function taskTestCommand(files) {
+  const safe = (f) => /^[\w./-]+$/.test(f) && !f.includes('..');
+  const js = files.filter((f) => safe(f) && /(^|\/)(tests?\/[^/]+|[^/]*[._-]test)\.(c|m)?js$/.test(f));
+  const py = files.filter((f) => safe(f) && /(^|\/)tests?\/test_[^/]+\.py$/.test(f));
+  if (js.length && !py.length) return `node --test ${js.join(' ')}`;
+  if (py.length && !js.length) return `python -m unittest ${py.map((f) => f.replace(/\.py$/, '').replaceAll('/', '.')).join(' ')}`;
   return null;
 }
 

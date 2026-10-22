@@ -5,10 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-// Ollama finto: il modello dei task risponde «Fatto.» senza correggere niente (i test restano rossi);
+// Ollama finto: il modello dei task scrive un file a parte e risponde «Fatto.» senza correggere niente (i test restano rossi);
 // le richieste non in streaming sono quelle del consigliere e ricevono un consiglio numerato
 const advice = [];
 const turns = [];
+const writeCall = (n) => `${JSON.stringify({ message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'write_file', arguments: { path: `nota${n}.txt`, content: 'ok' } } }] }, done: false })}\n${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -24,7 +25,8 @@ const fake = http.createServer((req, res) => {
       return res.end(JSON.stringify({ message: { role: 'assistant', content: `## Cause\nconsiglio ${advice.length}: somma() restituisce una stringa\n## What to do\n1. return a + b\n## Avoid\nnon toccare i test` } }));
     }
     if (j.stream === false) return res.end(JSON.stringify({ message: { role: 'assistant', content: 'Titolo' } }));
-    turns.push(j);
+    // primo giro del turno: scrive un file (un task che non cambia niente si ferma prima dei test)
+    if (j.messages.at(-1)?.role === 'user') { turns.push(j); return res.end(writeCall(turns.length)); }
     res.end(`${JSON.stringify({ message: { role: 'assistant', content: 'Fatto.' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
   });
 });
@@ -100,4 +102,5 @@ test('task incastrato: dopo 2 verifiche fallite arrivano i consigli, finiscono i
   runner.setActive(p, false);
 });
 
-test.after(() => { fake.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
+// il database della memoria (aperto dai turni dei task) va chiuso; su Windows la cartella può restare bloccata ancora un po' (git delle versioni)
+test.after(async () => { fake.close(); (await import('../src/memory.js')).close(); try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {} });

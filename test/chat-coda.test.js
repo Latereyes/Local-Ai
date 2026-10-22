@@ -58,7 +58,8 @@ test('nota delle azioni inventata dal modello: tolta dalla risposta e dalla cron
   assert.doesNotMatch(msg.content, /Azioni eseguite/);
   assert.match(msg.content, /Nessuna azione eseguita in questo turno/);
   // il modello sa che la coda la avvia LocalAI; senza task in coda non parte, e lo si dice
-  assert.match(turn().messages.findLast((m) => m.role === 'user').content, /LocalAI avvia la coda alla fine/);
+  // (nel messaggio dell'utente: dopo il testo finto LocalAI può aggiungere un richiamo a usare gli strumenti)
+  assert.ok(turn().messages.some((m) => m.role === 'user' && /LocalAI avvia la coda alla fine/.test(m.content)));
   assert.match(msg.content, /Coda non avviata: Nessun task in coda/);
   assert.equal(p.active, false);
   // nel turno dopo il modello non rivede la nota finta come se fosse vera

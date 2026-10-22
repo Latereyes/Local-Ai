@@ -583,3 +583,20 @@ details.msg-auto pre { text-align: left; white-space: pre-wrap; font: inherit; f
 }
 .pj-head .btn:disabled { opacity: .45; cursor: default; }
 .pj-add textarea { font-family: inherit; font-size: 13.5px; }
+
+/* Memoria */
+.mem-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mem-row .spacer { flex: 1; }
+.mem-row.faint-note { margin: 6px 0 0; font-size: 12.5px; }
+.mem-row .btn.ghost { padding: 3px 8px; font-size: 12.5px; }
+.mem-add, .mem-note { display: flex; flex-direction: column; gap: 8px; }
+.mem-add textarea, .mem-note textarea, .mem-row select, .mem-filters input {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; outline: none;
+}
+.mem-add textarea, .mem-note textarea { width: 100%; resize: vertical; box-sizing: border-box; }
+.mem-add textarea:focus, .mem-note textarea:focus, .mem-filters input:focus { border-color: var(--accent); }
+.mem-filters input { flex: 1; min-width: 160px; }
+.mem-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; }
+.mem-note.off .mem-body { color: var(--muted); }
+.mem-note.mem-proposed { border-left: 3px solid var(--accent); }
+@media (max-width: 860px) { .mem-row select { flex: 1; min-width: 0; } }

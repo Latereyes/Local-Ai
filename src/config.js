@@ -24,11 +24,18 @@ export default {
       'qwen3.8-coder': 'Qwen Coder',
       'qwen3.8-aggressive': 'Qwen Aggressive',
       'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 'Gemma 26B',
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 'LFM2.5',
     },
     // Contesto per modello quando il Modelfile non lo fissa (misurato sul PC)
     ctx: {
-      // Gemma 26B non sta mai tutta in GPU (~11% su CPU): 64k ha la stessa velocità di 16k, oltre rallenta
-      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 65536,
+      // Gemma 26B non sta mai tutta in GPU: rimisurato il 2026-10-22 con Ollama 0.40.3, 32k ~78 tok/s, 64k 63, 128k 45
+      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 32768,
+      // LFM2.5 (2026-10-22): 64k 166 tok/s tutto in GPU, 128k 112 tok/s al 93% in GPU; oltre 131072 Ollama risponde 400
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 131072,
+    },
+    // Modelli che ragionano sempre (ignorano think: false): sotto questi token il ragionamento si mangia la risposta
+    minPredict: {
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 16384,
     },
   },
 
@@ -75,7 +82,9 @@ export default {
       code: env.TASK_MODEL_CODE || 'qwen3.8-coder:latest',
       page: env.TASK_MODEL_PAGE || 'qwen3.8-coder:latest',
       read: env.TASK_MODEL_READ || 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
-      chat: env.TASK_MODEL_CHAT || '',   // vuoto = modello predefinito (OLLAMA_MODEL)
+      // testi (capitoli, articoli): Gemma 26B scrive meglio di gemma4-12b ed è più veloce (~90 tok/s); con il 12B i capitoli
+      // del libro mindfulness uscivano corti e write_file arrivava senza percorso. TASK_MODEL_CHAT= (vuoto) = modello predefinito
+      chat: env.TASK_MODEL_CHAT ?? 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
     },
     // Tentativi per task: dopo un test fallito il modello riceve l'errore e corregge, fino a questo numero di giri
     maxAttempts: Number(env.TASK_MAX_ATTEMPTS || 3),
@@ -111,6 +120,24 @@ export default {
     describeModel: env.DESCRIBE_MODEL ?? 'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS',
   },
 
+  // Memoria: note scritte dall'utente (preferenze, fatti, procedure, correzioni) aggiunte al prompt quando servono
+  memory: {
+    // caratteri massimi di note per messaggio (il pacchetto si aggiunge solo se la ricerca trova note pertinenti)
+    packChars: Number(env.MEMORY_PACK_CHARS || 1500),
+    // note proposte dopo i task e a progetto chiuso (da confermare nella pagina Memoria); MEMORY_PROPOSE=0 le spegne
+    propose: env.MEMORY_PROPOSE !== '0',
+    // modello che legge il resoconto e propone le note (vuoto = quello per lettura e analisi, Gemma 26B)
+    proposeModel: env.MEMORY_PROPOSE_MODEL || '',
+  },
+
+  // Documenti lunghi (oltre ~30k token): li legge interi LFM2.5, 2–2,5× più veloce di Gemma 26B a quelle lunghezze,
+  // e scrive in una volta sintesi e riassunti delle sezioni. Sui testi brevi è 3–8× più lento: lì resta il riassunto
+  // a blocchi con il modello della chat. DOC_LONG_MODEL vuoto lo spegne.
+  documents: {
+    longModel: env.DOC_LONG_MODEL ?? 'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0',
+    longMinChars: Number(env.DOC_LONG_MIN_CHARS || 90000),
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',
@@ -130,6 +157,8 @@ export default {
     sessions: path.join(dataDir, 'sessions.json'),
     public: path.join(root, 'public'),
     projects: path.join(dataDir, 'projects'),
+    // Memoria (note dell'utente usate nelle risposte): un database SQLite
+    memory: path.join(dataDir, 'memory.sqlite'),
     workspace: env.WORKSPACE_DIR ? path.resolve(env.WORKSPACE_DIR) : path.join(root, 'workspace'),
   },
 };
