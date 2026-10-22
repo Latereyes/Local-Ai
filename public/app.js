@@ -1652,13 +1652,24 @@ const scopeOptions = (sel, all = false) => [...(all ? [['tutte', 'Tutti gli ambi
   .map(([v, l]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
 const typeOptions = (sel) => Object.entries(memState.data.types).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
+const PROPOSED = 'da confermare';
 function renderMemory() {
   const d = memState.data;
+  // note proposte dopo i task: Conferma (entra nel prompt), Modifica (salvare la conferma), Scarta (si elimina)
+  const proposed = (n) => memState.editing === n.id ? note(n) : `<div class="project mem-note mem-proposed" data-note="${n.id}">
+        <div class="mem-body">${esc(n.text)}</div>
+        <div class="mem-row faint-note"><span class="pj-pill on">${esc(d.types[n.type] || n.type)}</span><span class="pj-pill">${esc(scopeLabel(n.scope))}</span>
+          <span>#${n.id} · ${esc(n.source)} · ${when(n.createdAt)}</span>
+          <span class="spacer"></span>
+          <button class="btn primary" data-mem="confirm">Conferma</button>
+          <button class="btn ghost" data-mem="edit">Modifica</button>
+          <button class="btn ghost" data-mem="discard">Scarta</button></div>
+      </div>`;
   const note = (n) => memState.editing === n.id
     ? `<div class="project mem-note" data-note="${n.id}">
         <textarea class="mem-text" rows="3" maxlength="1000">${esc(n.text)}</textarea>
         <div class="mem-row"><select class="mem-type">${typeOptions(n.type)}</select><select class="mem-scope">${scopeOptions(n.scope)}</select>
-        <span class="spacer"></span><button class="btn" data-mem="cancel">Annulla</button><button class="btn primary" data-mem="save">Salva</button></div>
+        <span class="spacer"></span><button class="btn" data-mem="cancel">Annulla</button><button class="btn primary" data-mem="save">${n.status === PROPOSED ? 'Salva e conferma' : 'Salva'}</button></div>
       </div>`
     : `<div class="project mem-note${n.status === 'archiviata' ? ' off' : ''}" data-note="${n.id}">
         <div class="mem-body">${esc(n.text)}</div>
@@ -1670,24 +1681,29 @@ function renderMemory() {
           <button class="btn ghost" data-mem="delete">Elimina</button></div>
       </div>`;
   const filtered = memState.q || memState.scope !== 'tutte' || memState.status;
+  const notes = memState.status === PROPOSED ? d.notes : d.notes.filter((n) => n.status !== PROPOSED);
+  const pending = memState.status === PROPOSED ? [] : d.proposed || [];
   el.memory.innerHTML = `<div class="pj-head"><h2>Memoria</h2></div>
     <p class="faint-note" style="margin:0">Note che l'assistente usa quando c'entrano con la domanda: preferenze, fatti, procedure e correzioni. A ogni messaggio si cercano le note pertinenti (per parole chiave) e se ne aggiungono poche al prompt, con il numero della nota. Le note di un progetto valgono solo nelle chat, nei task e nel piano di quel progetto. Chiavi, password e token vengono tolti prima di salvare.</p>
     <label class="pj-check-opt"><input type="checkbox" id="mem-enabled" ${d.enabled ? 'checked' : ''}> Usa la memoria nelle risposte${d.enabled ? '' : ' <b>(spenta: le note restano salvate ma non vengono usate)</b>'}</label>
+    ${pending.length ? `<section class="pj-card"><h3 style="margin:0 0 4px">Note proposte da confermare (${pending.length})</h3>
+      <p class="faint-note" style="margin:0 0 8px">Le ha proposte un modello locale dopo i task dei progetti (errori, correzioni, cose che hanno funzionato). Non vengono usate finché non le confermi.</p>
+      ${pending.map(proposed).join('')}</section>` : ''}
     <section class="pj-card mem-add">
       <textarea id="mem-new" rows="2" maxlength="1000" placeholder="Nuova nota, es. «Preferisco risposte brevi con un esempio» oppure «Il NAS di casa è su 192.168.1.20»"></textarea>
       <div class="mem-row"><select id="mem-new-type">${typeOptions('preferenza')}</select><select id="mem-new-scope">${scopeOptions('')}</select><span class="spacer"></span><button class="btn primary" data-mem="add">Aggiungi</button></div>
     </section>
     <div class="mem-row mem-filters"><input id="mem-q" type="search" placeholder="Cerca nelle note" value="${esc(memState.q)}">
       <select id="mem-f-scope">${scopeOptions(memState.scope, true)}</select>
-      <select id="mem-f-status">${[['', 'Attive e disattivate'], ['attiva', 'Solo attive'], ['archiviata', 'Solo disattivate']].map(([v, l]) => `<option value="${v}" ${v === memState.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    ${d.notes.length ? d.notes.map(note).join('') : `<div class="empty">${filtered ? 'Nessuna nota trovata.' : 'Ancora nessuna nota. Scrivine una qui sopra: per esempio come preferisci le risposte o un fatto da ricordare.'}</div>`}`;
+      <select id="mem-f-status">${[['', 'Attive e disattivate'], ['attiva', 'Solo attive'], ['archiviata', 'Solo disattivate'], [PROPOSED, 'Da confermare']].map(([v, l]) => `<option value="${v}" ${v === memState.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${notes.length ? notes.map((n) => (n.status === PROPOSED ? proposed(n) : note(n))).join('') : `<div class="empty">${filtered ? 'Nessuna nota trovata.' : 'Ancora nessuna nota. Scrivine una qui sopra: per esempio come preferisci le risposte o un fatto da ricordare.'}</div>`}`;
 }
 el.memory.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-mem]');
   if (!b) return;
   const card = b.closest('[data-note]');
   const id = card ? Number(card.dataset.note) : null;
-  const n = id && memState.data.notes.find((x) => x.id === id);
+  const n = id && [...memState.data.notes, ...(memState.data.proposed || [])].find((x) => x.id === id);
   const warn = (out) => { if (out.removed) alert(`Tolti dalla nota ${out.removed} ${out.removed === 1 ? 'dato segreto' : 'dati segreti'} (chiavi, password o token).`); };
   try {
     switch (b.dataset.mem) {
@@ -1700,9 +1716,11 @@ el.memory.addEventListener('click', async (e) => {
       case 'edit': memState.editing = id; return renderMemory();
       case 'cancel': memState.editing = null; return renderMemory();
       case 'save':
-        warn(await api(`/api/memory/${id}`, { method: 'PATCH', body: { text: $('.mem-text', card).value, type: $('.mem-type', card).value, scope: $('.mem-scope', card).value } }));
+        warn(await api(`/api/memory/${id}`, { method: 'PATCH', body: { text: $('.mem-text', card).value, type: $('.mem-type', card).value, scope: $('.mem-scope', card).value, ...(n?.status === PROPOSED ? { status: 'attiva' } : {}) } }));
         memState.editing = null;
         break;
+      case 'confirm': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: 'attiva' } }); break;
+      case 'discard': await api(`/api/memory/${id}`, { method: 'DELETE' }); break;
       case 'toggle': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: n.status === 'archiviata' ? 'attiva' : 'archiviata' } }); break;
       case 'delete':
         if (!confirm('Eliminare questa nota? Non si può annullare (per tenerla senza usarla, disattivala).')) return;

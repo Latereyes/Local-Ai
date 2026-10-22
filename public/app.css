@@ -598,4 +598,5 @@ details.msg-auto pre { text-align: left; white-space: pre-wrap; font: inherit; f
 .mem-filters input { flex: 1; min-width: 160px; }
 .mem-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; }
 .mem-note.off .mem-body { color: var(--muted); }
+.mem-note.mem-proposed { border-left: 3px solid var(--accent); }
 @media (max-width: 860px) { .mem-row select { flex: 1; min-width: 0; } }
