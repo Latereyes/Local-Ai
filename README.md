@@ -259,7 +259,8 @@ Dalla voce **Memoria** nella barra laterale si scrivono note brevi che l'assiste
 - Le note si cercano, modificano, disattivano (restano salvate ma non vengono usate) ed eliminano dalla pagina.
 - Chiavi API, token, password e credenziali negli URL vengono tolti prima di salvare (`[rimosso]`).
 - Interruttori: «Usa la memoria nelle risposte» nella pagina Memoria (per utente) e «Usa la memoria in questo progetto» nella sezione Verifica del progetto.
-- Per ora le note si scrivono solo a mano: niente raccolta automatica dalle chat. Il database è `data/memory.sqlite`.
+- **Note proposte**: alla fine di un task della coda da cui c'è qualcosa da imparare (verifica non passata, più tentativi, consigli, errori, messaggi scritti nella chat del progetto mentre lavorava) e quando la coda di un progetto finisce, LocalAI mette da parte un resoconto. Quando la GPU è libera e nessuna coda lavora, Gemma 26B lo legge e propone da 0 a 5 note brevi (preferenza, fatto, procedura o correzione, con ambito generale o del progetto e la fonte). Le note proposte compaiono in cima alla pagina Memoria: **Conferma**, **Modifica** (salvare la conferma) o **Scarta**. Finché non sono confermate non entrano nel prompt. Stesso filtro dei segreti; con la memoria spenta (per l'utente o per il progetto) niente resoconti e niente proposte. `MEMORY_PROPOSE=0` le spegne, `MEMORY_PROPOSE_MODEL` cambia il modello.
+- Le chat normali non vengono lette: le note da lì si scrivono a mano. Il database è `data/memory.sqlite` (note e resoconti in attesa).
 
 ## HTTPS con Tailscale (microfono e notifiche dal telefono)
 
@@ -293,6 +294,8 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni, progetti) |
 | `ASSISTANT_NAME` | `Gemma` |
 | `MEMORY_PACK_CHARS` | `1500` (caratteri massimi di note della memoria per messaggio) |
+| `MEMORY_PROPOSE` | `1` (note proposte dopo i task, da confermare; `0` le spegne) |
+| `MEMORY_PROPOSE_MODEL` | vuoto = Gemma 26B, il modello per lettura e analisi |
 
 ## Come funziona
 
@@ -385,6 +388,7 @@ src/
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
   memory.js          memoria: note dell'utente su SQLite, ricerca FTS5, filtro dei segreti, pacchetto per il prompt
+  proposte.js        memoria: resoconti dei task e note proposte da Gemma a GPU libera, da confermare
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
   workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
