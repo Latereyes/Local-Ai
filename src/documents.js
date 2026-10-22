@@ -98,28 +98,131 @@ function chunk(pages) {
   return out;
 }
 
+const norm = (n) => String(n || '').replace(/:latest$/, '');
+
+/**
+ * Modello per leggere intero un documento lungo (LFM2.5, config.documents.longModel), se è installato,
+ * se il documento supera longMinChars (~30k token: sotto è più lento del riassunto a blocchi)
+ * e se ci sta tutto nel suo contesto lasciando spazio alla risposta. Altrimenti null.
+ */
+export async function longModelFor(doc) {
+  const want = config.documents.longModel;
+  if (!want || (doc.chars || 0) < config.documents.longMinChars) return null;
+  const found = (await ollama.listModels().catch(() => [])).find((m) => norm(m.name) === norm(want));
+  if (!found) return null;
+  const room = await ollama.contextSize(found.name) - (config.ollama.minPredict[norm(want)] || 4096) - 4000;
+  return (doc.chars || 0) <= charsFor(room, found.name) ? found.name : null;
+}
+
+/**
+ * Legge i riassunti «[pp. a-b] …» della risposta del modello per i documenti lunghi: il testo di una sezione
+ * va fino al prossimo «[pp.», anche a capo (prova sul PC 2026-10-22: LFM2.5 mette l'intervallo su una riga e il testo sotto).
+ */
+export function parseSections(text, parts) {
+  const found = new Map();
+  const marks = [...String(text || '').matchAll(/^[ \t]*(?:[-*]|\d+[.)])?[ \t]*\**\[pp?\.\s*(\d+)\s*[-–]\s*(\d+)\]\**[ \t]*[:—–-]?/gm)];
+  marks.forEach((m, i) => {
+    const body = text.slice(m.index + m[0].length, marks[i + 1]?.index ?? text.length).replace(/\s+/g, ' ').trim();
+    if (body) found.set(`${m[1]}-${m[2]}`, body);
+  });
+  return parts.map((p) => ({ from: p.from, to: p.to, summary: found.get(`${p.from}-${p.to}`) || '' }));
+}
+
+// Intestazione «Sintesi» o «Sezioni» in qualunque forma: «## Sintesi», «**Sintesi**», «Sintesi:» (LFM2.5 usa il grassetto)
+const heading = (word) => new RegExp(`^[ \\t]*(?:#{1,4}[ \\t]*)?\\**[ \\t]*${word}\\b[^\\n*#:]{0,30}\\**[ \\t]*:?[ \\t]*\\**[ \\t]*$`, 'im');
+
+/** Divide la risposta del modello per i documenti lunghi in sintesi e sezioni. */
+export function splitWhole(out, parts) {
+  out = String(out || '');
+  const a = heading('Sintesi').exec(out);
+  const b = heading('Sezioni').exec(out);
+  const start = a ? a.index + a[0].length : 0;
+  const end = b && b.index >= start ? b.index : out.length;
+  // senza intestazione «Sintesi» vale il testo prima delle sezioni, solo se le sezioni ci sono
+  const summary = a || b ? out.slice(start, end).trim() : '';
+  return { summary, sections: parseSections(b ? out.slice(b.index + b[0].length) : out, parts) };
+}
+
+/**
+ * Documento lungo letto intero in una sola richiesta: sintesi generale e una riga per ogni sezione.
+ * Le sezioni sono le stesse del riassunto a blocchi (servono a trovare i passaggi pertinenti alle domande).
+ */
+async function digestWhole(doc, pages, parts, longModel) {
+  const ranges = parts.map((p) => `[pp. ${p.from}-${p.to}]`).join(' ');
+  const out = await ollama.complete({
+    model: longModel, timeout: 900000,
+    options: { temperature: 0.2, num_predict: 16384 + parts.length * 400 + 1600 },
+    messages: [
+      { role: 'system', content: 'Read the whole document and write, in Italian, two parts with exactly these headings.\n' +
+        '## Sintesi\nA complete and faithful summary of the document: what kind of document it is, general theme or plot, structure, main characters or subjects, developments in order, conclusion. Markdown with short subheadings, 450-800 words, with the pages of key passages in parentheses (pp. x-y).\n' +
+        '## Sezioni\nOne line for each page range listed by the user, in the same order, starting with the range exactly as written (e.g. "[pp. 1-6] ..."): 120-220 words of compact prose keeping names, places, dates, numbers, events and key passages in order. No introductions or comments.' },
+      { role: 'user', content: `Documento: "${doc.name}" (${pages.length} pagine)\nSezioni da riassumere: ${ranges}\n\n${withPageMarks(pages)}` },
+    ],
+  });
+  const whole = splitWhole(out, parts);
+  if (!whole.summary) console.warn(`[documenti] ${longModel} non ha scritto la sintesi di «${doc.name}» nel formato chiesto (${out.length} caratteri): riassunto a blocchi`);
+  return whole;
+}
+
 /**
  * Crea (una volta) riassunto generale e riassunti per sezione di un documento lungo.
+ * Con longModel (vedi longModelFor) il documento si legge intero in una richiesta; le sezioni che mancano
+ * nella risposta (o tutto, se la richiesta non riesce) si riassumono a blocchi con model.
  * onProgress(done, total) per mostrare l'avanzamento.
  */
-export async function digest(doc, { model, signal, onProgress = () => {} }) {
+export async function digest(doc, { model, longModel, signal, onProgress = () => {} }) {
   const pages = await loadPages(doc.textFile);
   const parts = chunk(pages);
+  if (longModel) {
+    onProgress(0, 1, { longModel });
+    const whole = await digestWhole(doc, pages, parts, longModel).catch((e) => {
+      console.warn(`[documenti] lettura intera di «${doc.name}» con ${longModel} non riuscita: ${e.message}`);
+      return null;
+    });
+    if (whole?.summary) {
+      const missing = whole.sections.filter((s) => !s.summary);
+      // se manca più di metà delle sezioni si rifanno tutte a blocchi, tenendo la sintesi del documento intero
+      if (missing.length <= parts.length / 2) {
+        for (const [i, s] of missing.entries()) {
+          if (signal?.aborted) throw new Error('Interrotto');
+          onProgress(i, missing.length, { longModel, missing: true });
+          s.summary = await summarizePart(doc, parts.find((p) => p.from === s.from), model);
+        }
+        return { summary: whole.summary, sections: whole.sections, language: guessLanguage(pages.join(' ')), digestModel: longModel };
+      }
+      const sections = await summarizeParts(doc, parts, model, signal, onProgress);
+      return { summary: whole.summary, sections, language: guessLanguage(pages.join(' ')), digestModel: longModel };
+    }
+  }
+  const sections = await summarizeParts(doc, parts, model, signal, onProgress);
+  return { ...(await reduce(doc, pages, sections, model, onProgress, parts.length)), sections, language: guessLanguage(pages.join(' ')) };
+}
+
+async function summarizePart(doc, part, model) {
+  const summary = await ollama.complete({
+    model, timeout: 180000,
+    options: { temperature: 0.2, num_predict: 450 },
+    messages: [
+      { role: 'system', content: 'Riassumi fedelmente, in italiano, la parte di documento fornita. Conserva nomi, luoghi, date, numeri, eventi e passaggi chiave nell\'ordine in cui avvengono. 120-220 parole, prosa compatta, senza introduzioni né commenti.' },
+      { role: 'user', content: `Documento: "${doc.name}" — pagine ${part.from}-${part.to}\n\n${part.text}` },
+    ],
+  });
+  return summary.trim();
+}
+
+async function summarizeParts(doc, parts, model, signal, onProgress) {
   const sections = [];
   for (const [i, part] of parts.entries()) {
     if (signal?.aborted) throw new Error('Interrotto');
     onProgress(i, parts.length + 1);
-    const summary = await ollama.complete({
-      model, timeout: 180000,
-      options: { temperature: 0.2, num_predict: 450 },
-      messages: [
-        { role: 'system', content: 'Riassumi fedelmente, in italiano, la parte di documento fornita. Conserva nomi, luoghi, date, numeri, eventi e passaggi chiave nell\'ordine in cui avvengono. 120-220 parole, prosa compatta, senza introduzioni né commenti.' },
-        { role: 'user', content: `Documento: "${doc.name}" — pagine ${part.from}-${part.to}\n\n${part.text}` },
-      ],
-    });
-    sections.push({ from: part.from, to: part.to, summary: summary.trim() });
+    sections.push({ from: part.from, to: part.to, summary: await summarizePart(doc, part, model) });
   }
-  onProgress(parts.length, parts.length + 1);
+  return sections;
+}
+
+/** Sintesi finale dai riassunti delle sezioni (riduzione a più livelli se sono troppi). */
+async function reduce(doc, pages, sections, model, onProgress, n) {
+  onProgress(n, n + 1);
   // riduzione (a più livelli se i riassunti parziali sono troppi): la sintesi finale deve stare nel contesto del modello
   const maxNotes = Math.min(45000, Math.floor(charsFor(await ollama.contextSize(model) - 2600, model) * 0.9));
   let notes = sections.map((s) => `[pp. ${s.from}-${s.to}] ${s.summary}`);
@@ -140,8 +243,8 @@ export async function digest(doc, { model, signal, onProgress = () => {} }) {
       { role: 'user', content: `Documento: "${doc.name}" (${pages.length} pagine)\n\n${notes.join('\n\n')}` },
     ],
   });
-  onProgress(parts.length + 1, parts.length + 1);
-  return { summary: overall.trim(), sections, language: guessLanguage(pages.join(' ')) };
+  onProgress(n + 1, n + 1);
+  return { summary: overall.trim() };
 }
 
 /**

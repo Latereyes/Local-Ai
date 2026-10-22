@@ -24,11 +24,18 @@ export default {
       'qwen3.8-coder': 'Qwen Coder',
       'qwen3.8-aggressive': 'Qwen Aggressive',
       'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 'Gemma 26B',
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 'LFM2.5',
     },
     // Contesto per modello quando il Modelfile non lo fissa (misurato sul PC)
     ctx: {
-      // Gemma 26B non sta mai tutta in GPU (~11% su CPU): 64k ha la stessa velocità di 16k, oltre rallenta
-      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 65536,
+      // Gemma 26B non sta mai tutta in GPU: rimisurato il 2026-10-22 con Ollama 0.40.3, 32k ~78 tok/s, 64k 63, 128k 45
+      'hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS': 32768,
+      // LFM2.5 (2026-10-22): 64k 166 tok/s tutto in GPU, 128k 112 tok/s al 93% in GPU; oltre 131072 Ollama risponde 400
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 131072,
+    },
+    // Modelli che ragionano sempre (ignorano think: false): sotto questi token il ragionamento si mangia la risposta
+    minPredict: {
+      'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0': 16384,
     },
   },
 
@@ -121,6 +128,14 @@ export default {
     propose: env.MEMORY_PROPOSE !== '0',
     // modello che legge il resoconto e propone le note (vuoto = quello per lettura e analisi, Gemma 26B)
     proposeModel: env.MEMORY_PROPOSE_MODEL || '',
+  },
+
+  // Documenti lunghi (oltre ~30k token): li legge interi LFM2.5, 2–2,5× più veloce di Gemma 26B a quelle lunghezze,
+  // e scrive in una volta sintesi e riassunti delle sezioni. Sui testi brevi è 3–8× più lento: lì resta il riassunto
+  // a blocchi con il modello della chat. DOC_LONG_MODEL vuoto lo spegne.
+  documents: {
+    longModel: env.DOC_LONG_MODEL ?? 'hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0',
+    longMinChars: Number(env.DOC_LONG_MIN_CHARS || 90000),
   },
 
   search: {
