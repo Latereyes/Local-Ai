@@ -976,19 +976,24 @@ async function prepareDocuments(conv, msg, question, model, signal, budget = doc
   const inline = Math.min(documents.INLINE_LIMIT, budget - 500);
   for (const d of docs) {
     if (d.chars <= inline || d.summary) continue;
-    const step = { id: store.newId(), type: 'document', title: d.name, status: 'running', text: 'Documento lungo: preparo il riassunto delle sezioni…', startedAt: Date.now() };
+    // oltre ~30k token il documento lo legge intero LFM2.5, se è installato (config.documents)
+    const longModel = await documents.longModelFor(d);
+    const longLabel = longModel && (config.ollama.labels[longModel.replace(/:latest$/, '')] || longModel);
+    const step = { id: store.newId(), type: 'document', title: d.name, status: 'running', text: longModel ? `Documento lungo: lo legge intero ${longLabel}…` : 'Documento lungo: preparo il riassunto delle sezioni…', startedAt: Date.now() };
     msg.steps.push(step);
     emitStep(step);
     const dg = await documents.digest(d, {
-      model, signal,
-      onProgress: (i, n) => {
-        step.text = i < n - 1 ? `Documento lungo (${d.pages} pagine): riassunto della sezione ${i + 1} di ${n - 1}…` : 'Sintesi finale…';
+      model, longModel, signal,
+      onProgress: (i, n, info) => {
+        step.text = info?.missing ? `Documento lungo: riassunto delle sezioni mancanti, ${i + 1} di ${n}…`
+          : info?.longModel ? `Documento lungo (${d.pages} pagine): lo legge intero ${longLabel}…`
+          : i < n - 1 ? `Documento lungo (${d.pages} pagine): riassunto della sezione ${i + 1} di ${n - 1}…` : 'Sintesi finale…';
         emitStep(step);
       },
     });
     Object.assign(d, dg);
     step.status = 'done';
-    step.text = `Riassunto creato: ${dg.sections.length} sezioni (resta salvato per le prossime domande)`;
+    step.text = `Riassunto creato${dg.digestModel ? ` da ${longLabel}, documento letto intero` : ''}: ${dg.sections.length} sezioni (resta salvato per le prossime domande)`;
     step.finishedAt = Date.now();
     emitStep(step);
     store.save(conv, { touch: false });
