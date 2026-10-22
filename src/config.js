@@ -117,6 +117,10 @@ export default {
   memory: {
     // caratteri massimi di note per messaggio (il pacchetto si aggiunge solo se la ricerca trova note pertinenti)
     packChars: Number(env.MEMORY_PACK_CHARS || 1500),
+    // note proposte dopo i task e a progetto chiuso (da confermare nella pagina Memoria); MEMORY_PROPOSE=0 le spegne
+    propose: env.MEMORY_PROPOSE !== '0',
+    // modello che legge il resoconto e propone le note (vuoto = quello per lettura e analisi, Gemma 26B)
+    proposeModel: env.MEMORY_PROPOSE_MODEL || '',
   },
 
   search: {

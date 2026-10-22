@@ -12,6 +12,8 @@ import { tokens } from './documents.js';
  * - Al prompt si aggiunge un pacchetto di poche note pertinenti (al massimo config.memory.packChars caratteri),
  *   solo se la ricerca trova qualcosa.
  * - Prima di salvare si tolgono chiavi, password e token.
+ * Passo 2 (src/proposte.js): dopo i task della coda Gemma 26B propone note «da confermare», che non entrano nel prompt
+ * finché l'utente non le conferma nella pagina Memoria. I resoconti in attesa del modello stanno nella tabella jobs.
  */
 
 export const TYPES = {
@@ -20,7 +22,8 @@ export const TYPES = {
   procedura: 'Procedura',
   correzione: 'Correzione',
 };
-export const STATUSES = ['attiva', 'archiviata'];
+export const PROPOSED = 'da confermare';
+export const STATUSES = ['attiva', 'archiviata', PROPOSED];
 export const MAX_TEXT = 1000;
 
 export class MemoryError extends Error { constructor(m) { super(m); this.status = 400; } }
@@ -58,6 +61,16 @@ function open() {
       INSERT INTO notes_fts(rowid, text) VALUES (new.id, new.text);
     END;
     CREATE TABLE IF NOT EXISTS settings (owner TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE IF NOT EXISTS jobs (
+      id INTEGER PRIMARY KEY,
+      owner TEXT NOT NULL,
+      ref TEXT NOT NULL,
+      project TEXT NOT NULL DEFAULT '',
+      report TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      tries INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(owner, ref)
+    );
   `);
   return db;
 }
@@ -210,6 +223,25 @@ export function setEnabled(owner, on) {
   open().prepare('INSERT INTO settings (owner, enabled) VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET enabled = excluded.enabled').run(owner, on ? 1 : 0);
   return !!on;
 }
+
+// ---------------- Resoconti per le note proposte ----------------
+/**
+ * Mette in fila il resoconto di un task o di un progetto (oggetto JSON, segreti tolti) per le note proposte.
+ * ref identifica il fatto (es. «task:<id>:<tentativi>»): lo stesso fatto non si mette in fila due volte.
+ */
+export function addJob(owner, { ref, project = '', report }) {
+  const text = redact(JSON.stringify(report)).text;
+  return open().prepare('INSERT OR IGNORE INTO jobs (owner, ref, project, report, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(owner, String(ref), String(project || ''), text, Date.now()).changes > 0;
+}
+/** Il resoconto più vecchio con meno di maxTries tentativi, o null. */
+export function nextJob(maxTries = 3) {
+  const r = open().prepare('SELECT * FROM jobs WHERE tries < ? ORDER BY created_at, id LIMIT 1').get(maxTries);
+  return r ? { id: Number(r.id), owner: r.owner, ref: r.ref, project: r.project, report: JSON.parse(r.report), tries: Number(r.tries) } : null;
+}
+export function jobDone(id) { open().prepare('DELETE FROM jobs WHERE id = ?').run(Number(id)); }
+export function jobFailed(id) { open().prepare('UPDATE jobs SET tries = tries + 1 WHERE id = ?').run(Number(id)); }
+export function jobCount() { return Number(open().prepare('SELECT COUNT(*) AS n FROM jobs WHERE tries < 3').get().n); }
 
 // ---------------- Pacchetto per il prompt ----------------
 const day = (t) => new Date(t).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
