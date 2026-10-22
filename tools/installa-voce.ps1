@@ -35,7 +35,9 @@ if (-not (Test-Path $py)) {
 
 Write-Host "`n>> Librerie: faster-whisper, piper-tts" -ForegroundColor Cyan
 & $py -m pip install --upgrade --quiet pip
-& $py -m pip install --upgrade "faster-whisper>=1.2" "piper-tts>=1.3"
+# PyAV 19 toglie un argomento che faster-whisper 1.2.1 usa (prova sul PC 2026-10-22: /stt falliva con
+# «unexpected keyword argument 'metadata_errors'»); solo pacchetti già compilati, dai sorgenti non si installa
+& $py -m pip install --upgrade --only-binary av "faster-whisper>=1.2" "piper-tts>=1.3" "av>=11,<15"
 if ($LASTEXITCODE -ne 0) { Write-Error "Installazione delle librerie non riuscita"; exit 1 }
 if ($Gpu) {
   Write-Host "`n>> Librerie CUDA 12 per Whisper sulla GPU (cuBLAS, cuDNN 9)" -ForegroundColor Cyan

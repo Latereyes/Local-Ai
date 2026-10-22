@@ -83,7 +83,7 @@ Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stabl
 
 Con il tasto **voce** (le barrette, nel composer) parli con l'assistente come al telefono: dici una frase, quando smetti di parlare viene trascritta e mandata in chat, e la risposta viene letta ad alta voce **frase per frase mentre Gemma la scrive**. Poi ti riascolta da solo. Tutto resta sul PC.
 
-- **Riconoscimento vocale**: faster-whisper con `large-v3-turbo`. Va sulla GPU se ci sono almeno 2,5 GB liberi (con Gemma 12B di solito sì), altrimenti sulla CPU. Sulla GPU lascia la memoria dopo 10 minuti senza usarla, e subito prima di ogni lavoro di ComfyUI (foto, video, musica).
+- **Riconoscimento vocale**: faster-whisper con `large-v3-turbo`. Va sulla GPU se ci sono almeno 2,5 GB liberi (con Gemma 12B di solito sì), altrimenti sulla CPU. Misurato sul PC il 2026-10-22 con una frase di 5 s: 0,2 s sulla GPU (1,3 GB di VRAM), 5 s sulla CPU. La voce di Piper: 0,15 s a frase. Sulla GPU lascia la memoria dopo 10 minuti senza usarla, e subito prima di ogni lavoro di ComfyUI (foto, video, musica).
 - **Sintesi vocale**: Piper, voci italiane Paola e Riccardo, sulla CPU (pochi decimi di secondo a frase). Si sceglie la voce dal pannello.
 - In modalità voce Gemma risponde breve e senza Markdown. Il codice e le tabelle li vedi comunque sullo schermo: a voce dice solo «codice sullo schermo».
 - **Interrompere**: tocca il cerchio. Con «Interrompi parlando» basta parlare sopra la risposta. Con gli altoparlanti l'eco può interromperla da sola, quindi conviene usarlo con le cuffie.
