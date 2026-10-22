@@ -77,12 +77,13 @@ test('parseProposals: JSON anche con testo intorno, tipi e ambiti controllati, a
 test('resoconto del task: esito, verifiche e messaggi dell\'utente scritti mentre lavorava (non quelli automatici)', async () => {
   const p = await projects.create(owner, 'Resoconto');
   const task = failedTask();
-  task.createdAt = Date.now() - 1000;
+  task.createdAt = Date.now() - 120000;
+  task.startedAt = Date.now() - 1000;
   const chatConv = store.create(owner.id);
   chatConv.messages.push(
     { role: 'user', content: 'Usa unittest, non pytest', createdAt: Date.now() },
     { role: 'user', content: '[Queue coordinator — automatic message]', auto: true, createdAt: Date.now() },
-    { role: 'user', content: 'Messaggio di prima del task', createdAt: task.createdAt - 60000 },
+    { role: 'user', content: 'Messaggio di quando il task era ancora in coda', createdAt: task.createdAt + 1000 },
   );
   p.chats = [chatConv.id];
   const r = proposte.taskReport(p, task);

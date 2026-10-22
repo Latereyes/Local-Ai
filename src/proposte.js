@@ -43,7 +43,8 @@ export function userMessages(p, from = 0, to = Infinity, max = 8) {
 
 /** Resoconto di un task finito: esito, verifiche, errori, consigli e messaggi dell'utente. */
 export function taskReport(p, task) {
-  const chats = userMessages(p, task.createdAt || 0, task.finishedAt || Date.now());
+  // dall'ultimo avvio del task (in coda può restare a lungo, e i messaggi di prima riguardano altro)
+  const chats = userMessages(p, task.startedAt || task.createdAt || 0, task.finishedAt || Date.now());
   return {
     kind: 'task',
     project: { id: p.id, name: p.name },
@@ -126,7 +127,8 @@ Good notes are durable and reusable:
 - correzione: something the user corrected (what was wrong and what is right)
 - procedura: a way to solve a problem that worked here and will recur (e.g. which library or command works on this PC)
 - fatto: a stable fact about the user's environment or project (paths, servers, libraries installed or missing)
-Do NOT propose: progress of this task, what was done, generic programming advice, guesses not supported by the report, anything already in the known notes, secrets.
+The user's own messages are the best evidence: preferences and corrections come from what the user wrote. A requirement the user stated for this project that future tasks must keep (how something must look, behave or feel) is a good "progetto" note.
+Do NOT propose: progress of this task or what was done; how the project's code works (functions, files, fixes: that is already in the project files); temporary problems that were solved (a library that was missing and got installed) unless the user stated it as a rule; generic programming advice; guesses not supported by the report; anything already in the known notes; secrets.
 Each note: one sentence in Italian, at most 200 characters, self-contained (name the project, library or file it is about).
 scope: "progetto" if it only matters for this project, "generale" if it matters for any work with this user.
 Answer only with JSON: {"notes":[{"text":"...","type":"preferenza|fatto|procedura|correzione","scope":"progetto|generale","why":"short reason, the evidence in the report"}]}. With nothing worth remembering: {"notes":[]}.` },
