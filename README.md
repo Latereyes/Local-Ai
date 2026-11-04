@@ -97,18 +97,18 @@ LocalAI trasforma scansioni e foto di documenti in **PDF ricercabili**: la pagin
 
 - **Allegati in chat**: un PDF senza testo viene convertito al caricamento (qualche secondo a pagina).
 - **Modalità Computer**: chiedi «fai l'OCR della cartella documenti». Lo strumento `ocr_to_pdf` lavora su un file o su una cartella intera, sottocartelle comprese, e scrive i risultati nella sottocartella `OCR`. Gli originali non vengono mai toccati. Alla fine l'assistente dice quali file sono stati convertiti e quali no.
-- Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
+- Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages --rasterizer pypdfium`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
 
 Installazione (una volta sola, su Windows):
 
 ```powershell
-winget install UB-Mannheim.TesseractOCR     # durante l'installazione aggiungi la lingua italiana
-winget install ArtifexSoftware.GhostScript
+winget install UB-Mannheim.TesseractOCR
 py -m venv C:\AI\ocr\venv
-C:\AI\ocr\venv\Scripts\pip install ocrmypdf
+C:\AI\ocr\venv\Scripts\pip install ocrmypdf img2pdf pypdf
+# lingue: ita.traineddata, eng.traineddata e osd.traineddata (tessdata_best) in C:\AI\ocr\tessdata
 ```
 
-LocalAI cerca `ocrmypdf` in `OCRMYPDF`, poi in `C:\AI\ocr\venv\Scripts\ocrmypdf.exe`, poi nel PATH. Tesseract e Ghostscript non serve metterli nel PATH: LocalAI li cerca nelle cartelle standard di installazione.
+LocalAI cerca `ocrmypdf` in `OCRMYPDF`, poi in `C:\AI\ocr\venv\Scripts\ocrmypdf.exe`, poi nel PATH. Tesseract non serve metterlo nel PATH: LocalAI lo cerca in `C:\Program Files\Tesseract-OCR` e usa le lingue di `C:\AI\ocr\tessdata` se la cartella c'è. Ghostscript non serve: le pagine si leggono con pypdfium.
 
 | Variabile | Default |
 |---|---|

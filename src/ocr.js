@@ -42,7 +42,8 @@ export function findOcrmypdf({ refresh = false } = {}) {
  * image: l'ingresso è una foto/scansione (jpg, png, tif) invece di un PDF; dpi serve se il file non lo dice.
  */
 export function ocrArgs(input, output, { lang = OCR_LANG, image = false, dpi = 0, rotate = true } = {}) {
-  const args = ['-l', lang, '--output-type', 'pdf', '--optimize', '0'];
+  // pypdfium al posto di Ghostscript, che su winget non c'è (prova sul PC 2026-11-04: 16 file di Carla senza Ghostscript)
+  const args = ['-l', lang, '--output-type', 'pdf', '--optimize', '0', '--rasterizer', 'pypdfium'];
   // le pagine che hanno già testo restano come sono (--force-ocr le trasformerebbe in immagini)
   if (!image) args.push('--skip-text');
   if (rotate) args.push('--rotate-pages');
@@ -78,6 +79,8 @@ export function ocrEnv(env = process.env) {
     const gs = path.join(b, 'gs');
     try { for (const v of fs.readdirSync(gs).sort().reverse()) extra.push(path.join(gs, v, 'bin')); } catch {}
   }
+  // lingua italiana tessdata_best in C:\AI\ocr\tessdata (così non si scrive in Program Files)
+  if (!env.TESSDATA_PREFIX && fs.existsSync('C:\\AI\\ocr\\tessdata')) env = { ...env, TESSDATA_PREFIX: 'C:\\AI\\ocr\\tessdata' };
   const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
   const have = String(env[key] || '').toLowerCase().split(';');
   const add = extra.filter((d) => fs.existsSync(d) && !have.includes(d.toLowerCase()));
