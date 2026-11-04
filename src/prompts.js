@@ -35,6 +35,7 @@ ${documents ? `
 - Riassunti e analisi: sii fedele al documento, non aggiungere fatti che non contiene. Dai una struttura chiara (di che documento si tratta, punti chiave, dettagli importanti, conclusioni) e cita le pagine dei dati importanti, es. (p. 3).
 - Tieni separate tre cose e dillo quando le mescoli: cosa dice il documento, tue conoscenze o valutazioni, informazioni trovate sul web.
 - Se una risposta non è nei passaggi che hai ricevuto, dillo chiaramente invece di inventare; per un documento lungo l'informazione può trovarsi in parti non incluse: suggerisci una domanda più specifica (personaggio, capitolo, argomento).
+- Unire più PDF, renderli ricercabili (OCR) o ridurne il peso: usa pdf_tools (anche più operazioni in una chiamata). Il file nuovo compare sotto la tua risposta con il link per scaricarlo: di' in una frase cosa hai fatto (pagine, peso prima e dopo) senza scrivere link.
 - Nelle conversazioni successive il documento resta disponibile: usalo come contesto per tutte le domande che lo riguardano.
 - Referti e documenti medici: per ogni valore indica il risultato e l'intervallo di riferimento riportato nel referto, evidenzia con chiarezza e senza allarmismo quelli fuori intervallo e spiega in parole semplici cosa misura ciascun esame. Non fare diagnosi e non suggerire terapie: ricorda che l'interpretazione spetta al medico, che conosce la storia clinica.
 - Verifiche sul web di un documento: controlla i fatti verificabili (orari, prezzi, indirizzi, regole, eventi, dati pubblici) e confrontali con il documento, segnalando conferme, differenze e informazioni non verificabili. Non inserire MAI nelle ricerche dati personali presenti nel documento (nomi di persone private, codici, numeri di prenotazione, dati sanitari): cerca solo termini generici.
@@ -271,6 +272,27 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
+/**
+ * Strumento sui PDF allegati alla conversazione: unione, OCR, riduzione del peso (anche insieme).
+ * docs: [{ name, pages }] nell'ordine in cui sono stati allegati.
+ */
+export function pdfTool(docs) {
+  return { type: 'function', function: {
+    name: 'pdf_tools',
+    description: 'Lavora sui PDF allegati dall\'utente e crea un PDF nuovo da scaricare (gli originali restano come sono). '
+      + 'Operazioni, anche insieme: merge = unisce più PDF in uno; ocr = rende ricercabile il testo delle scansioni lasciando la pagina identica (loghi, firme, timbri); '
+      + 'compress = riduce il peso (immagini a 200 dpi, JPEG qualità 75: circa -60% sulle scansioni, firme e loghi senza differenze visibili). '
+      + 'Usalo solo quando l\'utente chiede di unire, fare l\'OCR o comprimere/ridurre il peso dei PDF.',
+    parameters: { type: 'object', properties: {
+      operations: { type: 'array', items: { type: 'string', enum: ['merge', 'ocr', 'compress'] }, description: 'Operazioni da fare. Vengono eseguite sempre in quest\'ordine: merge, ocr, compress.' },
+      documents: { type: 'array', items: { type: 'integer', minimum: 1, maximum: docs.length },
+        description: 'Quali PDF, nell\'ordine voluto (per merge è l\'ordine delle pagine). Default: tutti, nell\'ordine in cui sono stati allegati. '
+          + docs.map((d, i) => `${i + 1} = ${d.name} (${d.pages} pag.)`).join(' | ') },
+      name: { type: 'string', description: 'Nome del file unito, senza .pdf (solo con merge). Default: «documenti uniti».' },
+    }, required: ['operations'] },
+  } };
+}
+
 export function computerTools({ canRun = false, images = [], project = false, projectChat = false, folders = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
@@ -320,6 +342,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    fn('ocr_to_pdf', 'OCR di scansioni: crea PDF ricercabili (testo selezionabile e cercabile) da PDF scansionati o immagini (jpg, png, tif), lasciando la pagina identica all\'originale con loghi, firme e timbri. Accetta un file o una cartella intera (anche le sottocartelle). Gli originali non vengono toccati: i risultati vanno nella sottocartella OCR.', {
+      path: p('File o cartella da convertire, es. documenti/fattura.pdf oppure documenti'),
+      output_path: p('Facoltativo: file .pdf (per un file) o cartella (per una cartella) dove scrivere i risultati. Default: sottocartella OCR.'),
+    }, ['path']),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },
@@ -369,6 +395,7 @@ ${folder ? `- In questa conversazione stai lavorando nella cartella ${folder}/: 
 - Nella cronologia le tue scritture precedenti compaiono accorciate («omessi N caratteri…»): è una nota di LocalAI, non contenuto. Non copiarla mai in un file: LocalAI la rifiuta. Se ti serve il contenuto, rileggilo con read_file.
 - Se un file risulta vuoto, troncato o rovinato, rimetti la versione precedente con restore_file invece di riscriverlo a memoria.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
+- Scansioni da rendere ricercabili («fai l'OCR», «rendi cercabile il testo», «converti in OCR»): usa ocr_to_pdf sul file o sulla cartella, poi elenca all'utente quali file sono stati convertiti e quali no (con il motivo). Non riscrivere a mano il testo di una scansione.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
 ${hasAudio() ? `- Musica ed effetti sonori (giochi, siti, presentazioni): crea i file con create_audio_file, uno per suono (es. audio/musica.mp3, audio/riga.mp3, audio/game-over.mp3), e nello stesso turno scrivi il codice che li usa con percorsi relativi (in JavaScript: new Audio('audio/riga.mp3'); la musica di sottofondo con loop = true e volume più basso, avviata al primo tasto o tocco perché i browser bloccano l'audio prima di un'interazione). I file vengono generati alla fine del turno, circa mezzo minuto ciascuno: crea solo quelli che servono.

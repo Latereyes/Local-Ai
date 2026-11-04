@@ -14,6 +14,7 @@ import { gpu } from './src/gpu.js';
 import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
+import { ocrBuffer } from './src/ocr.js';
 import { checkMelody } from './src/melody.js';
 import * as snapshots from './src/snapshots.js';
 import * as workspace from './src/workspace.js';
@@ -434,7 +435,7 @@ async function saveMelody(req) {
 
 /** Salva un documento e ne estrae subito il testo (pagina per pagina). */
 async function saveDocument(req, ext) {
-  const buf = req.body;
+  let buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) throw httpError(400, 'File vuoto');
   if (ext === 'pdf' && buf.toString('ascii', 0, 5) !== '%PDF-') throw httpError(400, 'Il file non è un PDF valido');
   let name = 'documento';
@@ -446,10 +447,22 @@ async function saveDocument(req, ext) {
   const id = randomUUID();
   const base = `${req.user.id}/doc-${id}`;
   await fs.mkdir(path.join(config.paths.media, req.user.id), { recursive: true });
+  // PDF scansionato: OCR sul PC (ocrmypdf), così Gemma può leggerlo. Si tiene anche l'originale.
+  let ocr = false;
+  if (ext === 'pdf' && extracted.scanned) {
+    const searchable = await ocrBuffer(buf).catch(() => null);
+    const again = searchable && await extractText(searchable, 'x.pdf').catch(() => null);
+    if (again && !again.scanned) {
+      await fs.writeFile(path.join(config.paths.media, `${base}-originale.pdf`), buf);
+      buf = searchable;
+      extracted = again;
+      ocr = true;
+    }
+  }
   await fs.writeFile(path.join(config.paths.media, `${base}.${ext}`), buf);
-  await fs.writeFile(path.join(config.paths.media, `${base}.json`), JSON.stringify({ name, pages: extracted.pages }));
+  await fs.writeFile(path.join(config.paths.media, `${base}.json`), JSON.stringify({ name, pages: extracted.pages, ...(ocr ? { ocr } : {}) }));
   const chars = extracted.pages.reduce((n, p) => n + p.length, 0);
-  return { kind: 'document', file: `${base}.${ext}`, textFile: `${base}.json`, url: mediaUrl(`${base}.${ext}`), name, pages: extracted.pages.length, chars, scanned: extracted.scanned };
+  return { kind: 'document', file: `${base}.${ext}`, textFile: `${base}.json`, url: mediaUrl(`${base}.${ext}`), name, pages: extracted.pages.length, chars, scanned: extracted.scanned, ocr };
 }
 
 // ---- Media ----
