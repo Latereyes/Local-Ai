@@ -35,6 +35,7 @@ ${documents ? `
 - Riassunti e analisi: sii fedele al documento, non aggiungere fatti che non contiene. Dai una struttura chiara (di che documento si tratta, punti chiave, dettagli importanti, conclusioni) e cita le pagine dei dati importanti, es. (p. 3).
 - Tieni separate tre cose e dillo quando le mescoli: cosa dice il documento, tue conoscenze o valutazioni, informazioni trovate sul web.
 - Se una risposta non è nei passaggi che hai ricevuto, dillo chiaramente invece di inventare; per un documento lungo l'informazione può trovarsi in parti non incluse: suggerisci una domanda più specifica (personaggio, capitolo, argomento).
+- Unire più PDF, renderli ricercabili (OCR) o ridurne il peso: usa pdf_tools (anche più operazioni in una chiamata). Il file nuovo compare sotto la tua risposta con il link per scaricarlo: di' in una frase cosa hai fatto (pagine, peso prima e dopo) senza scrivere link.
 - Nelle conversazioni successive il documento resta disponibile: usalo come contesto per tutte le domande che lo riguardano.
 - Referti e documenti medici: per ogni valore indica il risultato e l'intervallo di riferimento riportato nel referto, evidenzia con chiarezza e senza allarmismo quelli fuori intervallo e spiega in parole semplici cosa misura ciascun esame. Non fare diagnosi e non suggerire terapie: ricorda che l'interpretazione spetta al medico, che conosce la storia clinica.
 - Verifiche sul web di un documento: controlla i fatti verificabili (orari, prezzi, indirizzi, regole, eventi, dati pubblici) e confrontali con il documento, segnalando conferme, differenze e informazioni non verificabili. Non inserire MAI nelle ricerche dati personali presenti nel documento (nomi di persone private, codici, numeri di prenotazione, dati sanitari): cerca solo termini generici.
@@ -271,6 +272,27 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
+/**
+ * Strumento sui PDF allegati alla conversazione: unione, OCR, riduzione del peso (anche insieme).
+ * docs: [{ name, pages }] nell'ordine in cui sono stati allegati.
+ */
+export function pdfTool(docs) {
+  return { type: 'function', function: {
+    name: 'pdf_tools',
+    description: 'Lavora sui PDF allegati dall\'utente e crea un PDF nuovo da scaricare (gli originali restano come sono). '
+      + 'Operazioni, anche insieme: merge = unisce più PDF in uno; ocr = rende ricercabile il testo delle scansioni lasciando la pagina identica (loghi, firme, timbri); '
+      + 'compress = riduce il peso (immagini a 200 dpi, JPEG qualità 75: circa -60% sulle scansioni, firme e loghi senza differenze visibili). '
+      + 'Usalo solo quando l\'utente chiede di unire, fare l\'OCR o comprimere/ridurre il peso dei PDF.',
+    parameters: { type: 'object', properties: {
+      operations: { type: 'array', items: { type: 'string', enum: ['merge', 'ocr', 'compress'] }, description: 'Operazioni da fare. Vengono eseguite sempre in quest\'ordine: merge, ocr, compress.' },
+      documents: { type: 'array', items: { type: 'integer', minimum: 1, maximum: docs.length },
+        description: 'Quali PDF, nell\'ordine voluto (per merge è l\'ordine delle pagine). Default: tutti, nell\'ordine in cui sono stati allegati. '
+          + docs.map((d, i) => `${i + 1} = ${d.name} (${d.pages} pag.)`).join(' | ') },
+      name: { type: 'string', description: 'Nome del file unito, senza .pdf (solo con merge). Default: «documenti uniti».' },
+    }, required: ['operations'] },
+  } };
+}
+
 export function computerTools({ canRun = false, images = [], project = false, projectChat = false, folders = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });

@@ -405,19 +405,27 @@ function renderSteps(node, m, live) {
   const searches = steps.filter((s) => s.type === 'search').length;
   const visions = steps.filter((s) => s.type === 'vision').length;
   const docSteps = steps.filter((s) => s.type === 'document');
+  const pdfSteps = steps.filter((s) => s.type === 'pdf');
   const parts = [];
+  if (pdfSteps.length) parts.push(pdfSteps.some((s) => s.status === 'error') ? 'PDF non riuscito' : 'PDF pronto');
   if (docSteps.length) parts.push('Documento consultato');
   if (visions) parts.push(visions === 1 ? 'Immagine analizzata' : `${visions} immagini analizzate`);
   if (searches) parts.push(`${searches} ${searches === 1 ? 'ricerca' : 'ricerche'}`);
   if (reads) parts.push(`${reads} ${reads === 1 ? 'pagina letta' : 'pagine lette'}`);
   $('.steps-title', box).textContent = running
-    ? (running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
+    ? (running.type === 'pdf' ? (running.text || 'Lavoro sui PDF…') : running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
     : parts.join(' · ');
-  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length ? 'doc' : 'eye', 14);
+  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length || pdfSteps.length ? 'doc' : 'eye', 14);
   box.classList.toggle('live', !!running);
-  if (box.dataset.auto !== 'off') box.open = live && !m.content;
+  // il PDF creato si scarica da qui: il riquadro resta aperto
+  if (box.dataset.auto !== 'off') box.open = (live && !m.content) || pdfSteps.some((s) => s.files?.length);
   $('.steps-list', box).innerHTML = steps.map((s) => {
     const state = s.status === 'running' ? '<span class="spin"></span>' : s.status === 'error' ? `<span class="step-err" title="${esc(s.error || '')}">non riuscita</span>` : '';
+    if (s.type === 'pdf') {
+      const what = (s.ops || []).map((o) => ({ merge: 'unione', ocr: 'OCR', compress: 'riduzione del peso' })[o] || o).join(' + ');
+      const files = (s.files || []).map((f) => `<a class="doc-chip" href="${esc(f.url)}" download="${esc(f.name)}">${icon('download', 16)}<span><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small></span></a>`).join('');
+      return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>PDF (${esc(what)}): <b>${esc(s.title || '')}</b> ${state}</div>${s.text && s.status === 'running' ? `<div class="faint">${esc(s.text)}</div>` : ''}${files ? `<div class="srcs">${files}</div>` : ''}</div></div>`;
+    }
     if (s.type === 'document') {
       return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>${s.status === 'running' ? 'Analisi' : 'Documento'}: <b>${esc(s.title || '')}</b> ${state}</div>${s.text ? `<div class="faint" style="white-space:pre-wrap">${esc(s.text)}</div>` : ''}</div></div>`;
     }

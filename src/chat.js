@@ -16,7 +16,8 @@ import { describeModel, describeWithOllama } from './vision.js';
 import { touchesFace } from './faces.js';
 import { planSegments, secondsFrom, partLine, continuePrompt, addParts, PART } from './videochain.js';
 import { workflows, getWorkflow, dimensions, dimensionsForRatio, frameCount, randomSeed, ASPECTS } from './workflows.js';
-import { systemPrompt, tools, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt, melodyFacts } from './prompts.js';
+import * as pdf from './pdf.js';
+import { systemPrompt, tools, pdfTool, computerTools, computerPrompt, promptEngineerSystem, promptEngineerUser, cleanPrompt, titlePrompt, searchRouterPrompt, melodyFacts } from './prompts.js';
 import { checkMelody } from './melody.js';
 import * as projects from './projects.js';
 import { checkPage } from './browser.js';
@@ -40,7 +41,7 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
 const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'ocr_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history', 'project_server']);
-const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
+const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS, 'pdf_tools']);
 const WRITE_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'restore_file', 'delete_file', 'save_chat_image', 'create_audio_file', 'html_to_word', 'html_to_pdf', 'ocr_to_pdf']);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
@@ -945,6 +946,49 @@ const parseArgs = (a) => {
  * Esegue web_search / read_webpage, registra il passaggio (visibile nella UI) e restituisce il risultato per Gemma.
  * Le pagine lette rispettano maxChars (dal contesto libero) e, se più lunghe, tengono le parti pertinenti a query.
  */
+// ---------- PDF allegati: unione, OCR, riduzione del peso ----------
+
+/** PDF allegati alla conversazione, nell'ordine in cui sono arrivati (anche le scansioni senza testo). */
+function pdfDocs(conv) {
+  return conv.messages.filter((m) => m.role === 'user').flatMap((m) => (m.attachments || []))
+    .filter((a) => a.kind === 'document' && /\.pdf$/i.test(a.file || ''));
+}
+
+const OP_LABEL = { merge: 'Unisco i PDF', ocr: 'OCR delle pagine', compress: 'Riduco il peso' };
+
+async function runPdfTool(conv, msg, call) {
+  const args = parseArgs(call.function?.arguments);
+  const docs = pdfDocs(conv);
+  const pick = (Array.isArray(args.documents) && args.documents.length ? args.documents : docs.map((_, i) => i + 1))
+    .map((n) => docs[Math.floor(Number(n)) - 1]).filter(Boolean);
+  const ops = (Array.isArray(args.operations) ? args.operations : [args.operations]).map(String);
+  const step = { id: store.newId(), type: 'pdf', ops, title: pick.map((d) => d.name).join(', '), status: 'running', startedAt: Date.now() };
+  msg.steps.push(step);
+  const emitStep = () => emit(conv.id, { type: 'step', messageId: msg.id, step });
+  emitStep();
+  try {
+    if (!pick.length) throw new Error('Nessun PDF allegato da usare');
+    const name = String(args.name || 'documenti uniti').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\.pdf$/i, '').trim().slice(0, 80) || 'documenti uniti';
+    const inputs = pick.map((d) => ({ path: path.join(config.paths.media, d.file), name: d.name }));
+    const out = await pdf.processPdfs(inputs, ops, () => path.join(config.paths.media, conv.ownerId, `pdf-${randomUUID()}.pdf`), {
+      name, onStage: (op) => { step.text = OP_LABEL[op]; emitStep(); },
+    });
+    const before = pick.reduce((n, d) => n + (fs.statSync(path.join(config.paths.media, d.file), { throwIfNoEntry: false })?.size || 0), 0);
+    step.files = out.map((r) => ({ name: r.name, size: r.size, url: mediaUrl(path.relative(config.paths.media, r.file).split(path.sep).join('/')) }));
+    step.text = undefined;
+    step.status = 'done';
+    return JSON.stringify({ ok: true, operations: pdf.plan(ops, pick.length), files: out.map((r) => ({ name: r.name, bytes: r.size, from: r.from })), original_bytes: before,
+      note: 'I file sono già sotto la tua risposta con il link per scaricarli: non scrivere link o percorsi.' });
+  } catch (e) {
+    step.status = 'error';
+    step.error = e.message;
+    return JSON.stringify({ error: e.message });
+  } finally {
+    step.finishedAt = Date.now();
+    emitStep();
+  }
+}
+
 async function runWebTool(conv, msg, call, { maxChars = PAGE_CHARS.max, query = '' } = {}) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
@@ -1235,6 +1279,7 @@ export async function send(conv, opts) {
           // nei task dei progetti, solo i file (i test li fa la coda)
           ...(opts.auto || projectTask ? [] : tools({ forcedImageModel: opts.imageModel && opts.imageModel !== 'auto', images: recentImages(conv), melody: recentMelody(conv) })
             .filter((t) => !(computer && CHAT_AUDIO_TOOLS.has(t.function.name)))),
+          ...(opts.auto || projectTask || !pdfDocs(conv).length ? [] : [pdfTool(pdfDocs(conv))]),
           ...(computer ? computerTools({ canRun, images: recentImages(conv, 12), project: !!conv.project, projectChat: !!computer.projectChat, folders: !conv.project }) : []),
         ];
         const finalTools = allTools.filter((t) => !LOOP_TOOLS.has(t.function.name));
@@ -1369,7 +1414,9 @@ export async function send(conv, opts) {
             if (ac.signal.aborted) break;
             const content = COMPUTER_TOOLS.has(call.function.name)
               ? await runComputerTool(conv, msg, call, user, { canRun, signal: ac.signal })
-              : await runWebTool(conv, msg, call, { maxChars, query: focusQuery });
+              : call.function.name === 'pdf_tools'
+                ? await runPdfTool(conv, msg, call)
+                : await runWebTool(conv, msg, call, { maxChars, query: focusQuery });
             convo.push({ role: 'tool', tool_name: call.function.name, content: content + repeatNote(msg, call) });
           }
           store.save(conv, { touch: false });

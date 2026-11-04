@@ -99,6 +99,14 @@ LocalAI trasforma scansioni e foto di documenti in **PDF ricercabili**: la pagin
 - **Modalità Computer**: chiedi «fai l'OCR della cartella documenti». Lo strumento `ocr_to_pdf` lavora su un file o su una cartella intera, sottocartelle comprese, e scrive i risultati nella sottocartella `OCR`. Gli originali non vengono mai toccati. Alla fine l'assistente dice quali file sono stati convertiti e quali no.
 - Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages --rasterizer pypdfium`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
 
+### Unire, fare l'OCR e ridurre il peso dei PDF allegati
+
+Allega uno o più PDF e chiedi, per esempio, «unisci questi PDF», «fai l'OCR e riduci il peso» o «comprimi il secondo». Gemma usa lo strumento `pdf_tools`, che fa le operazioni sempre in quest'ordine: unione, OCR, riduzione del peso. Il PDF nuovo compare sotto la risposta con il link per scaricarlo, e gli allegati originali restano come sono.
+
+- **Unione**: le pagine nell'ordine dei file scelti (di default l'ordine in cui li hai allegati).
+- **Riduzione del peso**: le immagini delle pagine vanno a 200 dpi in JPEG qualità 75, a colori. Testo, grafica vettoriale e strato OCR non cambiano. Sui file di Carla (2026-11-04) il peso è sceso del 62% e firme e loghi non mostrano differenze visibili.
+- Unione e riduzione le fa `tools/pdf-tool.py` con il Python del venv dell'OCR, che ha già pikepdf e Pillow. `PDF_PYTHON` permette di scegliere un altro Python.
+
 Installazione (una volta sola, su Windows):
 
 ```powershell
@@ -397,6 +405,7 @@ src/
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
   ocr.js             OCR delle scansioni (ocrmypdf): PDF ricercabili con la pagina originale intatta
+  pdf.js             PDF allegati: unione, OCR e riduzione del peso (con tools/pdf-tool.py)
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
   workspace.js       cartella di lavoro: file, comandi con conferma, PDF, Word e OCR
