@@ -39,9 +39,9 @@ const TOOL_MODE = { generate_image: 'text2img', generate_video: 'text2video', ed
 // in modalità Computer la musica e gli effetti vanno nella cartella di lavoro (create_audio_file), non nella chat
 const CHAT_AUDIO_TOOLS = new Set(['generate_music', 'generate_sound_effect']);
 const WEB_TOOLS = new Set(['web_search', 'read_webpage']);
-const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history', 'project_server']);
+const COMPUTER_TOOLS = new Set(['list_files', 'read_file', 'write_file', 'append_file', 'edit_file', 'restore_file', 'install_packages', 'delete_file', 'html_to_word', 'html_to_pdf', 'ocr_to_pdf', 'save_chat_image', 'create_audio_file', 'run_command', 'add_project_tasks', 'check_project', 'manage_queue', 'project_history', 'project_server']);
 const LOOP_TOOLS = new Set([...WEB_TOOLS, ...COMPUTER_TOOLS]);
-const WRITE_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'restore_file', 'delete_file', 'save_chat_image', 'create_audio_file', 'html_to_word', 'html_to_pdf']);
+const WRITE_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'restore_file', 'delete_file', 'save_chat_image', 'create_audio_file', 'html_to_word', 'html_to_pdf', 'ocr_to_pdf']);
 const FORCE_NOTE = {
   web: "\n\n[Ricerca web attivata dall'utente: cerca sul web prima di rispondere e cita le fonti.]",
   image: "\n\n[Strumento «Immagine» attivato dall'utente: rispondi chiamando generate_image.]",
@@ -386,7 +386,7 @@ function repeatNote(msg, call) {
 async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
   const name = call.function?.name;
   const args = parseArgs(call.function?.arguments);
-  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history', project_server: 'server' };
+  const ACTION = { list_files: 'list', read_file: 'read', write_file: 'write', append_file: 'append', edit_file: 'edit', restore_file: 'restore', install_packages: 'install', delete_file: 'delete', html_to_word: 'word', html_to_pdf: 'pdf', ocr_to_pdf: 'ocr', save_chat_image: 'image', create_audio_file: 'audio', add_project_tasks: 'tasks', check_project: 'check', manage_queue: 'queue', project_history: 'history', project_server: 'server' };
   const step = name === 'run_command'
     ? { id: store.newId(), type: 'command', command: String(args.command || '').trim(), cwd: String(args.cwd || ''), status: 'running', startedAt: Date.now() }
     : { id: store.newId(), type: 'file', action: ACTION[name], path: String(args.path ?? args.html_path ?? ''), status: 'running', startedAt: Date.now() };
@@ -497,6 +497,13 @@ async function runComputerTool(conv, msg, call, user, { canRun, signal }) {
         const r = await workspace.htmlToPdf(user, step.path, args.pdf_path);
         Object.assign(step, { source: step.path, path: r.path, size: r.size });
         output = JSON.stringify({ ok: true, pdf: r.path, bytes: r.size });
+        break;
+      }
+      case 'ocr_to_pdf': {
+        const r = await workspace.ocrToPdf(user, step.path, args.output_path, { signal });
+        const done = r.results.filter((x) => x.ok);
+        Object.assign(step, { source: step.path, path: done.length === 1 ? done[0].output : r.folder, converted: done.length, failed: r.results.length - done.length });
+        output = JSON.stringify({ ok: true, folder: r.folder, converted: done.length, not_converted: r.results.filter((x) => !x.ok), files: done.map((x) => x.output).slice(0, 100) });
         break;
       }
       case 'create_audio_file': {
@@ -1105,7 +1112,7 @@ export async function send(conv, opts) {
       if (!f.startsWith(`${conv.ownerId}/doc-`) || !tf.startsWith(`${conv.ownerId}/doc-`) || !exists(f) || !exists(tf)) throw invalid();
       const meta = JSON.parse(fs.readFileSync(path.join(config.paths.media, tf), 'utf8'));
       const chars = meta.pages.reduce((n, p) => n + p.length, 0);
-      attachments.push({ id: store.newId(), kind: 'document', file: f, textFile: tf, url: mediaUrl(f), name: meta.name, pages: meta.pages.length, chars, scanned: chars < 30 * meta.pages.length });
+      attachments.push({ id: store.newId(), kind: 'document', file: f, textFile: tf, url: mediaUrl(f), name: meta.name, pages: meta.pages.length, chars, scanned: chars < 30 * meta.pages.length, ...(meta.ocr ? { ocr: true } : {}) });
     } else if (a?.kind === 'audio') {
       // melodia canticchiata (WAV caricato da /api/uploads): durata, tonalità e tempo si ricalcolano dal file
       if (!f.startsWith(`${conv.ownerId}/up-`) || !f.endsWith('.wav') || !exists(f)) throw invalid();

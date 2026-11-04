@@ -320,6 +320,10 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    fn('ocr_to_pdf', 'OCR di scansioni: crea PDF ricercabili (testo selezionabile e cercabile) da PDF scansionati o immagini (jpg, png, tif), lasciando la pagina identica all\'originale con loghi, firme e timbri. Accetta un file o una cartella intera (anche le sottocartelle). Gli originali non vengono toccati: i risultati vanno nella sottocartella OCR.', {
+      path: p('File o cartella da convertire, es. documenti/fattura.pdf oppure documenti'),
+      output_path: p('Facoltativo: file .pdf (per un file) o cartella (per una cartella) dove scrivere i risultati. Default: sottocartella OCR.'),
+    }, ['path']),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },
@@ -369,6 +373,7 @@ ${folder ? `- In questa conversazione stai lavorando nella cartella ${folder}/: 
 - Nella cronologia le tue scritture precedenti compaiono accorciate («omessi N caratteri…»): è una nota di LocalAI, non contenuto. Non copiarla mai in un file: LocalAI la rifiuta. Se ti serve il contenuto, rileggilo con read_file.
 - Se un file risulta vuoto, troncato o rovinato, rimetti la versione precedente con restore_file invece di riscriverlo a memoria.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
+- Scansioni da rendere ricercabili («fai l'OCR», «rendi cercabile il testo», «converti in OCR»): usa ocr_to_pdf sul file o sulla cartella, poi elenca all'utente quali file sono stati convertiti e quali no (con il motivo). Non riscrivere a mano il testo di una scansione.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
 ${hasAudio() ? `- Musica ed effetti sonori (giochi, siti, presentazioni): crea i file con create_audio_file, uno per suono (es. audio/musica.mp3, audio/riga.mp3, audio/game-over.mp3), e nello stesso turno scrivi il codice che li usa con percorsi relativi (in JavaScript: new Audio('audio/riga.mp3'); la musica di sottofondo con loop = true e volume più basso, avviata al primo tasto o tocco perché i browser bloccano l'audio prima di un'interazione). I file vengono generati alla fine del turno, circa mezzo minuto ciascuno: crea solo quelli che servono.

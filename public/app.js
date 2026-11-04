@@ -319,7 +319,7 @@ function renderMessage(m) {
     const tl = TOOL_LABEL[m.tool];
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
     const imgs = (m.attachments || []).map((a, i) => a.kind === 'document'
-      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : ''}</small></span></a>`
+      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : a.ocr ? ' · OCR' : ''}</small></span></a>`
       : a.kind === 'audio'
         ? `<div class="doc-chip tune-chip">${icon('mic', 18)}<span><b>Melodia canticchiata</b><small>${esc(melodyFacts(a))}</small></span><audio src="${esc(a.url)}" controls preload="none"></audio></div>`
         : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
@@ -453,7 +453,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', ocr: 'OCR' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -506,9 +506,9 @@ function renderComputer(node, m) {
       }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
-      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
-      const links = s.status === 'done' && ['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) ? wsLinks(stepPath(s)) : '';
-      return `<div class="ws-act"><div class="ws-act-head">${icon(s.action === 'word' || s.action === 'pdf' ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
+      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.action === 'ocr' && s.status === 'done' ? `<span class="faint">${s.converted} ${s.converted === 1 ? 'file convertito' : 'file convertiti'}${s.failed ? `, ${s.failed} no` : ''}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
+      const links = s.status === 'done' && (['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) || (s.action === 'ocr' && s.converted === 1)) ? wsLinks(stepPath(s)) : '';
+      return `<div class="ws-act"><div class="ws-act-head">${icon(['word', 'pdf', 'ocr'].includes(s.action) ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
     }
     const where = s.cwd ? ` <span class="faint">in ${esc(s.cwd)}</span>` : '';
     const res = s.status === 'done'
@@ -1001,7 +1001,7 @@ async function addFiles(files) {
         const res = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': dt, 'X-Filename': encodeURIComponent(f.name) }, body: f });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Caricamento non riuscito');
-        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile: non potrò leggerne il contenuto.`);
+        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile e l'OCR non è riuscito (o ocrmypdf non è installato): non potrò leggerne il contenuto.`);
         Object.assign(att, data);
       } catch (err) {
         state.attachments = state.attachments.filter((a) => a !== att);

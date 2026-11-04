@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import config from './config.js';
 import { buildDocx } from './docx.js';
+import * as ocr from './ocr.js';
 
 /**
  * Cartella di lavoro dell'assistente: ogni utente ha workspace/<username>/, dove il modello crea progetti
@@ -355,6 +356,30 @@ export async function htmlToPdf(user, htmlRel, pdfRel) {
   const st = await fsp.stat(dst.abs).catch(() => null);
   if (!st?.size) throw new WorkspaceError('Il PDF non è stato creato');
   return { path: dst.rel, size: st.size, method: path.basename(browser).replace(/\.exe$/i, '') };
+}
+
+/**
+ * OCR di un file (PDF scansionato o immagine) o di una cartella intera in PDF ricercabili.
+ * I risultati vanno in una cartella nuova (default «OCR» accanto ai file): gli originali non si toccano mai.
+ */
+export async function ocrToPdf(user, rel, outRel, { signal } = {}) {
+  const src = resolve(user, rel);
+  const st = await fsp.stat(src.abs).catch(() => null);
+  if (!st) throw new WorkspaceError(`«${src.rel}» non esiste`);
+  if (!ocr.findOcrmypdf()) throw new WorkspaceError('OCR non disponibile: ocrmypdf non è installato sul PC (vedi README, sezione OCR)');
+  if (st.isDirectory()) {
+    const out = resolve(user, outRel || path.posix.join(src.rel, 'OCR'));
+    if (out.abs === src.abs) throw new WorkspaceError('La cartella di uscita deve essere diversa da quella dei file');
+    const results = await ocr.ocrFolder(src.abs, out.abs, { signal });
+    const relOf = (p) => path.posix.join(src.rel, p.split(path.sep).join('/'));
+    return { folder: out.rel, results: results.map((r) => ({ file: relOf(r.file), ...(r.output ? { output: relOf(r.output) } : {}), ok: r.ok, ...(r.reason ? { reason: r.reason } : {}) })) };
+  }
+  const dir = path.posix.dirname(src.rel);
+  const out = resolve(user, outRel || path.posix.join(dir === '.' ? '' : dir, 'OCR', path.posix.basename(src.rel).replace(/\.[^.]+$/, '') + '.pdf'));
+  if (!/\.pdf$/i.test(out.rel)) throw new WorkspaceError('Il file di destinazione deve finire in .pdf');
+  const r = await ocr.ocrFile(src.abs, out.abs, { signal });
+  if (!r.ok) throw new WorkspaceError(`OCR non riuscito per «${src.rel}»: ${r.reason}`);
+  return { folder: path.posix.dirname(out.rel), results: [{ file: src.rel, output: out.rel, ok: true }] };
 }
 
 function wordConvert(src, dst) {

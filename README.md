@@ -88,8 +88,32 @@ Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 M
 - Il riquadro «Documento consultato» mostra cosa è stato letto e quali pagine sono state usate. Gemma cita le pagine (p. N).
 - **Verifica sul web**: chiedi «verifica su internet…». La ricerca usa solo termini generici: le regole del prompt impediscono di mettere nelle query nomi, codici o dati sanitari presenti nei documenti.
 - **Referti medici**: valori e intervalli di riferimento vengono spiegati in modo chiaro, senza diagnosi e con il rimando al medico.
-- I PDF scansionati, cioè senza testo selezionabile, vengono segnalati ma non letti: l'OCR non è ancora supportato.
+- I **PDF scansionati**, cioè senza testo selezionabile, passano dall'OCR al caricamento (vedi «OCR delle scansioni»), così Gemma li può leggere. Accanto al nome compare «OCR»; l'originale resta salvato. Se ocrmypdf non è installato vengono segnalati ma non letti.
 - Le formule matematiche (`$...$`, `$$...$$`) vengono visualizzate con KaTeX, servito in locale.
+
+## OCR delle scansioni
+
+LocalAI trasforma scansioni e foto di documenti in **PDF ricercabili**: la pagina resta l'immagine originale, identica (loghi, firme, timbri, impaginazione), e sotto c'è uno strato di testo invisibile che si può selezionare, copiare e cercare. Lo fa [ocrmypdf](https://ocrmypdf.readthedocs.io) con Tesseract in italiano e inglese, tutto sul PC.
+
+- **Allegati in chat**: un PDF senza testo viene convertito al caricamento (qualche secondo a pagina).
+- **Modalità Computer**: chiedi «fai l'OCR della cartella documenti». Lo strumento `ocr_to_pdf` lavora su un file o su una cartella intera, sottocartelle comprese, e scrive i risultati nella sottocartella `OCR`. Gli originali non vengono mai toccati. Alla fine l'assistente dice quali file sono stati convertiti e quali no.
+- Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
+
+Installazione (una volta sola, su Windows):
+
+```powershell
+winget install UB-Mannheim.TesseractOCR     # durante l'installazione aggiungi la lingua italiana
+winget install ArtifexSoftware.GhostScript
+py -m venv C:\AI\ocr\venv
+C:\AI\ocr\venv\Scripts\pip install ocrmypdf
+```
+
+LocalAI cerca `ocrmypdf` in `OCRMYPDF`, poi in `C:\AI\ocr\venv\Scripts\ocrmypdf.exe`, poi nel PATH. Tesseract e Ghostscript non serve metterli nel PATH: LocalAI li cerca nelle cartelle standard di installazione.
+
+| Variabile | Default |
+|---|---|
+| `OCRMYPDF` | percorso di `ocrmypdf.exe`, se non è in una delle posizioni sopra |
+| `OCR_LANG` | `ita+eng` (lingue di Tesseract) |
 
 ## Codice con Qwen Coder
 
@@ -372,9 +396,10 @@ src/
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
+  ocr.js             OCR delle scansioni (ocrmypdf): PDF ricercabili con la pagina originale intatta
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
-  workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
+  workspace.js       cartella di lavoro: file, comandi con conferma, PDF, Word e OCR
   docx.js            conversione HTML → .docx senza dipendenze
   projects.js        progetti: piano (PIANO.md), task, scelta del modello per tipo
   runner.js          coda dei task: un task alla volta, test, controllo pagine e tentativi
