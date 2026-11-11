@@ -79,6 +79,30 @@ LocalAI crea musica ed effetti sonori con ComfyUI, sulla stessa GPU e con la ste
 
 Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. Senza i modelli, gli strumenti audio non vengono proposti.
 
+## Conversazione a voce
+
+Con il tasto **voce** (le barrette, nel composer) parli con l'assistente come al telefono: dici una frase, quando smetti di parlare viene trascritta e mandata in chat, e la risposta viene letta ad alta voce **frase per frase mentre Gemma la scrive**. Poi ti riascolta da solo. Tutto resta sul PC.
+
+- **Riconoscimento vocale**: faster-whisper con `large-v3-turbo`. Va sulla GPU se ci sono almeno 2,5 GB liberi (con Gemma 12B di solito sì), altrimenti sulla CPU. Misurato sul PC il 2026-10-22 con una frase di 5 s: 0,2 s sulla GPU (1,3 GB di VRAM), 5 s sulla CPU. La voce di Piper: 0,15 s a frase. Sulla GPU lascia la memoria dopo 10 minuti senza usarla, e subito prima di ogni lavoro di ComfyUI (foto, video, musica).
+- **Sintesi vocale**: Piper, voci italiane Paola e Riccardo, sulla CPU (pochi decimi di secondo a frase). Si sceglie la voce dal pannello.
+- In modalità voce Gemma risponde breve e senza Markdown. Il codice e le tabelle li vedi comunque sullo schermo: a voce dice solo «codice sullo schermo».
+- **Interrompere**: tocca il cerchio. Con «Interrompi parlando» basta parlare sopra la risposta. Con gli altoparlanti l'eco può interromperla da sola, quindi conviene usarlo con le cuffie.
+- Il microfono funziona su `http://localhost` e in HTTPS. Dal telefono usa l'indirizzo HTTPS di Tailscale (vedi *HTTPS con Tailscale*).
+
+**Installare**: sul PC di LocalAI lancia da PowerShell, dalla cartella di LocalAI:
+
+`powershell -ExecutionPolicy Bypass -File tools\installa-voce.ps1 -Gpu`
+
+Lo script crea `voice\.venv`, un ambiente Python 3.12 separato (ComfyUI non si tocca), e scarica faster-whisper, Piper, le voci e il modello Whisper: circa 1 GB, più 1,5 GB con `-Gpu` (cuBLAS e cuDNN per Whisper sulla GPU). Senza `-Gpu` Whisper va sempre sulla CPU. Al riavvio LocalAI avvia da solo il servizio voce (`voice/server.py`, porta 8190, solo `127.0.0.1`) e il tasto compare. Per provarlo da solo: `voice\avvia-voce.bat`.
+
+| Variabile | Default |
+|---|---|
+| `VOICE_URL` | `http://127.0.0.1:8190` (vuoto = voce spenta) |
+| `VOICE_LANGUAGE` | `it` (vuoto = Whisper riconosce la lingua) |
+| `VOICE_STT_MODEL` | `large-v3-turbo` (più veloce sulla CPU: `small`) |
+| `VOICE_STT_DEVICE` | `auto` (oppure `cuda` o `cpu`) |
+| `VOICE_DEFAULT` | `it_IT-paola-medium` |
+
 ## Documenti (PDF, TXT, MD)
 
 Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.

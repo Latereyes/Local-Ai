@@ -138,6 +138,15 @@ export default {
     longMinChars: Number(env.DOC_LONG_MIN_CHARS || 90000),
   },
 
+  // Conversazione a voce: servizio locale con riconoscimento e sintesi vocale (voice/server.py, vedi README).
+  // VOICE_URL vuoto la spegne. Voce e lingua predefinite si possono cambiare dal menu della modalità voce.
+  voice: {
+    url: env.VOICE_URL ?? 'http://127.0.0.1:8190',
+    language: env.VOICE_LANGUAGE ?? 'it',
+    voice: env.VOICE_VOICE || '',
+    speed: Number(env.VOICE_SPEED || 1),
+  },
+
   search: {
     // Vuoto = DuckDuckGo (nessuna configurazione). Impostando uno dei due si usa quel motore.
     searxngUrl: env.SEARXNG_URL || '',

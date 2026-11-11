@@ -24,6 +24,7 @@ import * as vision from './src/vision.js';
 import * as memory from './src/memory.js';
 import * as proposte from './src/proposte.js';
 import * as plancheck from './src/plancheck.js';
+import * as voice from './src/voice.js';
 
 // Un errore fuori da ogni richiesta non deve chiudere LocalAI (e con lui la coda dei progetti): si scrive in
 // data/errori.log e si va avanti. Prova torrent-cli del 2026-10-19: un assert di undici chiudeva tutto senza traccia.
@@ -180,8 +181,8 @@ app.delete('/api/conversations/:id', wrap(async (req, res) => {
 
 app.post('/api/conversations/:id/messages', wrap(async (req, res) => {
   const c = ownConv(req);
-  const { text, tool, imageModel, aspect, duration, think, model, attachments, computer } = req.body || {};
-  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments, computer: typeof computer === 'boolean' ? computer : undefined }));
+  const { text, tool, imageModel, aspect, duration, think, model, attachments, computer, voice: spoken } = req.body || {};
+  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments, computer: typeof computer === 'boolean' ? computer : undefined, voice: spoken === true }));
 }));
 
 // Conferma (o rifiuto) di un comando proposto dall'assistente in modalità Computer
@@ -492,6 +493,23 @@ async function saveDocument(req, ext) {
   return { kind: 'document', file: `${base}.${ext}`, textFile: `${base}.json`, url: mediaUrl(`${base}.${ext}`), name, pages: extracted.pages.length, chars, scanned: extracted.scanned };
 }
 
+// ---- Voce: riconoscimento e sintesi vocale dal servizio locale (src/voice.js) ----
+app.get('/api/voice', wrap(async (req, res) => res.json(await voice.status({ fresh: req.query.fresh !== undefined }) || { off: true })));
+
+// Una frase detta dall'utente (WAV mono dal browser) → testo da mandare in chat
+app.post('/api/voice/transcribe', express.raw({ type: AUDIO_TYPES, limit: '20mb' }), wrap(async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length < 64) throw httpError(400, 'Registrazione vuota');
+  res.json(await voice.transcribe(req.body, { language: typeof req.query.language === 'string' ? req.query.language : undefined }));
+}));
+
+// Una frase della risposta → audio WAV
+app.post('/api/voice/speak', wrap(async (req, res) => {
+  const text = String(req.body?.text || '').slice(0, 2000);
+  const wav = await voice.speak(text, { voice: req.body?.voice || undefined, speed: Number(req.body?.speed) || undefined });
+  if (!wav) return res.sendStatus(204);
+  res.type('audio/wav').send(wav);
+}));
+
 // ---- Media ----
 app.post('/api/conversations/:id/media/:mediaId/cancel', wrap(async (req, res) => {
   ownConv(req);
@@ -555,6 +573,7 @@ const server = app.listen(config.port, config.host, () => {
   else console.log('  (Microfono e notifiche dal telefono richiedono HTTPS: tools/attiva-https.ps1, vedi README)');
   console.log(`\n  Ollama:  ${config.ollama.url}  (${config.ollama.model})`);
   console.log(`  ComfyUI: ${config.comfy.url}`);
+  if (config.voice.url) voice.start().then(() => voice.status({ fresh: true })).then((v) => console.log(v ? `  Voce: ${config.voice.url} (Whisper ${v.stt?.model || '?'} + ${v.tts?.engine || '?'})` : '  Voce: servizio non installato (tools/installa-voce.ps1, vedi README)'));
   console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
