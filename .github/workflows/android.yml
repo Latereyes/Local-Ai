@@ -1,0 +1,56 @@
+# Compila l'app Android di LocalAI (cartella android/) e la pubblica tra le Release:
+# - da main nella release «android-latest»;
+# - dagli altri branch nella pre-release «android-prova», per provarla sul telefono prima di unire.
+name: App Android
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test e compilazione
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testReleaseUnitTest assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../LocalAI.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalAI-apk
+          path: LocalAI.apk
+
+      - name: Pubblica nelle Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            TAG=android-latest; TITLE="App Android (ultima versione)"; EXTRA=""
+          else
+            TAG=android-prova; TITLE="App Android (prova dal branch ${GITHUB_REF_NAME})"; EXTRA="--prerelease"
+          fi
+          NOTES="Build ${GITHUB_RUN_NUMBER} dal commit ${GITHUB_SHA::7} (${GITHUB_REF_NAME}). Dal telefono: scarica LocalAI.apk e installalo consentendo le app da fonti sconosciute."
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" LocalAI.apk --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES" $EXTRA

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LocalAI in casa è in HTTP semplice (http://192.168…:3000): il traffico resta nella rete di casa o in Tailscale. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

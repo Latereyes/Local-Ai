@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema chiaro: la pagina vede prefers-color-scheme: light, come nel browser -->
+    <style name="Theme.LocalAI" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:colorAccent">@color/accento</item>
+    </style>
+    <color name="fondo">#FAF9F7</color>
+    <color name="testo">#1D1C1A</color>
+    <color name="accento">#6A5AE0</color>
+</resources>
