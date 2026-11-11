@@ -14,6 +14,7 @@ import { gpu } from './src/gpu.js';
 import { bus, cancel, mediaUrl, recoverInterrupted } from './src/jobs.js';
 import { workflows, loadWorkflows, publicInfo, checkAvailability } from './src/workflows.js';
 import { extractText } from './src/documents.js';
+import { ocrBuffer } from './src/ocr.js';
 import { checkMelody } from './src/melody.js';
 import * as snapshots from './src/snapshots.js';
 import * as workspace from './src/workspace.js';
@@ -21,6 +22,10 @@ import * as projects from './src/projects.js';
 import * as runner from './src/runner.js';
 import * as launcher from './src/launcher.js';
 import * as vision from './src/vision.js';
+import * as memory from './src/memory.js';
+import * as proposte from './src/proposte.js';
+import * as plancheck from './src/plancheck.js';
+import * as voice from './src/voice.js';
 
 // Un errore fuori da ogni richiesta non deve chiudere LocalAI (e con lui la coda dei progetti): si scrive in
 // data/errori.log e si va avanti. Prova torrent-cli del 2026-10-19: un assert di undici chiudeva tutto senza traccia.
@@ -177,8 +182,8 @@ app.delete('/api/conversations/:id', wrap(async (req, res) => {
 
 app.post('/api/conversations/:id/messages', wrap(async (req, res) => {
   const c = ownConv(req);
-  const { text, tool, imageModel, aspect, duration, think, model, attachments, computer } = req.body || {};
-  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments, computer: typeof computer === 'boolean' ? computer : undefined }));
+  const { text, tool, imageModel, aspect, duration, think, model, attachments, computer, voice: spoken } = req.body || {};
+  res.json(await chat.send(c, { text, tool, imageModel, aspect, duration, think, model, attachments, computer: typeof computer === 'boolean' ? computer : undefined, voice: spoken === true }));
 }));
 
 // Conferma (o rifiuto) di un comando proposto dall'assistente in modalità Computer
@@ -216,7 +221,7 @@ const ownTask = (p, id) => {
 };
 const fullProject = async (req, p) => ({
   ...projects.summary(p),
-  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume,
+  autoTest: p.autoTest, testCommand: p.testCommand, coordinator: p.coordinator !== false, autoResume: !!p.autoResume, memory: p.memory !== false, reviewPlan: !!p.reviewPlan,
   maxAttempts: p.maxAttempts || null, defaultAttempts: config.projects.maxAttempts,
   history: await snapshots.history(projects.dirOf(req.user, p), 15),
   git: await snapshots.hasGit(), log: p.log.slice(-60),
@@ -245,6 +250,8 @@ app.patch('/api/projects/:id', projectErr(async (req, res) => {
   if (typeof b.autoTest === 'boolean') p.autoTest = b.autoTest;
   if (typeof b.coordinator === 'boolean') p.coordinator = b.coordinator;
   if (typeof b.autoResume === 'boolean') p.autoResume = b.autoResume;
+  if (typeof b.memory === 'boolean') p.memory = b.memory;
+  if (typeof b.reviewPlan === 'boolean') p.reviewPlan = b.reviewPlan;
   if (b.maxAttempts !== undefined) p.maxAttempts = Math.min(5, Math.max(0, Math.floor(Number(b.maxAttempts)) || 0)) || null;
   if (typeof b.testCommand === 'string') {
     if (req.user.role !== 'admin' && b.testCommand.trim()) throw httpError(403, 'Solo per amministratori');
@@ -272,12 +279,12 @@ app.post('/api/projects/:id/plan/draft', projectErr(async (req, res) => {
   if (!goal) throw httpError(400, 'Scrivi l\'obiettivo del progetto nel riquadro del piano');
   const model = await projects.modelFor('read');
   const files = await workspace.overview(projects.scoped(req.user, p), 40).catch(() => '');
-  const text = await gpu.run('ollama', 'Bozza del piano', () => ollama.complete({
-    model, messages: projects.planPrompt(goal, files === '(vuota)' ? '' : files), timeout: 300000, options: { temperature: 0.3, num_predict: 2000 },
-  }));
-  const plan = text.replace(/^```(markdown|md)?\s*|```\s*$/g, '').trim();
+  const notes = memory.pack(req.user.id, goal, { project: p.id, projectOn: p.memory !== false }).text;
+  // bozza + controllo (lunghezza, parti dell'obiettivo, strumenti, task troppo grandi) e una riscrittura se serve
+  const { plan, problems } = await plancheck.draftPlan({ goal, files: files === '(vuota)' ? '' : files, notes, model, run: (fn) => gpu.run('ollama', 'Bozza del piano', fn) });
   if (!projects.parsePlan(plan).length) throw httpError(502, 'Il modello non ha scritto un piano valido: riprova o scrivilo a mano');
   await projects.writePlan(req.user, p, plan);
+  if (problems.length) projects.addLog(p, `Piano scritto, ma il controllo segnala ancora: ${problems.join(' ')}`);
   res.json(await fullProject(req, p));
 }));
 
@@ -307,7 +314,7 @@ app.post('/api/projects/:id/tasks/:taskId', projectErr(async (req, res) => {
     case 'retry':
       if (busy) throw httpError(409, 'Il task è in corso');
       // rimesso in coda dall'utente: il coordinatore riparte da zero interventi
-      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0 });
+      Object.assign(t, { status: 'queued', attempts: 0, error: null, coordinated: 0, modelsTried: [] });
       projects.addLog(p, `«${t.title}» di nuovo in coda`);
       break;
     case 'skip':
@@ -388,6 +395,41 @@ app.post('/api/projects/:id/pause', projectErr(async (req, res) => {
   res.json(await fullProject(req, p));
 }));
 
+// ---- Memoria: note scritte dall'utente, aggiunte al prompt quando sono pertinenti (src/memory.js) ----
+const memoryErr = (fn) => wrap(async (req, res) => {
+  try { await fn(req, res); }
+  catch (e) { throw e.status ? e : httpError(500, e.message); }
+});
+const scopeOf = (v) => (v === undefined || v === 'tutte' ? undefined : String(v));
+app.get('/api/memory', memoryErr(async (req, res) => {
+  const { q = '', scope, status } = req.query;
+  res.json({
+    enabled: memory.isEnabled(req.user.id),
+    types: memory.TYPES,
+    notes: memory.list(req.user.id, { q: String(q), scope: scopeOf(scope), status: memory.STATUSES.includes(status) ? status : undefined }),
+    // note proposte dopo i task: sempre in cima alla pagina, qualunque filtro
+    proposed: memory.list(req.user.id, { status: memory.PROPOSED, limit: 50 }),
+    projects: (await projects.list(req.user).catch(() => [])).map((p) => ({ id: p.id, name: p.name })),
+  });
+}));
+app.post('/api/memory', memoryErr(async (req, res) => {
+  const { text, type, scope } = req.body || {};
+  res.json(memory.add(req.user.id, { text, type, scope }));
+}));
+app.put('/api/memory/settings', memoryErr(async (req, res) => {
+  res.json({ enabled: memory.setEnabled(req.user.id, req.body?.enabled !== false) });
+}));
+app.patch('/api/memory/:id', memoryErr(async (req, res) => {
+  const { text, type, scope, status } = req.body || {};
+  const n = memory.update(req.user.id, req.params.id, { text, type, scope, status });
+  if (!n) throw httpError(404, 'Nota non trovata');
+  res.json(n);
+}));
+app.delete('/api/memory/:id', memoryErr(async (req, res) => {
+  if (!memory.remove(req.user.id, req.params.id)) throw httpError(404, 'Nota non trovata');
+  res.json({ ok: true });
+}));
+
 // ---- Verifica dei modelli che leggono le immagini (giudizio degli screenshot) ----
 app.get('/api/vision', (req, res) => res.json(vision.lastCheck() || {}));
 app.post('/api/vision/check', auth.requireAdmin, wrap(async (req, res) => res.json(await vision.runCheck(req.user.id))));
@@ -434,7 +476,7 @@ async function saveMelody(req) {
 
 /** Salva un documento e ne estrae subito il testo (pagina per pagina). */
 async function saveDocument(req, ext) {
-  const buf = req.body;
+  let buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) throw httpError(400, 'File vuoto');
   if (ext === 'pdf' && buf.toString('ascii', 0, 5) !== '%PDF-') throw httpError(400, 'Il file non è un PDF valido');
   let name = 'documento';
@@ -446,11 +488,40 @@ async function saveDocument(req, ext) {
   const id = randomUUID();
   const base = `${req.user.id}/doc-${id}`;
   await fs.mkdir(path.join(config.paths.media, req.user.id), { recursive: true });
+  // PDF scansionato: OCR sul PC (ocrmypdf), così Gemma può leggerlo. Si tiene anche l'originale.
+  let ocr = false;
+  if (ext === 'pdf' && extracted.scanned) {
+    const searchable = await ocrBuffer(buf).catch(() => null);
+    const again = searchable && await extractText(searchable, 'x.pdf').catch(() => null);
+    if (again && !again.scanned) {
+      await fs.writeFile(path.join(config.paths.media, `${base}-originale.pdf`), buf);
+      buf = searchable;
+      extracted = again;
+      ocr = true;
+    }
+  }
   await fs.writeFile(path.join(config.paths.media, `${base}.${ext}`), buf);
-  await fs.writeFile(path.join(config.paths.media, `${base}.json`), JSON.stringify({ name, pages: extracted.pages }));
+  await fs.writeFile(path.join(config.paths.media, `${base}.json`), JSON.stringify({ name, pages: extracted.pages, ...(ocr ? { ocr } : {}) }));
   const chars = extracted.pages.reduce((n, p) => n + p.length, 0);
-  return { kind: 'document', file: `${base}.${ext}`, textFile: `${base}.json`, url: mediaUrl(`${base}.${ext}`), name, pages: extracted.pages.length, chars, scanned: extracted.scanned };
+  return { kind: 'document', file: `${base}.${ext}`, textFile: `${base}.json`, url: mediaUrl(`${base}.${ext}`), name, pages: extracted.pages.length, chars, scanned: extracted.scanned, ocr };
 }
+
+// ---- Voce: riconoscimento e sintesi vocale dal servizio locale (src/voice.js) ----
+app.get('/api/voice', wrap(async (req, res) => res.json(await voice.status({ fresh: req.query.fresh !== undefined }) || { off: true })));
+
+// Una frase detta dall'utente (WAV mono dal browser) → testo da mandare in chat
+app.post('/api/voice/transcribe', express.raw({ type: AUDIO_TYPES, limit: '20mb' }), wrap(async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length < 64) throw httpError(400, 'Registrazione vuota');
+  res.json(await voice.transcribe(req.body, { language: typeof req.query.language === 'string' ? req.query.language : undefined }));
+}));
+
+// Una frase della risposta → audio WAV
+app.post('/api/voice/speak', wrap(async (req, res) => {
+  const text = String(req.body?.text || '').slice(0, 2000);
+  const wav = await voice.speak(text, { voice: req.body?.voice || undefined, speed: Number(req.body?.speed) || undefined });
+  if (!wav) return res.sendStatus(204);
+  res.type('audio/wav').send(wav);
+}));
 
 // ---- Media ----
 app.post('/api/conversations/:id/media/:mediaId/cancel', wrap(async (req, res) => {
@@ -515,9 +586,12 @@ const server = app.listen(config.port, config.host, () => {
   else console.log('  (Microfono e notifiche dal telefono richiedono HTTPS: tools/attiva-https.ps1, vedi README)');
   console.log(`\n  Ollama:  ${config.ollama.url}  (${config.ollama.model})`);
   console.log(`  ComfyUI: ${config.comfy.url}`);
+  if (config.voice.url) voice.start().then(() => voice.status({ fresh: true })).then((v) => console.log(v ? `  Voce: ${config.voice.url} (Whisper ${v.stt?.model || '?'} + ${v.tts?.engine || '?'})` : '  Voce: servizio non installato (tools/installa-voce.ps1, vedi README)'));
   console.log(`  Cartella di lavoro: ${config.paths.workspace} (file aperti dalla porta ${config.workspace.port})`);
   console.log(`  Workflow: ${workflows().map((w) => `${w.name} [${w.type}]`).join(', ')}\n`);
   comfy.connect().catch(() => console.warn('  ⚠ ComfyUI non raggiungibile per ora'));
+  // note proposte per la memoria: a GPU libera e con la coda dei progetti ferma
+  proposte.start({ isBusy: () => !!runner.state() || projects.activeProjects().length > 0 });
   // Workflow utilizzabili = quelli con tutti i modelli presenti su ComfyUI (ricontrollo ogni 5 minuti)
   const refresh = () => checkAvailability(comfy.listModels, comfy.hasNode).then((list) => {
     const off = list.filter((w) => w.available === false);

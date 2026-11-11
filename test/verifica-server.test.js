@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process';
 
 // Prova torrent-cli del 2026-10-19: la pagina di un progetto Flask chiama fetch('/api/status'). Aperta dal server
 // dei file di LocalAI dava 404 a ogni tentativo; ora la verifica avvia il server del progetto e la apre da lì.
+let calls = 0;
+const writeCall = (n) => `${JSON.stringify({ message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'write_file', arguments: { path: `nota${n}.txt`, content: 'ok' } } }] }, done: false })}\n${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -17,7 +19,10 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'tools'], parameters: 'num_ctx 32768' }));
     if (req.url === '/api/tags' || req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }));
     if (req.url !== '/api/chat') return res.end('{"version":"0.0.0"}');
-    if (JSON.parse(body).stream === false) return res.end(JSON.stringify({ message: { role: 'assistant', content: 'Titolo' } }));
+    const j = JSON.parse(body);
+    if (j.stream === false) return res.end(JSON.stringify({ message: { role: 'assistant', content: 'Titolo' } }));
+    // il task deve cambiare almeno un file: scrive una nota e poi risponde
+    if (j.messages.at(-1)?.role === 'user') return res.end(writeCall(++calls));
     res.end(`${JSON.stringify({ message: { role: 'assistant', content: 'Fatto.' }, done: true, done_reason: 'stop', eval_count: 5, prompt_eval_count: 100 })}\n`);
   });
 });

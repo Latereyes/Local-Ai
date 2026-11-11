@@ -35,7 +35,7 @@ export async function capabilities(model) {
 
 /**
  * Contesto (token) da usare con il modello: quello del suo Modelfile se lo fissa
- * (es. Qwen Coder a 40k, misurato perché stia tutto nei 16 GB), altrimenti quello in config.ollama.ctx, altrimenti OLLAMA_CTX.
+ * (es. Qwen Coder a 48k, misurato perché stia tutto nei 16 GB), altrimenti quello in config.ollama.ctx, altrimenti OLLAMA_CTX.
  */
 export async function contextSize(model) {
   const name = model || config.ollama.model;
@@ -139,6 +139,13 @@ export async function chat({ model, messages, tools, think = false, options = {}
   return out;
 }
 
+/** Opzioni con il minimo di token in uscita per i modelli che ragionano sempre (LFM2.5). */
+export function withMinPredict(model, options = {}) {
+  const min = config.ollama.minPredict[String(model || config.ollama.model).replace(/:latest$/, '')];
+  if (!min || (options.num_predict ?? Infinity) >= min) return options;
+  return { ...options, num_predict: min };
+}
+
 /** Richiesta breve non in streaming (titoli, ecc.). */
 export async function complete({ model, messages, options = {}, format, timeout = 60000 }) {
   const j = await api('/api/chat', {
@@ -148,7 +155,7 @@ export async function complete({ model, messages, options = {}, format, timeout 
     stream: false,
     think: false,
     keep_alive: config.ollama.keepAlive,
-    options: { num_ctx: await contextSize(model), ...options },
+    options: { num_ctx: await contextSize(model), ...withMinPredict(model, options) },
   }, { timeout });
   return j.message?.content || '';
 }

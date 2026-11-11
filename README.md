@@ -23,7 +23,7 @@ Per entrare servono nome utente e password. Ogni utente vede solo le proprie con
 | `claudia` | utente | password temporanea `1234`, poi ne sceglie una personale |
 
 - Al primo accesso, e dopo ogni reimpostazione, l'app chiede di scegliere una nuova password (almeno 6 caratteri, diversa da `1234`). Finché non lo fai, non è possibile usare nient'altro.
-- L'amministratore, da *menu utente → Gestione utenti*, può aggiungere utenti e reimpostare le password. La password temporanea predefinita è `1234`, ma se ne può indicare un'altra. Quando una password viene reimpostata, l'utente viene disconnesso da tutti i dispositivi.
+- L'amministratore, da *menu utente → Utenti*, può aggiungere utenti e reimpostare le password. La password temporanea predefinita è `1234`, ma se ne può indicare un'altra. Quando una password viene reimpostata, l'utente viene disconnesso da tutti i dispositivi.
 - Chiunque può cambiare la propria password da *menu utente → Cambia password*.
 - Le password sono salvate solo come hash scrypt in `data/users.json`. Le sessioni durano 30 giorni (cookie HttpOnly). Dopo 5 tentativi sbagliati di fila l'accesso da quell'IP viene bloccato per un minuto.
 - Le chat create prima dell'introduzione dei profili sono state assegnate ad Andrea.
@@ -31,7 +31,7 @@ Per entrare servono nome utente e password. Ogni utente vede solo le proprie con
 
 ## Immagini allegate: lettura, image-to-image, image-to-video
 
-Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole sulla chat o incollandole (Ctrl+V). Su telefono c'è anche il tasto **fotocamera**, che apre direttamente la fotocamera posteriore. Il browser ridimensiona le foto a 1600 px (JPEG) prima dell'invio e ne corregge l'orientamento.
+Puoi allegare fino a 4 immagini per messaggio: con il tasto **+** → *Allega file*, trascinandole sulla chat o incollandole (Ctrl+V). Su telefono nel **+** c'è anche *Scatta una foto*, che apre direttamente la fotocamera posteriore. Il browser ridimensiona le foto a 1600 px (JPEG) prima dell'invio e ne corregge l'orientamento.
 
 - **Lettura**: Gemma (`gemma4-12b-uncensored`) non vede le immagini, perché il suo GGUF non ha il modulo visivo. Da ottobre 2026 l'immagine la descrive **Gemma 26B** (HauhauCS, senza censura), che nella verifica visiva ha letto giusto: descrizione completa e testo visibile trascritto, consultabile nel riquadro «Immagine analizzata» con il nome del modello. Se Gemma 26B non è installato si usa il modello scelto dalla verifica visiva; se manca anche quello, o la lettura non riesce, si torna a **Qwen3-VL 4B** su ComfyUI (workflow `qwen3vl-vision`). Si cambia con `DESCRIBE_MODEL` (un nome Ollama, oppure `comfy` per Qwen3-VL). Con un modello della chat che vede (Qwen Coder, qwen35, Gemma 26B) le immagini vanno direttamente a lui.
 - **Il prompt delle modifiche guarda la foto**: se il modello della chat vede le immagini, quando prepara l'istruzione per Qwen-Edit (o per Krea/Z-Image, o per i video da foto) riceve anche la foto di partenza. Così nomina la persona, il capo o l'oggetto giusto, con il colore e la posizione veri, invece di fidarsi solo della descrizione.
@@ -45,7 +45,7 @@ Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole s
 
   `powershell -ExecutionPolicy Bypass -File scarica-qwen-image-edit.ps1`
 
-  Lo script scarica circa 30,7 GB in `models/diffusion_models`, `models/text_encoders` e `models/loras`. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. In quel pannello l'amministratore vede quali workflow sono attivi e quali file mancano.
+  Lo script scarica circa 30,7 GB in `models/diffusion_models`, `models/text_encoders` e `models/loras`. LocalAI se ne accorge entro 5 minuti, oppure subito con *menu utente → Workflow ComfyUI → Ricarica*. In quel pannello l'amministratore vede quali workflow sono attivi e quali file mancano.
 - **Image to video** (`animate_image`, workflow `minimax-h3-i2v`): MiniMax H3 parte esattamente dall'immagine e la anima, con audio. Il formato segue quello dell'immagine (0,7 MP, 6 passi: valori misurati su ChatBz il 2026-10-09, con 0,4 MP le mani nei movimenti uscivano sfocate e doppie), fino a 15 s.
 - **Video lunghi e «Continua»** (da ChatBz, provati sul PC il 2026-10-10): fino a 15 s il video è un pezzo solo; da 16 a 30 s («un video di 20 secondi», o il menu «Durata») si fa in pezzi da 10 s. Ogni pezzo carica il precedente, usa gli ultimi 22 fotogrammi e il loro audio come guida (`MiniMaxH3AddGuide`), genera il seguito e lo incolla in coda: ogni pezzo salva il video intero fin lì («parte 2/3 · 20 s»). Sotto ogni video finito c'è **Continua**: chiede cosa succede dopo e quanti secondi aggiungere (2-10). Servono i nodi recenti di ComfyUI (`LoadVideo`, `GetVideoComponents`, `ImageFromBatch`, `ImageBatch`, `AudioConcat`, `TrimAudioDuration`; su ChatBz ComfyUI 0.39.0 li ha); senza `MiniMaxH3AddGuide` il pezzo parte solo dall'ultimo fotogramma (giunzione meno fluida). Codice in `src/videochain.js`.
 - **Rifinitura dei volti**: dopo ogni modifica con Qwen-Edit, FaceDetailer (Juggernaut XL) ripassa solo i volti a basso denoise. Pelle e occhi diventano più naturali; se nell'immagine non ci sono volti, non cambia nulla.
@@ -77,19 +77,75 @@ LocalAI crea musica ed effetti sonori con ComfyUI, sulla stessa GPU e con la ste
 
 `powershell -ExecutionPolicy Bypass -File scarica-audio.ps1`
 
-Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. Senza i modelli, gli strumenti audio non vengono proposti.
+Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *menu utente → Workflow ComfyUI → Ricarica*. Senza i modelli, gli strumenti audio non vengono proposti.
+
+## Conversazione a voce
+
+Con il tasto **voce** (le barrette, nel composer) parli con l'assistente come al telefono: dici una frase, quando smetti di parlare viene trascritta e mandata in chat, e la risposta viene letta ad alta voce **frase per frase mentre Gemma la scrive**. Poi ti riascolta da solo. Tutto resta sul PC.
+
+- **Riconoscimento vocale**: faster-whisper con `large-v3-turbo`. Va sulla GPU se ci sono almeno 2,5 GB liberi (con Gemma 12B di solito sì), altrimenti sulla CPU. Misurato sul PC il 2026-10-22 con una frase di 5 s: 0,2 s sulla GPU (1,3 GB di VRAM), 5 s sulla CPU. La voce di Piper: 0,15 s a frase. Sulla GPU lascia la memoria dopo 10 minuti senza usarla, e subito prima di ogni lavoro di ComfyUI (foto, video, musica).
+- **Sintesi vocale**: Piper, voci italiane Paola e Riccardo, sulla CPU (pochi decimi di secondo a frase). Si sceglie la voce dal pannello.
+- In modalità voce Gemma risponde breve e senza Markdown. Il codice e le tabelle li vedi comunque sullo schermo: a voce dice solo «codice sullo schermo».
+- **Interrompere**: tocca il cerchio. Con «Interrompi parlando» basta parlare sopra la risposta. Con gli altoparlanti l'eco può interromperla da sola, quindi conviene usarlo con le cuffie.
+- Il microfono funziona su `http://localhost` e in HTTPS. Dal telefono usa l'indirizzo HTTPS di Tailscale (vedi *HTTPS con Tailscale*).
+
+**Installare**: sul PC di LocalAI lancia da PowerShell, dalla cartella di LocalAI:
+
+`powershell -ExecutionPolicy Bypass -File tools\installa-voce.ps1 -Gpu`
+
+Lo script crea `voice\.venv`, un ambiente Python 3.12 separato (ComfyUI non si tocca), e scarica faster-whisper, Piper, le voci e il modello Whisper: circa 1 GB, più 1,5 GB con `-Gpu` (cuBLAS e cuDNN per Whisper sulla GPU). Senza `-Gpu` Whisper va sempre sulla CPU. Al riavvio LocalAI avvia da solo il servizio voce (`voice/server.py`, porta 8190, solo `127.0.0.1`) e il tasto compare. Per provarlo da solo: `voice\avvia-voce.bat`.
+
+| Variabile | Default |
+|---|---|
+| `VOICE_URL` | `http://127.0.0.1:8190` (vuoto = voce spenta) |
+| `VOICE_LANGUAGE` | `it` (vuoto = Whisper riconosce la lingua) |
+| `VOICE_STT_MODEL` | `large-v3-turbo` (più veloce sulla CPU: `small`) |
+| `VOICE_STT_DEVICE` | `auto` (oppure `cuda` o `cpu`) |
+| `VOICE_DEFAULT` | `it_IT-paola-medium` |
 
 ## Documenti (PDF, TXT, MD)
 
-Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
+Con **+** → *Allega file* (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
 
 - **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda. Con i modelli a contesto più piccolo il limite scende: oltre, il documento viene trattato come lungo.
-- **Documenti lunghi** (libri, manuali): alla prima domanda si crea un riassunto a blocchi. Ogni sezione da circa 16.000 caratteri viene riassunta, poi tutto viene unito in una sintesi generale. Per un libro di 189 pagine servono circa 4 minuti; il riassunto resta salvato. A ogni domanda vengono recuperati la sintesi, i riassunti delle sezioni pertinenti e le pagine originali più rilevanti (ricerca BM25). Se il documento è in un'altra lingua, Gemma genera prima le parole chiave in quella lingua, così le domande in italiano funzionano anche su libri in inglese.
+- **Documenti lunghi** (libri, manuali): alla prima domanda si crea un riassunto a blocchi. Ogni sezione da circa 16.000 caratteri viene riassunta, poi tutto viene unito in una sintesi generale. Per un libro di 189 pagine servono circa 4 minuti; il riassunto resta salvato. I documenti oltre circa 90.000 caratteri (~30k token) e fino a ~330.000 li legge invece **interi LFM2.5** (`hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0`, 128k di contesto), se è installato: in una sola richiesta scrive la sintesi e i riassunti delle sezioni, partendo dal testo completo invece che dai riassunti dei pezzi. A queste lunghezze è 2–2,5× più veloce di Gemma 26B e resta quasi tutto in VRAM; sui testi brevi è più lento, per questo sotto la soglia resta il riassunto a blocchi. Se nella sua risposta manca qualche sezione, quelle si riassumono a blocchi con il modello della chat; se la richiesta non riesce si torna al riassunto a blocchi completo. LFM2.5 ragiona sempre, anche con il ragionamento spento: LocalAI gli lascia almeno 16.384 token di risposta (`config.ollama.minPredict`), altrimenti il ragionamento si mangia la risposta. Si cambia con `DOC_LONG_MODEL` (vuoto lo spegne) e `DOC_LONG_MIN_CHARS`. A ogni domanda vengono recuperati la sintesi, i riassunti delle sezioni pertinenti e le pagine originali più rilevanti (ricerca BM25). Se il documento è in un'altra lingua, Gemma genera prima le parole chiave in quella lingua, così le domande in italiano funzionano anche su libri in inglese.
 - Il riquadro «Documento consultato» mostra cosa è stato letto e quali pagine sono state usate. Gemma cita le pagine (p. N).
 - **Verifica sul web**: chiedi «verifica su internet…». La ricerca usa solo termini generici: le regole del prompt impediscono di mettere nelle query nomi, codici o dati sanitari presenti nei documenti.
 - **Referti medici**: valori e intervalli di riferimento vengono spiegati in modo chiaro, senza diagnosi e con il rimando al medico.
-- I PDF scansionati, cioè senza testo selezionabile, vengono segnalati ma non letti: l'OCR non è ancora supportato.
+- I **PDF scansionati**, cioè senza testo selezionabile, passano dall'OCR al caricamento (vedi «OCR delle scansioni»), così Gemma li può leggere. Accanto al nome compare «OCR»; l'originale resta salvato. Se ocrmypdf non è installato vengono segnalati ma non letti.
 - Le formule matematiche (`$...$`, `$$...$$`) vengono visualizzate con KaTeX, servito in locale.
+
+## OCR delle scansioni
+
+LocalAI trasforma scansioni e foto di documenti in **PDF ricercabili**: la pagina resta l'immagine originale, identica (loghi, firme, timbri, impaginazione), e sotto c'è uno strato di testo invisibile che si può selezionare, copiare e cercare. Lo fa [ocrmypdf](https://ocrmypdf.readthedocs.io) con Tesseract in italiano e inglese, tutto sul PC.
+
+- **Allegati in chat**: un PDF senza testo viene convertito al caricamento (qualche secondo a pagina).
+- **Modalità Computer**: chiedi «fai l'OCR della cartella documenti». Lo strumento `ocr_to_pdf` lavora su un file o su una cartella intera, sottocartelle comprese, e scrive i risultati nella sottocartella `OCR`. Gli originali non vengono mai toccati. Alla fine l'assistente dice quali file sono stati convertiti e quali no.
+- Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages --rasterizer pypdfium`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
+
+### Unire, fare l'OCR e ridurre il peso dei PDF allegati
+
+Allega uno o più PDF e chiedi, per esempio, «unisci questi PDF», «fai l'OCR e riduci il peso» o «comprimi il secondo». Gemma usa lo strumento `pdf_tools`, che fa le operazioni sempre in quest'ordine: unione, OCR, riduzione del peso. Il PDF nuovo compare sotto la risposta con il link per scaricarlo, e gli allegati originali restano come sono.
+
+- **Unione**: le pagine nell'ordine dei file scelti (di default l'ordine in cui li hai allegati).
+- **Riduzione del peso**: le immagini delle pagine vanno a 200 dpi in JPEG qualità 75, a colori. Testo, grafica vettoriale e strato OCR non cambiano. Sui file di Carla (2026-11-04) il peso è sceso del 62% e firme e loghi non mostrano differenze visibili.
+- Unione e riduzione le fa `tools/pdf-tool.py` con il Python del venv dell'OCR, che ha già pikepdf e Pillow. `PDF_PYTHON` permette di scegliere un altro Python.
+
+Installazione (una volta sola, su Windows):
+
+```powershell
+winget install UB-Mannheim.TesseractOCR
+py -m venv C:\AI\ocr\venv
+C:\AI\ocr\venv\Scripts\pip install ocrmypdf img2pdf pypdf
+# lingue: ita.traineddata, eng.traineddata e osd.traineddata (tessdata_best) in C:\AI\ocr\tessdata
+```
+
+LocalAI cerca `ocrmypdf` in `OCRMYPDF`, poi in `C:\AI\ocr\venv\Scripts\ocrmypdf.exe`, poi nel PATH. Tesseract non serve metterlo nel PATH: LocalAI lo cerca in `C:\Program Files\Tesseract-OCR` e usa le lingue di `C:\AI\ocr\tessdata` se la cartella c'è. Ghostscript non serve: le pagine si leggono con pypdfium.
+
+| Variabile | Default |
+|---|---|
+| `OCRMYPDF` | percorso di `ocrmypdf.exe`, se non è in una delle posizioni sopra |
+| `OCR_LANG` | `ita+eng` (lingue di Tesseract) |
 
 ## Codice con Qwen Coder
 
@@ -102,10 +158,10 @@ Per scrivere e correggere codice puoi passare a **Qwen Coder** (Qwen3.8 27B Unce
 Lo script:
 - toglie il Qwen installato in precedenza (anche la vecchia Unsloth `UD-Q3_K_XL`);
 - scarica `orcarouter/Qwen3.8-27B-Uncensored:iq3_m` dalla libreria di Ollama e crea il modello `qwen3.8-coder` da `tools/qwen-coder.Modelfile`, poi toglie il nome scaricato (i file restano), così nel menu c'è un solo Qwen;
-- imposta tutti i layer in GPU (`num_gpu 999`) e 40k di contesto (`num_ctx 40960`);
+- imposta tutti i layer in GPU (`num_gpu 999`) e 48k di contesto (`num_ctx 49152`);
 - attiva per Ollama `OLLAMA_FLASH_ATTENTION=1` e `OLLAMA_KV_CACHE_TYPE=q8_0`, che dimezzano la memoria del contesto. Sono impostazioni del server Ollama, quindi valgono anche per Gemma, e valgono solo per un Ollama avviato dopo lo script: riavvia Ollama, o l'agent del PC se è lui ad avviarlo.
 
-Misurato sulla 4070 Ti Super (ottobre 2026), con la KV cache ancora in f16: 100% in GPU, ~40 token/s in scrittura e ~1.500 token/s in lettura del prompt, ~6 s di caricamento a freddo. Con un prompt di 13.000 token a 16k la VRAM arriva a 15,2 GB su 16,4. Questo modello ha pochi strati di attenzione piena, quindi il contesto costa poco: da 12k a 16k servono solo ~140 MB in più. Il `q3_K_L` (~15 GB) lascerebbe invece troppo poco margine, per questo si usa `iq3_m`. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 32768 e rilancia lo script. Con flash attention e KV cache q8_0 (10 ottobre 2026), sempre 100% in GPU e ~41 token/s: 24k 15,0 GB, 32k 15,3 GB, 40k 15,6 GB su 16,0, con ~1,4 GB occupati dal desktop. Restano ~390 MB liberi, quindi se altri programmi usano più VRAM conviene scendere a 32k. Ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM).
+Misurato sulla 4070 Ti Super (ottobre 2026), con la KV cache ancora in f16: 100% in GPU, ~40 token/s in scrittura e ~1.500 token/s in lettura del prompt, ~6 s di caricamento a freddo. Con un prompt di 13.000 token a 16k la VRAM arriva a 15,2 GB su 16,4. Questo modello ha pochi strati di attenzione piena, quindi il contesto costa poco: da 12k a 16k servono solo ~140 MB in più. Il `q3_K_L` (~15 GB) lascerebbe invece troppo poco margine, per questo si usa `iq3_m`. Dopo un messaggio, `ollama ps` deve indicare `100% GPU`; se una parte finisce su CPU, abbassa `num_ctx` nel Modelfile a 32768 e rilancia lo script. Con flash attention e KV cache q8_0 (10 ottobre 2026), sempre 100% in GPU e ~41 token/s: 24k 15,0 GB, 32k 15,3 GB, 40k 15,6 GB su 16,0, con ~1,4 GB occupati dal desktop. Restano ~390 MB liberi, quindi se altri programmi usano più VRAM conviene scendere a 32k. Rimisurato il 22 ottobre 2026 (Ollama 0.40.8) a contesto pieno, contando tutta la VRAM del PC: 40k 14,8 GB, 48k 15,1 GB, 56k 15,4 GB, 64k 15,65 GB. Il Modelfile ora usa **48k**, con ~0,55 GB di margine. Oltre ~15,65 GB il driver riversa nella RAM condivisa e il modello rallenta, ma con `num_gpu 999` `ollama ps` dice comunque `100% GPU`: il riversamento si vede solo dai contatori di Windows (`\GPU Adapter Memory(*)\Shared Usage`). Se la RAM condivisa sale mentre Qwen lavora, torna a 40960 nel Modelfile e rilancia lo script. Ogni passaggio Gemma ⇄ Qwen scarica un modello per caricare l'altro (non stanno insieme in VRAM).
 
 LocalAI usa il `num_ctx` del Modelfile al posto di `OLLAMA_CTX` per quel modello e dimensiona tutto su quello (vedi *Finestra di contesto* più sotto): documenti, pagine web e cronologia hanno lo spazio di quella finestra, e la richiesta non supera mai la finestra. Il nome mostrato nel menu, e con cui il modello si presenta, è in `config.ollama.labels` (`src/config.js`). Il menu elenca solo i modelli per cui Ollama riconosce i tool; se Qwen Coder non compare, aggiorna Ollama e rilancia lo script, che in quel caso lo segnala. Questo Qwen ha anche la capacità `vision`: con Qwen Coder selezionato le immagini allegate vanno direttamente a lui, senza passare da Qwen3-VL su ComfyUI.
 
@@ -215,7 +271,7 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
   Prima controlla che Ollama risponda: senza Ollama i task falliscono subito e la prova non direbbe niente. Poi crea quattro progetti `prova-coord-…` con un problema apposta: un test sbagliato, una pagina con un errore JavaScript già presente, un task vaghissimo, una libreria Python inesistente. Poi avvia le code, aspetta coda e coordinatore e controlla l'esito. Il resoconto, con cronologia e risposte del coordinatore, finisce in `prova-coordinatore-<data>.md`. Rilanciandolo i progetti vengono ricreati da capo; `--solo test-sbagliato,pagina-rotta` ne prova solo alcuni. Serve un utente amministratore, perché i test girano solo per loro. I progetti di prova hanno un solo tentativo per task (`--tentativi 1`): così alla prima verifica fallita interviene il coordinatore, che è quello che si vuole provare.
 - **Piano**: si scrive nel riquadro *Piano* (o lo scrive Claude Code direttamente in `PIANO.md` nella cartella del progetto). Con **Scrivi il piano con l'AI** basta scrivere l'obiettivo: il modello per la lettura (Gemma 26B, o il predefinito) prepara il piano nel formato giusto, da rivedere prima di creare i task. **Crea task dal piano** trasforma ogni punto di elenco (`- …` o `1. …`) in un task; le righe rientrate sotto un punto ne sono i dettagli e le caselle già spuntate (`- [x] …`) si saltano. Un task si può aggiungere anche a mano.
 - **Coda**: **Avvia coda** esegue i task in ordine, uno alla volta per tutto LocalAI (nei 16 GB di VRAM sta un solo modello). Tra progetti diversi passa prima il task che usa il modello già caricato. Gira sul server: continua anche con il browser chiuso o dal telefono spento. Se un task non riesce la coda del progetto va in pausa; dopo un riavvio di LocalAI il task interrotto torna in coda e si riprende con **Avvia**. Le chat dell'utente passano davanti ai task (priorità bassa verso l'agent del PC).
-- **Modello per tipo di task** (dal benchmark in `C:\AI\benchmark-delega`): *Codice* e *Pagina o gioco* a **Qwen Coder** (40k di contesto), *Lettura e analisi* (riassunti, log, estrazione, JSON) a **Gemma 26B HauhauCS** (64k di contesto), *Testo* al modello predefinito. Il tipo si sceglie da solo dalle parole del task, si forza nel piano con `[codice]`, `[pagina]`, `[lettura]`, `[testo]` all'inizio del punto, o si cambia dal menu del task. Se il modello scelto non è installato o non supporta gli strumenti (servono per leggere e scrivere i file) si usa quello predefinito: l'interfaccia mostra quale modello userà ogni tipo.
+- **Modello per tipo di task** (dal benchmark in `C:\AI\benchmark-delega`): *Codice* e *Pagina o gioco* a **Qwen Coder** (48k di contesto), *Lettura e analisi* (riassunti, log, estrazione, JSON) a **Gemma 26B HauhauCS** (32k di contesto: rimisurato il 22 ottobre 2026, ~78 tok/s a 32k, 63 a 64k, 45 a 128k), *Testo* al modello predefinito. Il tipo si sceglie da solo dalle parole del task, si forza nel piano con `[codice]`, `[pagina]`, `[lettura]`, `[testo]` all'inizio del punto, o si cambia dal menu del task. Se il modello scelto non è installato o non supporta gli strumenti (servono per leggere e scrivere i file) si usa quello predefinito: l'interfaccia mostra quale modello userà ogni tipo.
 - **Ogni task ha la sua chat** (titolo «Progetto · task»), con tutti i file scritti e gli esiti delle verifiche: si apre dal task e non compare nello storico a sinistra. Il modello vede il piano, i task già fatti con il loro riepilogo, e lavora solo nella cartella del progetto. Nei task non esegue comandi: i test li lancia LocalAI.
 - **Lingua**: le istruzioni che il modello riceve nei task, gli esiti della verifica e il messaggio al coordinatore sono in inglese, come il codice, i commenti e i test che scrive. Qwen Coder è allenato soprattutto in inglese e il testo occupa meno contesto. Piano, titoli dei task, riepiloghi, notifiche e risposte della chat restano in italiano.
 - **Verifica automatica**, dopo ogni turno del modello:
@@ -250,6 +306,18 @@ La voce **Progetti** nella barra laterale apre i progetti: ognuno è una cartell
 | `APP_URL` | vuoto (indirizzo HTTPS dell'app, per il link nelle notifiche) |
 | `VISION_MODEL` | vuoto = scelto dalla verifica (es. `gemma4-12b-uncensored:latest`, oppure `comfy:qwen3-vl`) |
 
+## Memoria: note che l'assistente ricorda
+
+Dalla voce **Memoria** nella barra laterale si scrivono note brevi che l'assistente usa quando c'entrano con la domanda: **preferenze** («preferisco risposte brevi con un esempio»), **fatti** («il NAS di casa è su 192.168.1.20»), **procedure** e **correzioni**. Ogni utente vede solo le proprie.
+
+- A ogni messaggio si cercano le note pertinenti per parole chiave (SQLite FTS5, nessun modello in più) e se ne aggiungono poche al prompt, al massimo ~1500 caratteri, con il numero della nota e la fonte. Se nessuna nota c'entra non si aggiunge niente. Nella risposta compare «N note dalla memoria» con le note usate.
+- Ambito: **generale** (tutte le chat) oppure **un progetto** (solo nella chat, nei task e nella bozza del piano di quel progetto).
+- Le note si cercano, modificano, disattivano (restano salvate ma non vengono usate) ed eliminano dalla pagina.
+- Chiavi API, token, password e credenziali negli URL vengono tolti prima di salvare (`[rimosso]`).
+- Interruttori: «Usa la memoria nelle risposte» nella pagina Memoria (per utente) e «Usa la memoria in questo progetto» nella sezione Verifica del progetto.
+- **Note proposte**: alla fine di un task della coda da cui c'è qualcosa da imparare (verifica non passata, più tentativi, consigli, errori, messaggi scritti nella chat del progetto mentre lavorava) e quando la coda di un progetto finisce, LocalAI mette da parte un resoconto. Quando la GPU è libera e nessuna coda lavora, Gemma 26B lo legge e propone da 0 a 5 note brevi (preferenza, fatto, procedura o correzione, con ambito generale o del progetto e la fonte). Le note proposte compaiono in cima alla pagina Memoria: **Conferma**, **Modifica** (salvare la conferma) o **Scarta**. Finché non sono confermate non entrano nel prompt. Stesso filtro dei segreti; con la memoria spenta (per l'utente o per il progetto) niente resoconti e niente proposte. `MEMORY_PROPOSE=0` le spegne, `MEMORY_PROPOSE_MODEL` cambia il modello.
+- Le chat normali non vengono lette: le note da lì si scrivono a mano. Il database è `data/memory.sqlite` (note e resoconti in attesa).
+
 ## HTTPS con Tailscale (microfono e notifiche dal telefono)
 
 Il browser concede microfono e notifiche solo alle pagine in HTTPS (o su `localhost`). Con Tailscale l'app ha un indirizzo HTTPS vero, `https://<nome-pc>.<tailnet>.ts.net`, raggiungibile dal telefono anche fuori casa e senza avvisi di certificato:
@@ -264,6 +332,24 @@ Lo script fa due cose:
 
 L'indirizzo `http://…:3000` continua a funzionare. Per tornare indietro: `tailscale serve reset`.
 
+## App Android
+
+La stessa interfaccia, in un'app con la sua icona sul telefono (cartella `android/`, Kotlin, una WebView puntata al server del PC). Non contiene i modelli: LocalAI deve girare sul PC come sempre.
+
+**Installazione.** L'APK si compila da solo in GitHub Actions a ogni modifica di `android/` e finisce nelle *Releases* della repository: **android-latest** (da `main`) o **android-prova** (dagli altri branch, per provarla prima di unire). Dal telefono si scarica `LocalAI.apk` e si installa consentendo le app da fonti sconosciute. Gli aggiornamenti si installano sopra la versione precedente senza perdere l'accesso, perché ogni build è firmata con la stessa chiave (`android/app/signing.keystore`, chiave per uso personale, non da Play Store).
+
+**Primo avvio.** Chiede l'indirizzo di LocalAI, lo stesso che si apre nel browser:
+- in casa, l'IP che il server stampa all'avvio (`192.168.1.10` basta: la porta 3000 si aggiunge da sola);
+- ovunque, con Tailscale: `https://<nome-pc>.<tailnet>.ts.net` (vedi *HTTPS con Tailscale*). È l'indirizzo consigliato: solo in HTTPS il **microfono** funziona anche nell'app.
+
+Per cambiarlo: tieni premuta l'icona dell'app → **Cambia indirizzo**, oppure il tasto che compare quando il PC non risponde.
+
+**Cosa fa in più del browser.** Graffetta e fotocamera aprono le app del telefono (la foto si scatta con la Fotocamera e si allega subito); **Scarica** salva foto, video e file nella cartella *Download* con la sessione già fatta; i link esterni e **Apri** di pagine e giochi della cartella di lavoro si aprono nel browser del telefono; il tasto Indietro torna alla pagina precedente; se il PC è spento o Tailscale è staccato compare una schermata con **Riprova**.
+
+**Limiti.** Le notifiche del browser non esistono dentro l'app: per gli avvisi a app chiusa c'è ntfy (vedi *Progetti*). In HTTP (`http://192.168…`) il microfono non è concesso, come nel browser: il tasto apre il registratore del telefono o la scelta di un file audio.
+
+**Compilarla a mano** (facoltativo): con Android Studio si apre la cartella `android/`, oppure da riga di comando, con l'SDK di Android installato, `cd android` e `gradlew assembleRelease`; l'APK è in `android/app/build/outputs/apk/release/`.
+
 ## Configurazione
 
 Si fa con variabili d'ambiente (i default sono in `src/config.js`):
@@ -274,6 +360,8 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `OLLAMA_MODEL` | `gemma4-12b-uncensored:latest` |
 | `OLLAMA_CTX` | `131072` (misurato su gemma4-12b: 10,4 GB, 100% GPU, ~64 tok/s come a 24k; i modelli con `num_ctx` nel Modelfile, come Qwen Coder, usano il proprio) |
 | `OLLAMA_KEEP_ALIVE` | `30m` |
+| `DOC_LONG_MODEL` | `hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0` (legge interi i documenti lunghi; vuoto = sempre riassunto a blocchi) |
+| `DOC_LONG_MIN_CHARS` | `90000` (~30k token: sotto, riassunto a blocchi con il modello della chat) |
 | `COMFY_URL` | `http://127.0.0.1:8188` |
 | `AGENT_URL` | `http://127.0.0.1:7070` (agent del PC, arbitro della GPU condiviso con ChatBz) |
 | `GPU_ARBITER` | `1` (`0` = solo l'arbitro interno) |
@@ -281,6 +369,9 @@ Si fa con variabili d'ambiente (i default sono in `src/config.js`):
 | `WORKSPACE_HTTPS_PORT` | vuoto (porta HTTPS dei file quando l'app è in HTTPS: `8443` con `tools/attiva-https.ps1`) |
 | `DATA_DIR` | `./data` (conversazioni, media, utenti, sessioni, progetti) |
 | `ASSISTANT_NAME` | `Gemma` |
+| `MEMORY_PACK_CHARS` | `1500` (caratteri massimi di note della memoria per messaggio) |
+| `MEMORY_PROPOSE` | `1` (note proposte dopo i task, da confermare; `0` le spegne) |
+| `MEMORY_PROPOSE_MODEL` | vuoto = Gemma 26B, il modello per lettura e analisi |
 
 ## Come funziona
 
@@ -371,10 +462,14 @@ src/
   snapshots.js       storia dei progetti con git: fotografie, diff, ripristino
   prompts.js         prompt di sistema, tool, router di ricerca e prompt engineer
   search.js          ricerca web (DuckDuckGo/SearXNG/Brave) e lettura pagine
-  documents.js       PDF/TXT: estrazione testo, riassunto map-reduce, recupero passaggi (BM25)
+  documents.js       PDF/TXT: estrazione testo, riassunto map-reduce (o lettura intera con LFM2.5), recupero passaggi (BM25)
+  memory.js          memoria: note dell'utente su SQLite, ricerca FTS5, filtro dei segreti, pacchetto per il prompt
+  proposte.js        memoria: resoconti dei task e note proposte da Gemma a GPU libera, da confermare
+  ocr.js             OCR delle scansioni (ocrmypdf): PDF ricercabili con la pagina originale intatta
+  pdf.js             PDF allegati: unione, OCR e riduzione del peso (con tools/pdf-tool.py)
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
-  workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
+  workspace.js       cartella di lavoro: file, comandi con conferma, PDF, Word e OCR
   docx.js            conversione HTML → .docx senza dipendenze
   projects.js        progetti: piano (PIANO.md), task, scelta del modello per tipo
   runner.js          coda dei task: un task alla volta, test, controllo pagine e tentativi
@@ -383,6 +478,7 @@ src/
   faces.js           volto originale rimesso dopo le modifiche (YOLO + maschera sfumata)
   videochain.js      video lunghi in pezzi e «Continua» (MiniMax H3)
 public/              interfaccia (HTML/CSS/JS, senza build)
+android/             app Android (WebView sul server del PC), compilata da GitHub Actions
 workflows/           workflow ComfyUI (API) + manifest + guide
 _legacy/             vecchia versione del progetto (si può eliminare)
 ```

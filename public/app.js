@@ -1,4 +1,5 @@
 // LocalAI — frontend (vanilla JS, nessun build step)
+import { VoiceMode } from './voice.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -46,6 +47,9 @@ const P = {
   play: '<path d="M7 4v16l13-8z"/>',
   audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  voice: '<path d="M2 10v4"/><path d="M6 6v12"/><path d="M10 3v18"/><path d="M14 8v8"/><path d="M18 5v14"/><path d="M22 10v4"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  sliders: '<path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h2"/><path d="M10 12h10"/><circle cx="8" cy="12" r="2"/><path d="M4 18h10"/><path d="M18 18h2"/><circle cx="16" cy="18" r="2"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
 };
@@ -147,7 +151,7 @@ const el = {
   convList: $('#conv-list'), modelName: $('#model-name'), modelMenu: $('#model-menu'),
   gpuPill: $('#gpu-pill'), gpuLabel: $('#gpu-label'), gpuMenu: $('#gpu-menu'),
   toBottom: $('#to-bottom'), gallery: $('#gallery'), lightbox: $('#lightbox'), lbBody: $('#lb-body'),
-  projects: $('#projects'),
+  projects: $('#projects'), memory: $('#memory'),
 };
 
 // ---------- Sidebar ----------
@@ -163,6 +167,7 @@ $('#scrim').onclick = () => setSidebar(false);
 $('#btn-new').onclick = () => { newChat(); if (isMobile()) setSidebar(false); };
 $('#btn-gallery').onclick = () => { openGallery(); if (isMobile()) setSidebar(false); };
 $('#btn-projects').onclick = () => { openProjects(); if (isMobile()) setSidebar(false); };
+$('#btn-memory').onclick = () => { openMemory(); if (isMobile()) setSidebar(false); };
 
 function groupLabel(ts) {
   const d = new Date(ts), now = new Date();
@@ -234,8 +239,16 @@ function showView(v) {
   $('#view-chat').hidden = v !== 'chat';
   $('#view-gallery').hidden = v !== 'gallery';
   $('#view-projects').hidden = v !== 'projects';
+  $('#view-memory').hidden = v !== 'memory';
   $('#btn-gallery').classList.toggle('active', v === 'gallery');
   $('#btn-projects').classList.toggle('active', v === 'projects');
+  $('#btn-memory').classList.toggle('active', v === 'memory');
+  // fuori dalla chat il modello non serve: al suo posto il nome della pagina
+  const title = { gallery: 'Galleria', projects: 'Progetti', memory: 'Memoria' }[v];
+  $('.model-picker').hidden = !!title;
+  $('#view-title').hidden = !title;
+  $('#view-title').textContent = title || '';
+  closeMenus();
 }
 
 function newChat(push = true) {
@@ -250,7 +263,7 @@ function newChat(push = true) {
   if (push && location.pathname !== '/') history.pushState(null, '', '/');
   renderConvList();
   updateSend();
-  el.input.focus();
+  focusInput();
 }
 
 async function openConv(id, push = true) {
@@ -279,6 +292,7 @@ function route() {
   else if (location.pathname.startsWith('/galleria')) openGallery(false);
   else if (location.pathname.startsWith('/progetti/')) openProject(decodeURIComponent(location.pathname.slice(10)), false);
   else if (location.pathname.startsWith('/progetti')) openProjects(false);
+  else if (location.pathname.startsWith('/memoria')) openMemory(false);
   else newChat(false);
 }
 
@@ -319,7 +333,7 @@ function renderMessage(m) {
     const tl = TOOL_LABEL[m.tool];
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
     const imgs = (m.attachments || []).map((a, i) => a.kind === 'document'
-      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : ''}</small></span></a>`
+      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : a.ocr ? ' · OCR' : ''}</small></span></a>`
       : a.kind === 'audio'
         ? `<div class="doc-chip tune-chip">${icon('mic', 18)}<span><b>Melodia canticchiata</b><small>${esc(melodyFacts(a))}</small></span><audio src="${esc(a.url)}" controls preload="none"></audio></div>`
         : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
@@ -405,19 +419,32 @@ function renderSteps(node, m, live) {
   const searches = steps.filter((s) => s.type === 'search').length;
   const visions = steps.filter((s) => s.type === 'vision').length;
   const docSteps = steps.filter((s) => s.type === 'document');
+  const memNotes = steps.filter((s) => s.type === 'memory').reduce((n, s) => n + (s.notes?.length || 0), 0);
+  const pdfSteps = steps.filter((s) => s.type === 'pdf');
   const parts = [];
+  if (memNotes) parts.push(memNotes === 1 ? '1 nota dalla memoria' : `${memNotes} note dalla memoria`);
+  if (pdfSteps.length) parts.push(pdfSteps.some((s) => s.status === 'error') ? 'PDF non riuscito' : 'PDF pronto');
   if (docSteps.length) parts.push('Documento consultato');
   if (visions) parts.push(visions === 1 ? 'Immagine analizzata' : `${visions} immagini analizzate`);
   if (searches) parts.push(`${searches} ${searches === 1 ? 'ricerca' : 'ricerche'}`);
   if (reads) parts.push(`${reads} ${reads === 1 ? 'pagina letta' : 'pagine lette'}`);
   $('.steps-title', box).textContent = running
-    ? (running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
+    ? (running.type === 'pdf' ? (running.text || 'Lavoro sui PDF…') : running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
     : parts.join(' · ');
-  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length ? 'doc' : 'eye', 14);
+  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length || pdfSteps.length ? 'doc' : memNotes && !visions ? 'brain' : 'eye', 14);
   box.classList.toggle('live', !!running);
-  if (box.dataset.auto !== 'off') box.open = live && !m.content;
+  // il PDF creato si scarica da qui: il riquadro resta aperto
+  if (box.dataset.auto !== 'off') box.open = (live && !m.content) || pdfSteps.some((s) => s.files?.length);
   $('.steps-list', box).innerHTML = steps.map((s) => {
     const state = s.status === 'running' ? '<span class="spin"></span>' : s.status === 'error' ? `<span class="step-err" title="${esc(s.error || '')}">non riuscita</span>` : '';
+    if (s.type === 'memory') {
+      return `<div class="step">${icon('brain', 14)}<div class="step-body"><div>Note dalla <a href="/memoria" data-memory-link>memoria</a></div>${(s.notes || []).map((n) => `<div class="faint">#${n.id} · ${esc(n.type)}${n.scope ? ' · progetto' : ''}: ${esc(n.text)}</div>`).join('')}</div></div>`;
+    }
+    if (s.type === 'pdf') {
+      const what = (s.ops || []).map((o) => ({ merge: 'unione', ocr: 'OCR', compress: 'riduzione del peso' })[o] || o).join(' + ');
+      const files = (s.files || []).map((f) => `<a class="doc-chip" href="${esc(f.url)}" download="${esc(f.name)}">${icon('download', 16)}<span><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small></span></a>`).join('');
+      return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>PDF (${esc(what)}): <b>${esc(s.title || '')}</b> ${state}</div>${s.text && s.status === 'running' ? `<div class="faint">${esc(s.text)}</div>` : ''}${files ? `<div class="srcs">${files}</div>` : ''}</div></div>`;
+    }
     if (s.type === 'document') {
       return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>${s.status === 'running' ? 'Analisi' : 'Documento'}: <b>${esc(s.title || '')}</b> ${state}</div>${s.text ? `<div class="faint" style="white-space:pre-wrap">${esc(s.text)}</div>` : ''}</div></div>`;
     }
@@ -453,7 +480,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', script: 'Script eseguito', ocr: 'OCR' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -506,9 +533,9 @@ function renderComputer(node, m) {
       }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
-      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
-      const links = s.status === 'done' && ['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) ? wsLinks(stepPath(s)) : '';
-      return `<div class="ws-act"><div class="ws-act-head">${icon(s.action === 'word' || s.action === 'pdf' ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
+      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.action === 'ocr' && s.status === 'done' ? `<span class="faint">${s.converted} ${s.converted === 1 ? 'file convertito' : 'file convertiti'}${s.failed ? `, ${s.failed} no` : ''}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
+      const links = s.status === 'done' && (['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) || (s.action === 'ocr' && s.converted === 1)) ? wsLinks(stepPath(s)) : '';
+      return `<div class="ws-act"><div class="ws-act-head">${icon(['word', 'pdf', 'ocr'].includes(s.action) ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
     }
     const where = s.cwd ? ` <span class="faint">in ${esc(s.cwd)}</span>` : '';
     const res = s.status === 'done'
@@ -809,6 +836,7 @@ function onEvent(evt) {
       const m = upsertMsg(evt.message);
       // risposta partita dal server (ripresa automatica in modalità Computer): il tasto diventa «Ferma»
       if (m.role === 'assistant' && m.status === 'pending' && state.conv) { state.conv.running = true; updateSend(); }
+      if (m.role === 'assistant') voice.follow(m.id);
       renderMessage(m);
       scrollToBottom(m.role === 'user');
       break;
@@ -824,6 +852,7 @@ function onEvent(evt) {
       m.status = 'streaming';
       if (evt.content) m.content += evt.content;
       if (evt.thinking) m.thinking = (m.thinking || '') + evt.thinking;
+      if (evt.content) voice.update(m.id, m.content);
       scheduleRender(m);
       break;
     }
@@ -839,6 +868,7 @@ function onEvent(evt) {
     case 'content': {
       const m = findMsg(evt.messageId); if (!m) break;
       m.content = evt.content;
+      voice.update(m.id, m.content);
       scheduleRender(m);
       break;
     }
@@ -880,6 +910,7 @@ function onEvent(evt) {
       const m = findMsg(evt.messageId); if (!m) break;
       m.status = evt.status; m.error = evt.error; m.stats = evt.stats;
       state.conv.running = false;
+      voice.update(m.id, m.content || '', true);
       renderMessage(m);
       updateSend();
       break;
@@ -943,6 +974,28 @@ document.addEventListener('click', (e) => {
 
 // ---------- Composer ----------
 const coarse = matchMedia('(pointer: coarse)').matches;
+/** Sul telefono il focus si lascia al tocco: da solo nascondeva il benvenuto (e su alcuni telefoni apre la tastiera). */
+function focusInput() { if (!coarse) el.input.focus(); }
+
+// Menu del composer: «+» (allegati) e, sul telefono, «Strumenti»
+const plusMenu = $('#plus-menu'), toolsBox = $('#tools');
+function closeMenus(except) {
+  if (except !== plusMenu) plusMenu.hidden = true;
+  if (except !== toolsBox) toolsBox.classList.remove('open');
+}
+$('#btn-plus').onclick = (e) => {
+  e.stopPropagation();
+  if (rec) return stopRecording();   // mentre registri la melodia il «+» è il tasto per fermarla
+  closeMenus(plusMenu);
+  plusMenu.hidden = !plusMenu.hidden;
+};
+plusMenu.addEventListener('click', () => { plusMenu.hidden = true; });
+$('#btn-tools').onclick = (e) => { e.stopPropagation(); closeMenus(toolsBox); toolsBox.classList.toggle('open'); };
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#plus-menu')) plusMenu.hidden = true;
+  if (!e.target.closest('#tools')) toolsBox.classList.remove('open');
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 function autosize() { el.input.style.height = 'auto'; el.input.style.height = `${Math.min(el.input.scrollHeight, 220)}px`; }
 el.input.addEventListener('input', () => { autosize(); updateSend(); });
 el.input.addEventListener('keydown', (e) => {
@@ -1001,7 +1054,7 @@ async function addFiles(files) {
         const res = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': dt, 'X-Filename': encodeURIComponent(f.name) }, body: f });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Caricamento non riuscito');
-        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile: non potrò leggerne il contenuto.`);
+        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile e l'OCR non è riuscito (o ocrmypdf non è installato): non potrò leggerne il contenuto.`);
         Object.assign(att, data);
       } catch (err) {
         state.attachments = state.attachments.filter((a) => a !== att);
@@ -1121,12 +1174,12 @@ async function startRecording() {
     clearInterval(timer);
     s.getTracks().forEach((t) => t.stop());
     rec = null;
-    $('#btn-hum').classList.remove('on');
+    $('#btn-plus').classList.remove('on');
     renderAttachments();
     if (chunks.length) addMelody(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
   };
   recorder.start(250);
-  $('#btn-hum').classList.add('on');
+  $('#btn-plus').classList.add('on');
   renderAttachments();
   rec.timer = setInterval(() => {
     const s = (Date.now() - rec.t0) / 1000;
@@ -1153,6 +1206,66 @@ function updateHum() {
   $('#btn-hum').hidden = !(state.config?.workflows || []).some((w) => w.type === 'audio' && w.mode === 'melody' && w.available !== false);
 }
 
+// ---------- Conversazione a voce (public/voice.js) ----------
+const VOICE_STATE = {
+  listening: 'Ti ascolto…', recording: 'Ti ascolto…', transcribing: 'Trascrivo…',
+  thinking: 'Penso…', speaking: 'Rispondo · tocca il cerchio per interrompere', error: 'Qualcosa non va',
+};
+const voicePanel = $('#voice-panel'), voiceOrb = $('#voice-orb');
+const voice = new VoiceMode({
+  send: (text) => sendMessage(text, null, { voice: true }),
+  stop: () => state.conv && api(`/api/conversations/${state.conv.id}/stop`, { method: 'POST' }).catch(() => {}),
+  onState: (st, info) => {
+    voicePanel.dataset.state = st;
+    $('#voice-state').textContent = st === 'thinking' && state.gpu?.active && state.gpu.active.who !== 'ollama' ? 'Aspetto la GPU…' : VOICE_STATE[st] || st;
+    if (info.heard) $('#voice-heard').textContent = `«${info.heard}»`;
+    if (info.error) $('#voice-heard').textContent = info.error;
+    if (st === 'listening') voiceOrb.style.setProperty('--lv', 0);
+  },
+  onLevel: (rms) => { if (voice.state === 'listening' || voice.state === 'recording') voiceOrb.style.setProperty('--lv', Math.min(1, rms * 12).toFixed(2)); },
+});
+voice.voice = prefs.voice || '';
+voice.bargeIn = !!prefs.voiceBarge;
+$('#voice-barge').checked = voice.bargeIn;
+$('#voice-barge').onchange = (e) => { voice.bargeIn = prefs.voiceBarge = e.target.checked; savePrefs(); };
+$('#voice-pick').onchange = (e) => { voice.voice = prefs.voice = e.target.value; savePrefs(); };
+
+/** Il tasto della voce compare solo se il servizio voce del PC risponde (tools/installa-voce.ps1). */
+async function updateVoice() {
+  const info = await api('/api/voice').catch(() => null);
+  const ok = !!info?.ok;
+  $('#btn-voice').hidden = !ok;
+  if (!ok) return;
+  const list = info.voices || [];
+  if (!list.some((v) => v.id === voice.voice)) voice.voice = info.tts?.default || '';
+  $('#voice-pick').innerHTML = list.map((v) => `<option value="${esc(v.id)}" ${v.id === voice.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('#voice-pick').closest('label').hidden = list.length < 2;
+}
+
+function setVoicePanel(on) {
+  voicePanel.hidden = !on;
+  el.composer.classList.toggle('voice-on', on);
+  $('#btn-voice').classList.toggle('on', on);
+  if (!on) $('#voice-heard').textContent = '';
+}
+
+$('#btn-voice').onclick = async () => {
+  if (voice.active) { voice.stopAll(); return setVoicePanel(false); }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    alert("Il microfono nel browser funziona solo su http://localhost o in HTTPS: dal telefono apri l'indirizzo HTTPS di Tailscale (vedi README).");
+    return;
+  }
+  setVoicePanel(true);
+  try { await voice.start(); }
+  catch (err) {
+    voice.stopAll();
+    setVoicePanel(false);
+    alert(err.name === 'NotAllowedError' ? 'Permesso del microfono negato: consentilo dalle impostazioni del sito.' : `Microfono non disponibile (${err.message})`);
+  }
+};
+$('#voice-end').onclick = () => { voice.stopAll(); setVoicePanel(false); };
+voiceOrb.onclick = () => voice.interrupt();
+
 $('#btn-attach').onclick = () => fileInput.click();
 $('#btn-camera').onclick = () => cameraInput.click();
 for (const inp of [fileInput, cameraInput]) inp.onchange = () => { addFiles(inp.files); inp.value = ''; };
@@ -1177,6 +1290,11 @@ function renderOpts() {
   $$('.chip[data-tool]').forEach((c) => c.classList.toggle('on', c.dataset.tool === state.tool));
   $('#chip-think').classList.toggle('on', state.think);
   $('#chip-computer').classList.toggle('on', state.computer);
+  el.input.placeholder = state.computer ? 'Cosa creo o faccio sul PC? (es. un gioco tipo Tetris, una pagina web, un documento Word…)' : 'Scrivi un messaggio…';
+  // telefono: il tasto «Strumenti» dice quali sono accesi, senza aprire il menu
+  const on = $$('#tools .chip.on:not([hidden])').map((c) => c.textContent.trim());
+  $('#tools-label').textContent = on.length ? on.join(' · ') : 'Strumenti';
+  $('#btn-tools').classList.toggle('on', on.length > 0);
   const wf = state.config?.workflows || [];
   const sel = (key, options, title) => `<label class="select-chip" title="${title}"><select data-pref="${key}">${options.map(([v, l]) => `<option value="${v}" ${String(prefs[key] ?? 'auto') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
   let html = '';
@@ -1201,14 +1319,13 @@ el.opts.addEventListener('change', (e) => {
   if (s) { prefs[s.dataset.pref] = s.value; savePrefs(); }
 });
 $$('.chip[data-tool]').forEach((c) => {
-  c.onclick = () => { state.tool = state.tool === c.dataset.tool ? null : c.dataset.tool; renderOpts(); el.input.focus(); };
+  c.onclick = () => { state.tool = state.tool === c.dataset.tool ? null : c.dataset.tool; renderOpts(); focusInput(); };
 });
 $('#chip-computer').onclick = () => {
   state.computer = !state.computer;
   renderOpts();
   if (state.conv) api(`/api/conversations/${state.conv.id}`, { method: 'PATCH', body: { computer: state.computer } }).catch(() => {});
-  el.input.placeholder = state.computer ? 'Cosa creo o faccio sul PC? (es. un gioco tipo Tetris, una pagina web, un documento Word…)' : 'Scrivi un messaggio…';
-  el.input.focus();
+  focusInput();
 };
 $('#chip-think').onclick = () => { state.think = !state.think; prefs.think = state.think; savePrefs(); renderOpts(); };
 
@@ -1223,7 +1340,7 @@ el.composer.addEventListener('submit', async (e) => {
   await sendMessage(text, state.tool);
 });
 
-async function sendMessage(text, tool) {
+async function sendMessage(text, tool, extra = {}) {
   const atts = state.attachments.filter((a) => a.file);
   el.input.value = ''; autosize();
   state.attachments = [];
@@ -1242,7 +1359,7 @@ async function sendMessage(text, tool) {
     updateSend();
     state.stick = true;
     const body = {
-      text, tool, model: currentModel(), think: state.think, computer: state.computer,
+      text, tool, model: currentModel(), think: state.think && !extra.voice, computer: state.computer, ...extra,
       imageModel: prefs.imageModel || 'auto',
       aspect: tool === 'video' ? (prefs.vaspect || 'auto') : tool === 'image' ? (prefs.aspect || 'auto') : 'auto',
       duration: tool === 'video' ? (prefs.duration || 'auto') : 'auto',
@@ -1253,6 +1370,7 @@ async function sendMessage(text, tool) {
     scrollToBottom(true);
   } catch (err) {
     if (state.conv) state.conv.running = false;
+    if (extra.voice) { updateSend(); throw err; }
     el.input.value = text; autosize();
     state.attachments = atts;
     renderAttachments();
@@ -1315,8 +1433,9 @@ async function openProjects(push = true) {
   if (push) history.pushState(null, '', '/progetti');
   document.title = 'Progetti · LocalAI';
   const list = await api('/api/projects').catch(() => []);
-  el.projects.innerHTML = `<div class="pj-head"><h2>Progetti</h2></div>
-    <p class="faint-note" style="margin:0">Ogni progetto ha la sua cartella sul PC, un piano e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici. Le cartelle create in chat con <b>Computer</b> compaiono qui.</p>
+  delete el.projects.dataset.tab;
+  delete el.projects.dataset.project;
+  el.projects.innerHTML = `<p class="faint-note page-intro">Ogni progetto ha la sua cartella sul PC, un piano e una coda di task che i modelli locali eseguono uno alla volta, con test e controllo delle pagine automatici. Le cartelle create in chat con <b>Computer</b> compaiono qui.</p>
     <div class="pj-new"><input id="pj-name" placeholder="Nome del nuovo progetto (es. Tetris, Sito ristorante)" maxlength="80"><button class="btn primary" id="pj-create">Crea progetto</button></div>
     ${list.length ? list.map((p) => `<button class="project pj-row" data-open="${esc(p.id)}">
       <h3>${icon('folder', 16)}${esc(p.name)}${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait">in attesa di Ollama</span>' : ''}</h3>
@@ -1358,7 +1477,7 @@ function refreshProject() {
 
 function renderCheck(c) {
   const cls = c.ok === true ? 'ok' : c.ok === false ? 'ko' : 'na';
-  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', advice: 'Consigli' }[c.kind] || c.kind;
+  const label = { test: 'Test', page: 'Pagina', vision: 'Screenshot', deps: 'Librerie', text: 'Testo', files: 'File', advice: 'Consigli' }[c.kind] || c.kind;
   return `<div class="pj-check ${cls}"><div><b>${label}</b> <span class="faint">tentativo ${c.attempt || 1}${c.model ? ` · ${esc(modelLabel(c.model))}` : ''}${c.command ? ` · <code>${esc(c.command)}</code>` : ''}</span></div>
     <div>${esc(c.summary || '')}</div>
     ${c.screenshotUrl ? `<a href="${esc(c.screenshotUrl)}" target="_blank" rel="noopener"><img class="pj-shot" src="${esc(c.screenshotUrl)}" alt="Screenshot" loading="lazy"></a>` : ''}
@@ -1413,13 +1532,21 @@ function renderProject() {
   // link di una chat mostrava (e salvava) il piano di Missile Command rimasto nella pagina nascosta
   const keepPlan = $('#pj-plan');
   const draft = keepPlan && keepPlan.dataset.dirty === '1' && keepPlan.dataset.project === p.id ? keepPlan.value : null;
+  // idem per quello che si sta scrivendo negli altri campi: la pagina si ridisegna a ogni novità della coda
+  const typing = {};
+  if (el.projects.dataset.project === p.id) for (const id of ['pj-ask', 'pj-task-text', 'pj-testcmd']) { const n = $(`#${id}`); if (n) typing[id] = n.value; }
+  const focused = document.activeElement?.id, caret = document.activeElement?.selectionStart;
+  if (el.projects.dataset.project !== p.id) state.projectTab = 'task';
+  el.projects.dataset.project = p.id;
+  const tab = state.projectTab || 'task';
+  const failed = p.tasks.filter((t) => ['failed', 'error'].includes(t.status)).length;
   const admin = state.user?.role === 'admin';
   const hasIndex = p.files.some((f) => f.path === 'index.html');
   const queued = p.tasks.filter((t) => t.status === 'queued').length;
   const files = p.files.filter((f) => !f.dir);
   el.projects.innerHTML = `
     <div class="pj-head">
-      <button class="btn ghost" data-back>${icon('right', 14)}Progetti</button>
+      <button class="btn ghost" data-back title="Tutti i progetti">${icon('right', 14)}<span class="wide-only">Progetti</span></button>
       <h2>${esc(p.name)}</h2>
       ${p.active ? '<span class="pj-pill on">coda attiva</span>' : ''}${p.waiting ? '<span class="pj-pill wait" title="Ollama non risponde: la coda riparte da sola quando torna">in attesa di Ollama</span>' : ''}
       <span class="spacer"></span>
@@ -1427,7 +1554,13 @@ function renderProject() {
       ${p.active ? `<button class="btn" data-pj="pause">Pausa</button><button class="btn" data-pj="stop">Ferma ora</button>` : `<button class="btn primary" data-pj="start" ${queued ? '' : 'disabled'}>${icon('play', 14)}Avvia coda${queued ? ` (${queued})` : ''}</button>`}
       <button class="btn ghost" data-pj="delete" title="Elimina progetto e cartella">${icon('trash', 14)}</button>
     </div>
-    <section class="pj-card pj-talk">
+    <div class="tabs" id="pj-tabs">
+      <button class="tab ${tab === 'task' ? 'active' : ''}" data-tab="task">Lavoro<span class="tab-n ${failed ? 'ko' : ''}">${p.done}/${p.total}</span></button>
+      <button class="tab ${tab === 'plan' ? 'active' : ''}" data-tab="plan">Piano</button>
+      <button class="tab ${tab === 'files' ? 'active' : ''}" data-tab="files">File<span class="tab-n">${files.length}</span></button>
+      <button class="tab ${tab === 'settings' ? 'active' : ''}" data-tab="settings">Impostazioni</button>
+    </div>
+    <section class="pj-card pj-talk" data-tab-of="task">
       <div class="pj-card-head"><h3>Parla con il progetto</h3><span class="faint">domande, modifiche e nuove funzioni: le piccole le fa subito, le grandi diventano task della coda</span></div>
       <div class="pj-add">
         <textarea id="pj-ask" rows="2" placeholder="Es. «aggiungi un tasto pausa», «il punteggio non sale quando completo una riga», «come funziona il salvataggio?»"></textarea>
@@ -1436,15 +1569,15 @@ function renderProject() {
       ${(p.chats || []).length ? `<div class="pj-chats">${p.chats.slice(0, 5).map((c, i) => `<a href="/c/${c.id}" data-conv="${c.id}">${icon('chat', 13)}${esc(c.title)}<span class="faint">${c.running ? 'risponde…' : when(c.updatedAt)}${i === 0 ? ' · i nuovi messaggi vanno qui' : ''}</span></a>`).join('')}<button class="linkish" data-pj="new-chat">Nuova chat del progetto</button></div>` : ''}
     </section>
 
-    <p class="faint-note">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge. Se si incastra sullo stesso errore, ${esc(modelLabel(p.models.read))} lo analizza e gli scrive dei consigli in CONSIGLI.md.</p>
+    <p class="faint-note" data-tab-of="settings" style="margin:0">I task partono uno alla volta (anche a browser chiuso): codice e pagine a ${esc(modelLabel(p.models.code))}, lettura e analisi a ${esc(modelLabel(p.models.read))}, testi a ${esc(modelLabel(p.models.chat))}. Dopo ogni task LocalAI fa i test e, per le pagine, apre il browser e guarda lo screenshot; se qualcosa non va il modello corregge. Se si incastra sullo stesso errore, ${esc(modelLabel(p.models.read))} lo analizza e gli scrive dei consigli in CONSIGLI.md.</p>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="plan">
       <div class="pj-card-head"><h3>Piano</h3><span class="faint">${esc(p.folder)}/PIANO.md · ogni punto «- …» diventa un task; tipo forzabile con [codice], [pagina], [lettura], [testo]</span></div>
       <textarea id="pj-plan" data-project="${esc(p.id)}" rows="8" placeholder="Scrivi qui il piano, oppure solo l'obiettivo (es. «un clone di Tetris giocabile anche da telefono») e premi «Scrivi il piano con l'AI».&#10;&#10;Esempio di piano:&#10;# Obiettivo&#10;Un gioco tipo Tetris per browser&#10;&#10;- [pagina] index.html con griglia 10×20, pezzi, rotazione e punteggio&#10;- [codice] logica in game.js con test in tests/game.test.js&#10;- [testo] README con i comandi">${esc(draft ?? p.plan)}</textarea>
       <div class="pj-row-btns"><button class="btn" data-pj="draft-plan" title="Un modello locale scrive il piano partendo da quello che c'è nel riquadro (anche solo l'obiettivo)">Scrivi il piano con l'AI</button><button class="btn" data-pj="save-plan">Salva piano</button><button class="btn primary" data-pj="plan-tasks">Crea task dal piano</button></div>
     </section>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="task">
       <div class="pj-card-head"><h3>Task</h3><span class="faint">${p.done} di ${p.total} fatti</span></div>
       ${p.tasks.length ? p.tasks.map((t, i) => renderTask(t, i, p)).join('') : '<div class="faint-note" style="margin:0">Nessun task: crealo dal piano o aggiungilo qui sotto.</div>'}
       <div class="pj-add">
@@ -1454,33 +1587,38 @@ function renderProject() {
       </div>
     </section>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="settings">
       <div class="pj-card-head"><h3>Verifica</h3></div>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autotest" ${p.autoTest ? 'checked' : ''}> Fai girare i test dopo i task di codice${admin ? '' : ' (solo amministratore)'}</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-coordinator" ${p.coordinator ? 'checked' : ''}> Coordinatore della coda: se un task fallisce o si blocca, l'AI indaga nella chat del progetto, corregge o riscrive il task e fa ripartire la coda</label>
       <label class="pj-check-opt"><input type="checkbox" id="pj-autoresume" ${p.autoResume ? 'checked' : ''}> Se LocalAI si riavvia con la coda attiva, riprendi da solo</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-memory" ${p.memory ? 'checked' : ''}> Usa la <a href="/memoria" data-memory-link>memoria</a> in questo progetto (note generali e del progetto nella chat, nei task e nella bozza del piano)</label>
+      <label class="pj-check-opt"><input type="checkbox" id="pj-review" ${p.reviewPlan ? 'checked' : ''}> Mostrami il piano prima di partire: i task chiesti in chat aspettano che tu prema «Avvia» (con una notifica)</label>
       <label class="pj-check-opt">Tentativi per task prima di fermarsi (o di chiamare il coordinatore): <select id="pj-attempts">${[['', `predefinito (${p.defaultAttempts})`], ...[1, 2, 3, 4, 5].map((n) => [n, n])].map(([v, l]) => `<option value="${v}" ${String(p.maxAttempts || '') === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${'Notification' in window && Notification.permission !== 'granted' ? `<div class="faint-note" style="margin:6px 0 0">${Notification.permission === 'denied' ? 'Notifiche del browser bloccate per questo sito: riattivale dalle impostazioni del sito.' : window.isSecureContext ? '<button class="btn" data-pj="notify">Attiva le notifiche del browser</button> (coda finita, task non riusciti, coordinatore)' : 'Le notifiche del browser richiedono HTTPS (o localhost): vedi il README.'}</div>` : ''}
       ${admin ? `<div class="pj-add"><input id="pj-testcmd" placeholder="Comando di test (vuoto = automatico: npm test, node --test, pytest/unittest)" value="${esc(p.testCommand || '')}"><button class="btn" data-pj="save-test">Salva</button></div>` : ''}
       <div id="pj-vision" class="faint-note" style="margin:6px 0 0"></div>
     </section>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="files">
       <div class="pj-card-head"><h3>File</h3><span class="faint">${files.length}</span></div>
       ${files.length ? files.map((f) => `<div class="project-file"><span class="name">${esc(f.path)}</span><span class="faint">${fmtSize(f.size)} · ${when(f.mtime)}</span>${wsLinks(`${p.folder}/${f.path}`)}</div>`).join('') : '<div class="faint-note" style="margin:0">Cartella vuota</div>'}
     </section>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="files">
       <div class="pj-card-head"><h3>Storia della cartella</h3><span class="faint">fotografie prima e dopo ogni task e ogni modifica dalla chat</span></div>
       ${!p.git ? '<div class="faint-note" style="margin:0">Git non è installato sul PC: senza, i task non si possono annullare. Installalo da git-scm.com e riavvia LocalAI.</div>'
         : p.history.length ? p.history.map((h, i) => `<div class="pj-ver"><span class="faint">${when(h.at)}</span><span class="name">${esc(h.message)}</span><span class="faint">${h.files} file</span>${i ? `<button class="linkish" data-restore="${h.commit}" data-label="${esc(h.message)}">ripristina</button>` : '<span class="faint">attuale</span>'}</div>`).join('')
         : '<div class="faint-note" style="margin:0">La prima fotografia si fa al primo task o al primo messaggio nella chat del progetto.</div>'}
     </section>
 
-    <section class="pj-card">
+    <section class="pj-card" data-tab-of="files">
       <div class="pj-card-head"><h3>Cronologia</h3></div>
       <div class="pj-log">${p.log.slice().reverse().map((l) => `<div><span class="faint">${when(l.at)}</span> ${esc(l.text)}</div>`).join('') || '<div class="faint">—</div>'}</div>
     </section>`;
+  el.projects.dataset.tab = tab;
+  for (const [id, v] of Object.entries(typing)) { const n = $(`#${id}`); if (n) n.value = v; }
+  if (focused && typing[focused] !== undefined) { const n = $(`#${focused}`); n.focus(); try { n.setSelectionRange(caret, caret); } catch {} }
   const plan = $('#pj-plan');
   if (draft !== null) plan.dataset.dirty = '1';
   plan.oninput = () => { plan.dataset.dirty = '1'; };
@@ -1503,6 +1641,12 @@ el.projects.addEventListener('click', async (e) => {
   const open = e.target.closest('[data-open]');
   if (open) return openProject(open.dataset.open);
   if (e.target.closest('[data-back]')) return openProjects();
+  const tabBtn = e.target.closest('#pj-tabs .tab');
+  if (tabBtn) {
+    state.projectTab = el.projects.dataset.tab = tabBtn.dataset.tab;
+    $$('#pj-tabs .tab').forEach((b) => b.classList.toggle('active', b === tabBtn));
+    return;
+  }
   const conv = e.target.closest('[data-conv]');
   if (conv) { e.preventDefault(); return openConv(conv.dataset.conv); }
   const tog = e.target.closest('[data-toggle]');
@@ -1551,6 +1695,7 @@ el.projects.addEventListener('click', async (e) => {
       // salvato: il riquadro torna a mostrare PIANO.md (prima restava «in scrittura» per sempre)
       plan.dataset.dirty = '';
       if (!await run(() => api(`${base}/plan`, { method: 'PUT', body: { text: plan.value } }))) { plan.dataset.dirty = '1'; return; }
+      if (b.dataset.pj === 'plan-tasks') state.projectTab = 'task';   // i task appena creati si vedono nella scheda Lavoro
       if (b.dataset.pj === 'plan-tasks') await run(() => api(`${base}/plan/tasks`, { method: 'POST' }));
       return;
     }
@@ -1609,6 +1754,134 @@ el.projects.addEventListener('change', (e) => {
   if (e.target.id === 'pj-attempts') api(base, { method: 'PATCH', body: { maxAttempts: e.target.value || 0 } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-autoresume') api(base, { method: 'PATCH', body: { autoResume: e.target.checked } }).catch((err) => alert(err.message));
   if (e.target.id === 'pj-coordinator') api(base, { method: 'PATCH', body: { coordinator: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-memory') api(base, { method: 'PATCH', body: { memory: e.target.checked } }).catch((err) => alert(err.message));
+  if (e.target.id === 'pj-review') api(base, { method: 'PATCH', body: { reviewPlan: e.target.checked } }).catch((err) => alert(err.message));
+});
+
+// ---------- Memoria: note dell'utente usate nelle risposte ----------
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-memory-link]');
+  if (!a || e.ctrlKey || e.metaKey) return;
+  e.preventDefault();
+  openMemory();
+});
+const memState = { q: '', scope: 'tutte', status: '', editing: null, data: null };
+async function openMemory(push = true) {
+  showView('memory');
+  state.conv = null;
+  state.project = null;
+  renderConvList();
+  if (push && location.pathname !== '/memoria') history.pushState(null, '', '/memoria');
+  document.title = 'Memoria · LocalAI';
+  await loadMemory();
+}
+async function loadMemory() {
+  const qs = new URLSearchParams({ q: memState.q, scope: memState.scope, status: memState.status });
+  try { memState.data = await api(`/api/memory?${qs}`); }
+  catch (err) { el.memory.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  renderMemory();
+}
+const scopeLabel = (scope) => (scope ? `Progetto: ${memState.data.projects.find((p) => p.id === scope)?.name || scope}` : 'Generale');
+const scopeOptions = (sel, all = false) => [...(all ? [['tutte', 'Tutti gli ambiti']] : []), ['', 'Generale (tutte le chat)'], ...memState.data.projects.map((p) => [p.id, `Progetto: ${p.name}`])]
+  .map(([v, l]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+const typeOptions = (sel) => Object.entries(memState.data.types).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
+
+const PROPOSED = 'da confermare';
+function renderMemory() {
+  const d = memState.data;
+  // note proposte dopo i task: Conferma (entra nel prompt), Modifica (salvare la conferma), Scarta (si elimina)
+  const proposed = (n) => memState.editing === n.id ? note(n) : `<div class="project mem-note mem-proposed" data-note="${n.id}">
+        <div class="mem-body">${esc(n.text)}</div>
+        <div class="mem-row faint-note"><span class="pj-pill on">${esc(d.types[n.type] || n.type)}</span><span class="pj-pill">${esc(scopeLabel(n.scope))}</span>
+          <span>#${n.id} · ${esc(n.source)} · ${when(n.createdAt)}</span>
+          <span class="spacer"></span>
+          <button class="btn primary" data-mem="confirm">Conferma</button>
+          <button class="btn ghost" data-mem="edit">Modifica</button>
+          <button class="btn ghost" data-mem="discard">Scarta</button></div>
+      </div>`;
+  const note = (n) => memState.editing === n.id
+    ? `<div class="project mem-note" data-note="${n.id}">
+        <textarea class="mem-text" rows="3" maxlength="1000">${esc(n.text)}</textarea>
+        <div class="mem-row"><select class="mem-type">${typeOptions(n.type)}</select><select class="mem-scope">${scopeOptions(n.scope)}</select>
+        <span class="spacer"></span><button class="btn" data-mem="cancel">Annulla</button><button class="btn primary" data-mem="save">${n.status === PROPOSED ? 'Salva e conferma' : 'Salva'}</button></div>
+      </div>`
+    : `<div class="project mem-note${n.status === 'archiviata' ? ' off' : ''}" data-note="${n.id}">
+        <div class="mem-body">${esc(n.text)}</div>
+        <div class="mem-row faint-note"><span class="pj-pill on">${esc(d.types[n.type] || n.type)}</span><span class="pj-pill">${esc(scopeLabel(n.scope))}</span>${n.status === 'archiviata' ? '<span class="pj-pill">disattivata</span>' : ''}
+          <span>#${n.id} · ${esc(n.source)} · ${when(n.updatedAt)}${n.uses ? ` · usata ${n.uses} ${n.uses === 1 ? 'volta' : 'volte'}` : ''}</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" data-mem="edit">Modifica</button>
+          <button class="btn ghost" data-mem="toggle">${n.status === 'archiviata' ? 'Riattiva' : 'Disattiva'}</button>
+          <button class="btn ghost" data-mem="delete">Elimina</button></div>
+      </div>`;
+  const filtered = memState.q || memState.scope !== 'tutte' || memState.status;
+  const notes = memState.status === PROPOSED ? d.notes : d.notes.filter((n) => n.status !== PROPOSED);
+  const pending = memState.status === PROPOSED ? [] : d.proposed || [];
+  el.memory.innerHTML = `<p class="faint-note page-intro">Note che l'assistente usa quando c'entrano con la domanda: preferenze, fatti, procedure e correzioni. A ogni messaggio si cercano le note pertinenti (per parole chiave) e se ne aggiungono poche al prompt, con il numero della nota. Le note di un progetto valgono solo nelle chat, nei task e nel piano di quel progetto. Chiavi, password e token vengono tolti prima di salvare.</p>
+    <label class="pj-check-opt"><input type="checkbox" id="mem-enabled" ${d.enabled ? 'checked' : ''}> Usa la memoria nelle risposte${d.enabled ? '' : ' <b>(spenta: le note restano salvate ma non vengono usate)</b>'}</label>
+    ${pending.length ? `<section class="pj-card"><h3 style="margin:0 0 4px">Note proposte da confermare (${pending.length})</h3>
+      <p class="faint-note" style="margin:0 0 8px">Le ha proposte un modello locale dopo i task dei progetti (errori, correzioni, cose che hanno funzionato). Non vengono usate finché non le confermi.</p>
+      ${pending.map(proposed).join('')}</section>` : ''}
+    <section class="pj-card mem-add">
+      <textarea id="mem-new" rows="2" maxlength="1000" placeholder="Nuova nota, es. «Preferisco risposte brevi con un esempio» oppure «Il NAS di casa è su 192.168.1.20»"></textarea>
+      <div class="mem-row"><select id="mem-new-type">${typeOptions('preferenza')}</select><select id="mem-new-scope">${scopeOptions('')}</select><span class="spacer"></span><button class="btn primary" data-mem="add">Aggiungi</button></div>
+    </section>
+    <div class="mem-row mem-filters"><input id="mem-q" type="search" placeholder="Cerca nelle note" value="${esc(memState.q)}">
+      <select id="mem-f-scope">${scopeOptions(memState.scope, true)}</select>
+      <select id="mem-f-status">${[['', 'Attive e disattivate'], ['attiva', 'Solo attive'], ['archiviata', 'Solo disattivate'], [PROPOSED, 'Da confermare']].map(([v, l]) => `<option value="${v}" ${v === memState.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${notes.length ? notes.map((n) => (n.status === PROPOSED ? proposed(n) : note(n))).join('') : `<div class="empty">${filtered ? 'Nessuna nota trovata.' : 'Ancora nessuna nota. Scrivine una qui sopra: per esempio come preferisci le risposte o un fatto da ricordare.'}</div>`}`;
+}
+el.memory.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-mem]');
+  if (!b) return;
+  const card = b.closest('[data-note]');
+  const id = card ? Number(card.dataset.note) : null;
+  const n = id && [...memState.data.notes, ...(memState.data.proposed || [])].find((x) => x.id === id);
+  const warn = (out) => { if (out.removed) alert(`Tolti dalla nota ${out.removed} ${out.removed === 1 ? 'dato segreto' : 'dati segreti'} (chiavi, password o token).`); };
+  try {
+    switch (b.dataset.mem) {
+      case 'add': {
+        const text = $('#mem-new').value.trim();
+        if (!text) return $('#mem-new').focus();
+        warn(await api('/api/memory', { body: { text, type: $('#mem-new-type').value, scope: $('#mem-new-scope').value } }));
+        break;
+      }
+      case 'edit': memState.editing = id; return renderMemory();
+      case 'cancel': memState.editing = null; return renderMemory();
+      case 'save':
+        warn(await api(`/api/memory/${id}`, { method: 'PATCH', body: { text: $('.mem-text', card).value, type: $('.mem-type', card).value, scope: $('.mem-scope', card).value, ...(n?.status === PROPOSED ? { status: 'attiva' } : {}) } }));
+        memState.editing = null;
+        break;
+      case 'confirm': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: 'attiva' } }); break;
+      case 'discard': await api(`/api/memory/${id}`, { method: 'DELETE' }); break;
+      case 'toggle': await api(`/api/memory/${id}`, { method: 'PATCH', body: { status: n.status === 'archiviata' ? 'attiva' : 'archiviata' } }); break;
+      case 'delete':
+        if (!confirm('Eliminare questa nota? Non si può annullare (per tenerla senza usarla, disattivala).')) return;
+        await api(`/api/memory/${id}`, { method: 'DELETE' });
+        break;
+      default: return;
+    }
+    await loadMemory();
+  } catch (err) { alert(err.message); }
+});
+el.memory.addEventListener('change', async (e) => {
+  try {
+    if (e.target.id === 'mem-enabled') { await api('/api/memory/settings', { method: 'PUT', body: { enabled: e.target.checked } }); return loadMemory(); }
+    if (e.target.id === 'mem-f-scope') { memState.scope = e.target.value; return loadMemory(); }
+    if (e.target.id === 'mem-f-status') { memState.status = e.target.value; return loadMemory(); }
+  } catch (err) { alert(err.message); }
+});
+let memSearch = null;
+el.memory.addEventListener('input', (e) => {
+  if (e.target.id !== 'mem-q') return;
+  clearTimeout(memSearch);
+  memSearch = setTimeout(async () => {
+    memState.q = e.target.value.trim();
+    await loadMemory();
+    const q = $('#mem-q');
+    q.focus();
+    q.setSelectionRange(q.value.length, q.value.length);
+  }, 300);
 });
 
 // ---------- Lightbox ----------
@@ -1721,14 +1994,21 @@ userMenu.onclick = (e) => {
   const act = e.target.closest('[data-user-act]')?.dataset.userAct;
   userMenu.hidden = true;
   if (act === 'password') showPasswordForm(false);
-  if (act === 'users') openUsers();
+  if (act === 'users') openUsers('users');
+  if (act === 'workflows') openUsers('workflows');
   if (act === 'logout') logout();
 };
 
 // Gestione utenti (solo admin)
 const usersModal = $('#users-modal'), addUserForm = $('#add-user-form');
-async function openUsers() {
+function adminTab(tab) {
+  $$('#admin-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('[data-pane]', usersModal).forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+}
+$('#admin-tabs').onclick = (e) => { const b = e.target.closest('.tab'); if (b) adminTab(b.dataset.tab); };
+async function openUsers(tab = 'users') {
   usersModal.hidden = false;
+  adminTab(tab);
   showErr(addUserForm);
   renderWorkflows(state.config?.workflows || []);
   await renderUsers();
@@ -1796,6 +2076,7 @@ async function startApp() {
   if (prefs.model && !state.config.models.some((m) => m.name === prefs.model)) delete prefs.model;
   renderModel();
   renderOpts();
+  updateVoice();
   await loadConvs();
   route();
 }

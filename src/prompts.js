@@ -1,6 +1,7 @@
 import config from './config.js';
 import { workflows, ASPECTS } from './workflows.js';
 import { MAX as LONG_VIDEO } from './videochain.js';
+import { TASK_COMMANDS_HELP } from './taskcmd.js';
 
 // musica ed effetti sonori: almeno un workflow audio installato su ComfyUI
 const hasAudio = () => ['music', 'sfx'].some((k) => workflows('audio', k).length);
@@ -14,7 +15,7 @@ const today = () => new Date().toLocaleDateString('it-IT', { weekday: 'long', da
  * Prompt di sistema. Le sezioni su documenti e immagini allegate entrano solo quando la conversazione ne ha:
  * sono ~1.500 token che altrimenti occuperebbero la finestra di contesto senza servire.
  */
-export function systemPrompt(name = config.assistantName, { documents = true, images = true, melody = false } = {}) {
+export function systemPrompt(name = config.assistantName, { documents = true, images = true, melody = false, voice = false } = {}) {
   return `Sei ${name}, un assistente AI che gira interamente in locale sul computer dell'utente. Oggi è ${today()}.
 
 # Come rispondi
@@ -35,6 +36,7 @@ ${documents ? `
 - Riassunti e analisi: sii fedele al documento, non aggiungere fatti che non contiene. Dai una struttura chiara (di che documento si tratta, punti chiave, dettagli importanti, conclusioni) e cita le pagine dei dati importanti, es. (p. 3).
 - Tieni separate tre cose e dillo quando le mescoli: cosa dice il documento, tue conoscenze o valutazioni, informazioni trovate sul web.
 - Se una risposta non è nei passaggi che hai ricevuto, dillo chiaramente invece di inventare; per un documento lungo l'informazione può trovarsi in parti non incluse: suggerisci una domanda più specifica (personaggio, capitolo, argomento).
+- Unire più PDF, renderli ricercabili (OCR) o ridurne il peso: usa pdf_tools (anche più operazioni in una chiamata). Il file nuovo compare sotto la tua risposta con il link per scaricarlo: di' in una frase cosa hai fatto (pagine, peso prima e dopo) senza scrivere link.
 - Nelle conversazioni successive il documento resta disponibile: usalo come contesto per tutte le domande che lo riguardano.
 - Referti e documenti medici: per ogni valore indica il risultato e l'intervallo di riferimento riportato nel referto, evidenzia con chiarezza e senza allarmismo quelli fuori intervallo e spiega in parole semplici cosa misura ciascun esame. Non fare diagnosi e non suggerire terapie: ricorda che l'interpretazione spetta al medico, che conosce la storia clinica.
 - Verifiche sul web di un documento: controlla i fatti verificabili (orari, prezzi, indirizzi, regole, eventi, dati pubblici) e confrontali con il documento, segnalando conferme, differenze e informazioni non verificabili. Non inserire MAI nelle ricerche dati personali presenti nel documento (nomi di persone private, codici, numeri di prenotazione, dati sanitari): cerca solo termini generici.
@@ -81,6 +83,14 @@ ${melody && workflows('audio', 'melody').length ? `- Melodie canticchiate: l'ute
 - REGOLA: se l'utente parla di una persona già presente in un'immagine della chat («questa persona», «lui», «lei», «la stessa ragazza», «di nuovo lui») e la vuole in un'altra scena, usa SEMPRE photo_with_face e MAI generate_image: con generate_image verrebbe una persona diversa. Vale anche quando chiede una foto «realistica».
 - upscale_image (se disponibile) aumenta la risoluzione senza cambiare il contenuto: per «migliora la qualità», «ingrandisci», «rendila più nitida», «in HD». Usa quality="massima" (ridisegno del dettaglio) solo su immagini generate e solo se l'utente chiede la massima qualità o più dettaglio; sulle foto allegate l'ingrandimento è sempre fedele.
 - Se l'utente vuole un'immagine nuova ispirata a quella allegata (non una rielaborazione), usa generate_image con una descrizione completa.
+` : ''}${voice ? `
+# Conversazione a voce
+L'utente ti sta parlando a voce: il suo messaggio è trascritto in automatico e la tua risposta viene letta ad alta voce, frase per frase, mentre la scrivi.
+- Rispondi come in una telefonata: frasi brevi e naturali, di norma 1-3 frasi. Approfondisci solo se l'utente lo chiede.
+- Niente Markdown, elenchi, tabelle, titoli, emoji, LaTeX o link: suonano male letti. Se servono più punti, dilli in una frase («primo…, poi…»).
+- Scrivi i numeri e i simboli come si pronunciano quando può esserci dubbio (es. «3 euro e 50», «20 gradi»).
+- La trascrizione può contenere errori: se una parola non ha senso, interpreta la frase più probabile; se non capisci, chiedi di ripetere.
+- Codice o testi lunghi: scrivili pure, l'utente li vede sullo schermo, ma prima dì in una frase cosa stai scrivendo.
 ` : ''}`.trim();
 }
 
@@ -271,7 +281,28 @@ function audioTools(melody) {
 }
 
 /** Strumenti della modalità Computer: file nella cartella di lavoro e (per gli amministratori) comandi. */
-export function computerTools({ canRun = false, images = [], project = false, projectChat = false, folders = false } = {}) {
+/**
+ * Strumento sui PDF allegati alla conversazione: unione, OCR, riduzione del peso (anche insieme).
+ * docs: [{ name, pages }] nell'ordine in cui sono stati allegati.
+ */
+export function pdfTool(docs) {
+  return { type: 'function', function: {
+    name: 'pdf_tools',
+    description: 'Lavora sui PDF allegati dall\'utente e crea un PDF nuovo da scaricare (gli originali restano come sono). '
+      + 'Operazioni, anche insieme: merge = unisce più PDF in uno; ocr = rende ricercabile il testo delle scansioni lasciando la pagina identica (loghi, firme, timbri); '
+      + 'compress = riduce il peso (immagini a 200 dpi, JPEG qualità 75: circa -60% sulle scansioni, firme e loghi senza differenze visibili). '
+      + 'Usalo solo quando l\'utente chiede di unire, fare l\'OCR o comprimere/ridurre il peso dei PDF.',
+    parameters: { type: 'object', properties: {
+      operations: { type: 'array', items: { type: 'string', enum: ['merge', 'ocr', 'compress'] }, description: 'Operazioni da fare. Vengono eseguite sempre in quest\'ordine: merge, ocr, compress.' },
+      documents: { type: 'array', items: { type: 'integer', minimum: 1, maximum: docs.length },
+        description: 'Quali PDF, nell\'ordine voluto (per merge è l\'ordine delle pagine). Default: tutti, nell\'ordine in cui sono stati allegati. '
+          + docs.map((d, i) => `${i + 1} = ${d.name} (${d.pages} pag.)`).join(' | ') },
+      name: { type: 'string', description: 'Nome del file unito, senza .pdf (solo con merge). Default: «documenti uniti».' },
+    }, required: ['operations'] },
+  } };
+}
+
+export function computerTools({ canRun = false, images = [], project = false, projectChat = false, scripts = false, folders = false } = {}) {
   const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
   const p = (description) => ({ type: 'string', description });
   const addTasks = (folder) => fn('add_project_tasks', `Aggiunge task alla coda ${folder ? 'del progetto di una cartella (compare in Progetti)' : 'del progetto'}: li eseguono i modelli locali uno alla volta, con test e controllo delle pagine automatici. Per lavori grandi o in più passi.`, {
@@ -316,10 +347,18 @@ export function computerTools({ canRun = false, images = [], project = false, pr
       path: p(project ? 'Percorso del file .mp3 nel progetto, es. audio/musica.mp3, audio/riga.mp3' : 'Percorso del file .mp3, es. tetris/audio/musica.mp3'),
       ...computerAudioProps(),
     }, ['kind', 'path', 'description', 'duration'])] : []),
-    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF (formato A4), con la grafica della pagina.', {
+    fn('html_to_pdf', 'Converte una pagina HTML della cartella di lavoro in PDF con la grafica della pagina: formato A4, oppure quello del CSS @page (es. @page { size: A5; margin: 20mm }); i salti pagina seguono break-before: page. È il modo più semplice per impaginare libri e documenti: niente librerie PDF.', {
       html_path: p('File .html da convertire.'),
       pdf_path: p('File .pdf da creare (default: stesso nome del file html).'),
     }, ['html_path']),
+    // task della coda: comandi sicuri nella cartella del progetto, senza conferma (stesso rischio dei test che la coda già esegue)
+    ...(scripts ? [fn('run_command', `Esegue un comando nella cartella del progetto, senza conferma, e restituisce l'output: per eseguire gli script del progetto (es. generare book.html), provare il codice, far girare i test o installare librerie che esistono davvero. Ammessi solo: ${TASK_COMMANDS_HELP}.`, {
+      command: p('Il comando, es. python build_book.py'),
+    }, ['command'])] : []),
+    fn('ocr_to_pdf', 'OCR di scansioni: crea PDF ricercabili (testo selezionabile e cercabile) da PDF scansionati o immagini (jpg, png, tif), lasciando la pagina identica all\'originale con loghi, firme e timbri. Accetta un file o una cartella intera (anche le sottocartelle). Gli originali non vengono toccati: i risultati vanno nella sottocartella OCR.', {
+      path: p('File o cartella da convertire, es. documenti/fattura.pdf oppure documenti'),
+      output_path: p('Facoltativo: file .pdf (per un file) o cartella (per una cartella) dove scrivere i risultati. Default: sottocartella OCR.'),
+    }, ['path']),
     ...(canRun && projectChat ? [fn('install_packages', 'Installa librerie che mancano sul PC: Python con pip (es. numpy, pygame) o npm nella cartella del progetto. Parte senza conferma, solo per librerie che esistono davvero su PyPI o npm.', {
       packages: { type: 'array', items: { type: 'string' }, description: 'Nomi dei pacchetti, es. ["numpy"].' },
       language: { type: 'string', enum: ['python', 'js'], description: 'python (pip) o js (npm). Default python.' },
@@ -369,6 +408,7 @@ ${folder ? `- In questa conversazione stai lavorando nella cartella ${folder}/: 
 - Nella cronologia le tue scritture precedenti compaiono accorciate («omessi N caratteri…»): è una nota di LocalAI, non contenuto. Non copiarla mai in un file: LocalAI la rifiuta. Se ti serve il contenuto, rileggilo con read_file.
 - Se un file risulta vuoto, troncato o rovinato, rimetti la versione precedente con restore_file invece di riscriverlo a memoria.
 - Pagine web e giochi nel browser: un unico file index.html con CSS e JavaScript inclusi, senza librerie esterne, che funzioni anche da telefono (controlli touch oltre alla tastiera, layout adattabile). L'interfaccia mostra all'utente il link per aprirlo.
+- Scansioni da rendere ricercabili («fai l'OCR», «rendi cercabile il testo», «converti in OCR»): usa ocr_to_pdf sul file o sulla cartella, poi elenca all'utente quali file sono stati convertiti e quali no (con il motivo). Non riscrivere a mano il testo di una scansione.
 - Documenti PDF o Word: scrivi prima una pagina HTML ben formattata e adatta alla stampa A4 (titoli, paragrafi, tabelle, CSS in <style>, niente elementi interattivi), poi chiama html_to_pdf per il PDF o html_to_word per Word. Se l'utente dice solo «documento», fai il PDF.
 - Immagini e illustrazioni (per un PDF, un sito, un gioco): generale con generate_image, una chiamata per immagine, e in quel turno NON scrivere ancora la pagina finale. Le immagini richiedono circa un minuto: quando sono pronte arriva un messaggio automatico e allora le copi nel progetto con save_chat_image (es. progetto/img/1.png), scrivi l'HTML che le usa con percorsi relativi (<img src="img/1.png" style="max-width:100%">) e crei il PDF. Nel primo turno di' all'utente in una frase che stai generando le immagini e che poi completerai il documento.
 ${hasAudio() ? `- Musica ed effetti sonori (giochi, siti, presentazioni): crea i file con create_audio_file, uno per suono (es. audio/musica.mp3, audio/riga.mp3, audio/game-over.mp3), e nello stesso turno scrivi il codice che li usa con percorsi relativi (in JavaScript: new Audio('audio/riga.mp3'); la musica di sottofondo con loop = true e volume più basso, avviata al primo tasto o tocco perché i browser bloccano l'audio prima di un'interazione). I file vengono generati alla fine del turno, circa mezzo minuto ciascuno: crea solo quelli che servono.
