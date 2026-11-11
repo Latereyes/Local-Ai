@@ -264,6 +264,24 @@ Lo script fa due cose:
 
 L'indirizzo `http://…:3000` continua a funzionare. Per tornare indietro: `tailscale serve reset`.
 
+## App Android
+
+La stessa interfaccia, in un'app con la sua icona sul telefono (cartella `android/`, Kotlin, una WebView puntata al server del PC). Non contiene i modelli: LocalAI deve girare sul PC come sempre.
+
+**Installazione.** L'APK si compila da solo in GitHub Actions a ogni modifica di `android/` e finisce nelle *Releases* della repository: **android-latest** (da `main`) o **android-prova** (dagli altri branch, per provarla prima di unire). Dal telefono si scarica `LocalAI.apk` e si installa consentendo le app da fonti sconosciute. Gli aggiornamenti si installano sopra la versione precedente senza perdere l'accesso, perché ogni build è firmata con la stessa chiave (`android/app/signing.keystore`, chiave per uso personale, non da Play Store).
+
+**Primo avvio.** Chiede l'indirizzo di LocalAI, lo stesso che si apre nel browser:
+- in casa, l'IP che il server stampa all'avvio (`192.168.1.10` basta: la porta 3000 si aggiunge da sola);
+- ovunque, con Tailscale: `https://<nome-pc>.<tailnet>.ts.net` (vedi *HTTPS con Tailscale*). È l'indirizzo consigliato: solo in HTTPS il **microfono** funziona anche nell'app.
+
+Per cambiarlo: tieni premuta l'icona dell'app → **Cambia indirizzo**, oppure il tasto che compare quando il PC non risponde.
+
+**Cosa fa in più del browser.** Graffetta e fotocamera aprono le app del telefono (la foto si scatta con la Fotocamera e si allega subito); **Scarica** salva foto, video e file nella cartella *Download* con la sessione già fatta; i link esterni e **Apri** di pagine e giochi della cartella di lavoro si aprono nel browser del telefono; il tasto Indietro torna alla pagina precedente; se il PC è spento o Tailscale è staccato compare una schermata con **Riprova**.
+
+**Limiti.** Le notifiche del browser non esistono dentro l'app: per gli avvisi a app chiusa c'è ntfy (vedi *Progetti*). In HTTP (`http://192.168…`) il microfono non è concesso, come nel browser: il tasto apre il registratore del telefono o la scelta di un file audio.
+
+**Compilarla a mano** (facoltativo): con Android Studio si apre la cartella `android/`, oppure da riga di comando, con l'SDK di Android installato, `cd android` e `gradlew assembleRelease`; l'APK è in `android/app/build/outputs/apk/release/`.
+
 ## Configurazione
 
 Si fa con variabili d'ambiente (i default sono in `src/config.js`):
@@ -383,6 +401,7 @@ src/
   faces.js           volto originale rimesso dopo le modifiche (YOLO + maschera sfumata)
   videochain.js      video lunghi in pezzi e «Continua» (MiniMax H3)
 public/              interfaccia (HTML/CSS/JS, senza build)
+android/             app Android (WebView sul server del PC), compilata da GitHub Actions
 workflows/           workflow ComfyUI (API) + manifest + guide
 _legacy/             vecchia versione del progetto (si può eliminare)
 ```
