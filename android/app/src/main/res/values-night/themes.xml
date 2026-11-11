@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LocalAI" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:colorAccent">@color/accento</item>
+    </style>
+    <color name="fondo">#1B1B1D</color>
+    <color name="testo">#ECEAE6</color>
+    <color name="accento">#8B7CF6</color>
+</resources>

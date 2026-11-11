@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fumetto della chat con tre puntini -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M36,34 L72,34 Q80,34 80,42 L80,62 Q80,70 72,70 L50,70 L40,78 L40,70 L36,70 Q28,70 28,62 L28,42 Q28,34 36,34 Z" />
+    <path android:fillColor="#6A5AE0" android:pathData="M41,52 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#6A5AE0" android:pathData="M54,52 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#6A5AE0" android:pathData="M67,52 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+</vector>

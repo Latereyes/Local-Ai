@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tenendo premuta l'icona: cambiare l'indirizzo del PC -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="indirizzo"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_address">
+        <intent
+            android:action="it.latereyes.localai.INDIRIZZO"
+            android:targetPackage="it.latereyes.localai"
+            android:targetClass="it.latereyes.localai.MainActivity" />
+    </shortcut>
+</shortcuts>
