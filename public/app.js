@@ -325,7 +325,7 @@ function renderMessage(m) {
     const tl = TOOL_LABEL[m.tool];
     const tag = tl ? `<div class="tag">${icon(tl[0], 13)}${tl[1]}</div>` : '';
     const imgs = (m.attachments || []).map((a, i) => a.kind === 'document'
-      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : ''}</small></span></a>`
+      ? `<a class="doc-chip" href="${esc(a.url)}" target="_blank" rel="noopener">${icon('doc', 18)}<span><b>${esc(a.name)}</b><small>${a.pages} ${a.pages === 1 ? 'pagina' : 'pagine'}${a.scanned ? ' · senza testo' : a.ocr ? ' · OCR' : ''}</small></span></a>`
       : a.kind === 'audio'
         ? `<div class="doc-chip tune-chip">${icon('mic', 18)}<span><b>Melodia canticchiata</b><small>${esc(melodyFacts(a))}</small></span><audio src="${esc(a.url)}" controls preload="none"></audio></div>`
         : `<img src="${esc(a.url)}" alt="" data-att="${i}" loading="lazy">`).join('');
@@ -412,22 +412,30 @@ function renderSteps(node, m, live) {
   const visions = steps.filter((s) => s.type === 'vision').length;
   const docSteps = steps.filter((s) => s.type === 'document');
   const memNotes = steps.filter((s) => s.type === 'memory').reduce((n, s) => n + (s.notes?.length || 0), 0);
+  const pdfSteps = steps.filter((s) => s.type === 'pdf');
   const parts = [];
   if (memNotes) parts.push(memNotes === 1 ? '1 nota dalla memoria' : `${memNotes} note dalla memoria`);
+  if (pdfSteps.length) parts.push(pdfSteps.some((s) => s.status === 'error') ? 'PDF non riuscito' : 'PDF pronto');
   if (docSteps.length) parts.push('Documento consultato');
   if (visions) parts.push(visions === 1 ? 'Immagine analizzata' : `${visions} immagini analizzate`);
   if (searches) parts.push(`${searches} ${searches === 1 ? 'ricerca' : 'ricerche'}`);
   if (reads) parts.push(`${reads} ${reads === 1 ? 'pagina letta' : 'pagine lette'}`);
   $('.steps-title', box).textContent = running
-    ? (running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
+    ? (running.type === 'pdf' ? (running.text || 'Lavoro sui PDF…') : running.type === 'document' ? (running.text || 'Leggo il documento…') : running.type === 'vision' ? `Analizzo l'${running.title}…` : running.type === 'search' ? `Cerco «${running.query}»…` : `Leggo ${domain(running.url)}…`)
     : parts.join(' · ');
-  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length ? 'doc' : memNotes && !visions ? 'brain' : 'eye', 14);
+  $('summary > svg', box).outerHTML = icon(searches ? 'globe' : docSteps.length || pdfSteps.length ? 'doc' : memNotes && !visions ? 'brain' : 'eye', 14);
   box.classList.toggle('live', !!running);
-  if (box.dataset.auto !== 'off') box.open = live && !m.content;
+  // il PDF creato si scarica da qui: il riquadro resta aperto
+  if (box.dataset.auto !== 'off') box.open = (live && !m.content) || pdfSteps.some((s) => s.files?.length);
   $('.steps-list', box).innerHTML = steps.map((s) => {
     const state = s.status === 'running' ? '<span class="spin"></span>' : s.status === 'error' ? `<span class="step-err" title="${esc(s.error || '')}">non riuscita</span>` : '';
     if (s.type === 'memory') {
       return `<div class="step">${icon('brain', 14)}<div class="step-body"><div>Note dalla <a href="/memoria" data-memory-link>memoria</a></div>${(s.notes || []).map((n) => `<div class="faint">#${n.id} · ${esc(n.type)}${n.scope ? ' · progetto' : ''}: ${esc(n.text)}</div>`).join('')}</div></div>`;
+    }
+    if (s.type === 'pdf') {
+      const what = (s.ops || []).map((o) => ({ merge: 'unione', ocr: 'OCR', compress: 'riduzione del peso' })[o] || o).join(' + ');
+      const files = (s.files || []).map((f) => `<a class="doc-chip" href="${esc(f.url)}" download="${esc(f.name)}">${icon('download', 16)}<span><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small></span></a>`).join('');
+      return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>PDF (${esc(what)}): <b>${esc(s.title || '')}</b> ${state}</div>${s.text && s.status === 'running' ? `<div class="faint">${esc(s.text)}</div>` : ''}${files ? `<div class="srcs">${files}</div>` : ''}</div></div>`;
     }
     if (s.type === 'document') {
       return `<div class="step">${icon('doc', 14)}<div class="step-body"><div>${s.status === 'running' ? 'Analisi' : 'Documento'}: <b>${esc(s.title || '')}</b> ${state}</div>${s.text ? `<div class="faint" style="white-space:pre-wrap">${esc(s.text)}</div>` : ''}</div></div>`;
@@ -464,7 +472,7 @@ function wsLinks(p, { dir = false, bare = false } = {}) {
 }
 /** Percorso di un passaggio rispetto alla cartella di lavoro (nei task dei progetti è relativo al progetto). */
 const stepPath = (s) => (s.base ? `${s.base}/${s.path}` : s.path);
-const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', script: 'Script eseguito' };
+const FILE_LABEL = { list: 'Elenco file', read: 'Letto', write: 'Scritto', delete: 'Eliminato', word: 'Documento Word', pdf: 'PDF', image: 'Immagine', append: 'Continuo', audio: 'Audio', edit: 'Modificato', restore: 'Ripristinato', install: 'Librerie', script: 'Script eseguito', ocr: 'OCR' };
 
 function renderComputer(node, m) {
   const box = $('.ws-actions', node);
@@ -517,9 +525,9 @@ function renderComputer(node, m) {
       }
       if (s.action === 'image' && s.status === 'done') return `<div class="ws-act"><div class="ws-act-head">${icon('image', 14)}<span>Immagine salvata</span><b>${esc(s.path)}</b><span class="faint">${fmtSize(s.size)}</span>${wsLinks(stepPath(s))}</div></div>`;
       const label = s.action === 'write' ? (s.status !== 'done' ? 'Scrittura' : s.created ? 'Creato' : 'Aggiornato') : FILE_LABEL[s.action] || s.action;
-      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
-      const links = s.status === 'done' && ['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) ? wsLinks(stepPath(s)) : '';
-      return `<div class="ws-act"><div class="ws-act-head">${icon(s.action === 'word' || s.action === 'pdf' ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
+      const extra = s.action === 'install' && s.what ? `<span class="faint">${esc(s.what)}</span>` : s.action === 'word' && s.method ? `<span class="faint">${esc(s.method)}</span>` : s.action === 'ocr' && s.status === 'done' ? `<span class="faint">${s.converted} ${s.converted === 1 ? 'file convertito' : 'file convertiti'}${s.failed ? `, ${s.failed} no` : ''}</span>` : s.size != null ? `<span class="faint">${fmtSize(s.size)}</span>` : '';
+      const links = s.status === 'done' && (['write', 'edit', 'restore', 'word', 'pdf'].includes(s.action) || (s.action === 'ocr' && s.converted === 1)) ? wsLinks(stepPath(s)) : '';
+      return `<div class="ws-act"><div class="ws-act-head">${icon(['word', 'pdf', 'ocr'].includes(s.action) ? 'doc' : 'page', 14)}<span>${label}</span><b>${esc(s.path || '')}</b>${extra}${spin}${links}</div>${err}</div>`;
     }
     const where = s.cwd ? ` <span class="faint">in ${esc(s.cwd)}</span>` : '';
     const res = s.status === 'done'
@@ -1016,7 +1024,7 @@ async function addFiles(files) {
         const res = await fetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': dt, 'X-Filename': encodeURIComponent(f.name) }, body: f });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Caricamento non riuscito');
-        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile: non potrò leggerne il contenuto.`);
+        if (data.scanned) alert(`«${f.name}» sembra una scansione senza testo selezionabile e l'OCR non è riuscito (o ocrmypdf non è installato): non potrò leggerne il contenuto.`);
         Object.assign(att, data);
       } catch (err) {
         state.attachments = state.attachments.filter((a) => a !== att);

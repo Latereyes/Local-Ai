@@ -112,8 +112,40 @@ Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 M
 - Il riquadro «Documento consultato» mostra cosa è stato letto e quali pagine sono state usate. Gemma cita le pagine (p. N).
 - **Verifica sul web**: chiedi «verifica su internet…». La ricerca usa solo termini generici: le regole del prompt impediscono di mettere nelle query nomi, codici o dati sanitari presenti nei documenti.
 - **Referti medici**: valori e intervalli di riferimento vengono spiegati in modo chiaro, senza diagnosi e con il rimando al medico.
-- I PDF scansionati, cioè senza testo selezionabile, vengono segnalati ma non letti: l'OCR non è ancora supportato.
+- I **PDF scansionati**, cioè senza testo selezionabile, passano dall'OCR al caricamento (vedi «OCR delle scansioni»), così Gemma li può leggere. Accanto al nome compare «OCR»; l'originale resta salvato. Se ocrmypdf non è installato vengono segnalati ma non letti.
 - Le formule matematiche (`$...$`, `$$...$$`) vengono visualizzate con KaTeX, servito in locale.
+
+## OCR delle scansioni
+
+LocalAI trasforma scansioni e foto di documenti in **PDF ricercabili**: la pagina resta l'immagine originale, identica (loghi, firme, timbri, impaginazione), e sotto c'è uno strato di testo invisibile che si può selezionare, copiare e cercare. Lo fa [ocrmypdf](https://ocrmypdf.readthedocs.io) con Tesseract in italiano e inglese, tutto sul PC.
+
+- **Allegati in chat**: un PDF senza testo viene convertito al caricamento (qualche secondo a pagina).
+- **Modalità Computer**: chiedi «fai l'OCR della cartella documenti». Lo strumento `ocr_to_pdf` lavora su un file o su una cartella intera, sottocartelle comprese, e scrive i risultati nella sottocartella `OCR`. Gli originali non vengono mai toccati. Alla fine l'assistente dice quali file sono stati convertiti e quali no.
+- Opzioni usate: `-l ita+eng --output-type pdf --optimize 0 --skip-text --rotate-pages --rasterizer pypdfium`. Niente `--deskew`, `--clean-final`, `--remove-background` o `--force-ocr`, che ritoccherebbero o rifarebbero l'immagine della pagina. Le pagine che hanno già testo restano come sono. Le foto senza DPI nei metadati si riprovano a 300 dpi.
+
+### Unire, fare l'OCR e ridurre il peso dei PDF allegati
+
+Allega uno o più PDF e chiedi, per esempio, «unisci questi PDF», «fai l'OCR e riduci il peso» o «comprimi il secondo». Gemma usa lo strumento `pdf_tools`, che fa le operazioni sempre in quest'ordine: unione, OCR, riduzione del peso. Il PDF nuovo compare sotto la risposta con il link per scaricarlo, e gli allegati originali restano come sono.
+
+- **Unione**: le pagine nell'ordine dei file scelti (di default l'ordine in cui li hai allegati).
+- **Riduzione del peso**: le immagini delle pagine vanno a 200 dpi in JPEG qualità 75, a colori. Testo, grafica vettoriale e strato OCR non cambiano. Sui file di Carla (2026-11-04) il peso è sceso del 62% e firme e loghi non mostrano differenze visibili.
+- Unione e riduzione le fa `tools/pdf-tool.py` con il Python del venv dell'OCR, che ha già pikepdf e Pillow. `PDF_PYTHON` permette di scegliere un altro Python.
+
+Installazione (una volta sola, su Windows):
+
+```powershell
+winget install UB-Mannheim.TesseractOCR
+py -m venv C:\AI\ocr\venv
+C:\AI\ocr\venv\Scripts\pip install ocrmypdf img2pdf pypdf
+# lingue: ita.traineddata, eng.traineddata e osd.traineddata (tessdata_best) in C:\AI\ocr\tessdata
+```
+
+LocalAI cerca `ocrmypdf` in `OCRMYPDF`, poi in `C:\AI\ocr\venv\Scripts\ocrmypdf.exe`, poi nel PATH. Tesseract non serve metterlo nel PATH: LocalAI lo cerca in `C:\Program Files\Tesseract-OCR` e usa le lingue di `C:\AI\ocr\tessdata` se la cartella c'è. Ghostscript non serve: le pagine si leggono con pypdfium.
+
+| Variabile | Default |
+|---|---|
+| `OCRMYPDF` | percorso di `ocrmypdf.exe`, se non è in una delle posizioni sopra |
+| `OCR_LANG` | `ita+eng` (lingue di Tesseract) |
 
 ## Codice con Qwen Coder
 
@@ -415,9 +447,11 @@ src/
   documents.js       PDF/TXT: estrazione testo, riassunto map-reduce (o lettura intera con LFM2.5), recupero passaggi (BM25)
   memory.js          memoria: note dell'utente su SQLite, ricerca FTS5, filtro dei segreti, pacchetto per il prompt
   proposte.js        memoria: resoconti dei task e note proposte da Gemma a GPU libera, da confermare
+  ocr.js             OCR delle scansioni (ocrmypdf): PDF ricercabili con la pagina originale intatta
+  pdf.js             PDF allegati: unione, OCR e riduzione del peso (con tools/pdf-tool.py)
   workflows.js       registro dei workflow e iniezione dei parametri
   store.js           salvataggio delle conversazioni
-  workspace.js       cartella di lavoro: file, comandi con conferma, PDF e Word
+  workspace.js       cartella di lavoro: file, comandi con conferma, PDF, Word e OCR
   docx.js            conversione HTML → .docx senza dipendenze
   projects.js        progetti: piano (PIANO.md), task, scelta del modello per tipo
   runner.js          coda dei task: un task alla volta, test, controllo pagine e tentativi
