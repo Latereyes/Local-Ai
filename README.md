@@ -23,7 +23,7 @@ Per entrare servono nome utente e password. Ogni utente vede solo le proprie con
 | `claudia` | utente | password temporanea `1234`, poi ne sceglie una personale |
 
 - Al primo accesso, e dopo ogni reimpostazione, l'app chiede di scegliere una nuova password (almeno 6 caratteri, diversa da `1234`). Finché non lo fai, non è possibile usare nient'altro.
-- L'amministratore, da *menu utente → Gestione utenti*, può aggiungere utenti e reimpostare le password. La password temporanea predefinita è `1234`, ma se ne può indicare un'altra. Quando una password viene reimpostata, l'utente viene disconnesso da tutti i dispositivi.
+- L'amministratore, da *menu utente → Utenti*, può aggiungere utenti e reimpostare le password. La password temporanea predefinita è `1234`, ma se ne può indicare un'altra. Quando una password viene reimpostata, l'utente viene disconnesso da tutti i dispositivi.
 - Chiunque può cambiare la propria password da *menu utente → Cambia password*.
 - Le password sono salvate solo come hash scrypt in `data/users.json`. Le sessioni durano 30 giorni (cookie HttpOnly). Dopo 5 tentativi sbagliati di fila l'accesso da quell'IP viene bloccato per un minuto.
 - Le chat create prima dell'introduzione dei profili sono state assegnate ad Andrea.
@@ -31,7 +31,7 @@ Per entrare servono nome utente e password. Ogni utente vede solo le proprie con
 
 ## Immagini allegate: lettura, image-to-image, image-to-video
 
-Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole sulla chat o incollandole (Ctrl+V). Su telefono c'è anche il tasto **fotocamera**, che apre direttamente la fotocamera posteriore. Il browser ridimensiona le foto a 1600 px (JPEG) prima dell'invio e ne corregge l'orientamento.
+Puoi allegare fino a 4 immagini per messaggio: con il tasto **+** → *Allega file*, trascinandole sulla chat o incollandole (Ctrl+V). Su telefono nel **+** c'è anche *Scatta una foto*, che apre direttamente la fotocamera posteriore. Il browser ridimensiona le foto a 1600 px (JPEG) prima dell'invio e ne corregge l'orientamento.
 
 - **Lettura**: Gemma (`gemma4-12b-uncensored`) non vede le immagini, perché il suo GGUF non ha il modulo visivo. Da ottobre 2026 l'immagine la descrive **Gemma 26B** (HauhauCS, senza censura), che nella verifica visiva ha letto giusto: descrizione completa e testo visibile trascritto, consultabile nel riquadro «Immagine analizzata» con il nome del modello. Se Gemma 26B non è installato si usa il modello scelto dalla verifica visiva; se manca anche quello, o la lettura non riesce, si torna a **Qwen3-VL 4B** su ComfyUI (workflow `qwen3vl-vision`). Si cambia con `DESCRIBE_MODEL` (un nome Ollama, oppure `comfy` per Qwen3-VL). Con un modello della chat che vede (Qwen Coder, qwen35, Gemma 26B) le immagini vanno direttamente a lui.
 - **Il prompt delle modifiche guarda la foto**: se il modello della chat vede le immagini, quando prepara l'istruzione per Qwen-Edit (o per Krea/Z-Image, o per i video da foto) riceve anche la foto di partenza. Così nomina la persona, il capo o l'oggetto giusto, con il colore e la posizione veri, invece di fidarsi solo della descrizione.
@@ -45,7 +45,7 @@ Puoi allegare fino a 4 immagini per messaggio: con la graffetta, trascinandole s
 
   `powershell -ExecutionPolicy Bypass -File scarica-qwen-image-edit.ps1`
 
-  Lo script scarica circa 30,7 GB in `models/diffusion_models`, `models/text_encoders` e `models/loras`. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. In quel pannello l'amministratore vede quali workflow sono attivi e quali file mancano.
+  Lo script scarica circa 30,7 GB in `models/diffusion_models`, `models/text_encoders` e `models/loras`. LocalAI se ne accorge entro 5 minuti, oppure subito con *menu utente → Workflow ComfyUI → Ricarica*. In quel pannello l'amministratore vede quali workflow sono attivi e quali file mancano.
 - **Image to video** (`animate_image`, workflow `minimax-h3-i2v`): MiniMax H3 parte esattamente dall'immagine e la anima, con audio. Il formato segue quello dell'immagine (0,7 MP, 6 passi: valori misurati su ChatBz il 2026-10-09, con 0,4 MP le mani nei movimenti uscivano sfocate e doppie), fino a 15 s.
 - **Video lunghi e «Continua»** (da ChatBz, provati sul PC il 2026-10-10): fino a 15 s il video è un pezzo solo; da 16 a 30 s («un video di 20 secondi», o il menu «Durata») si fa in pezzi da 10 s. Ogni pezzo carica il precedente, usa gli ultimi 22 fotogrammi e il loro audio come guida (`MiniMaxH3AddGuide`), genera il seguito e lo incolla in coda: ogni pezzo salva il video intero fin lì («parte 2/3 · 20 s»). Sotto ogni video finito c'è **Continua**: chiede cosa succede dopo e quanti secondi aggiungere (2-10). Servono i nodi recenti di ComfyUI (`LoadVideo`, `GetVideoComponents`, `ImageFromBatch`, `ImageBatch`, `AudioConcat`, `TrimAudioDuration`; su ChatBz ComfyUI 0.39.0 li ha); senza `MiniMaxH3AddGuide` il pezzo parte solo dall'ultimo fotogramma (giunzione meno fluida). Codice in `src/videochain.js`.
 - **Rifinitura dei volti**: dopo ogni modifica con Qwen-Edit, FaceDetailer (Juggernaut XL) ripassa solo i volti a basso denoise. Pelle e occhi diventano più naturali; se nell'immagine non ci sono volti, non cambia nulla.
@@ -77,7 +77,7 @@ LocalAI crea musica ed effetti sonori con ComfyUI, sulla stessa GPU e con la ste
 
 `powershell -ExecutionPolicy Bypass -File scarica-audio.ps1`
 
-Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *Gestione utenti → Workflow ComfyUI → Ricarica workflow*. Senza i modelli, gli strumenti audio non vengono proposti.
+Lo script scarica circa 19 GB: ACE-Step 1.5 Turbo per la musica (9,3 GB) e Stable Audio 3 Medium per gli effetti (9,7 GB). Con `-Cosa musica` o `-Cosa effetti` scarichi solo una parte. LocalAI se ne accorge entro 5 minuti, oppure subito con *menu utente → Workflow ComfyUI → Ricarica*. Senza i modelli, gli strumenti audio non vengono proposti.
 
 ## Conversazione a voce
 
@@ -105,7 +105,7 @@ Lo script crea `voice\.venv`, un ambiente Python 3.12 separato (ComfyUI non si t
 
 ## Documenti (PDF, TXT, MD)
 
-Con la graffetta (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
+Con **+** → *Allega file* (o trascinando il file) puoi allegare PDF, TXT e MD fino a 60 MB. Il testo viene estratto subito, pagina per pagina, con `pdfjs-dist`, e il documento resta disponibile **per tutta la conversazione**: puoi fare domande successive senza ricaricarlo.
 
 - **Documenti brevi** (fino a circa 40.000 caratteri, ~15 pagine fitte): il testo completo, con i numeri di pagina, viene dato a Gemma a ogni domanda. Con i modelli a contesto più piccolo il limite scende: oltre, il documento viene trattato come lungo.
 - **Documenti lunghi** (libri, manuali): alla prima domanda si crea un riassunto a blocchi. Ogni sezione da circa 16.000 caratteri viene riassunta, poi tutto viene unito in una sintesi generale. Per un libro di 189 pagine servono circa 4 minuti; il riassunto resta salvato. I documenti oltre circa 90.000 caratteri (~30k token) e fino a ~330.000 li legge invece **interi LFM2.5** (`hf.co/LiquidAI/LFM2.5-24B-A2B-GGUF:QAD-Q4_0`, 128k di contesto), se è installato: in una sola richiesta scrive la sintesi e i riassunti delle sezioni, partendo dal testo completo invece che dai riassunti dei pezzi. A queste lunghezze è 2–2,5× più veloce di Gemma 26B e resta quasi tutto in VRAM; sui testi brevi è più lento, per questo sotto la soglia resta il riassunto a blocchi. Se nella sua risposta manca qualche sezione, quelle si riassumono a blocchi con il modello della chat; se la richiesta non riesce si torna al riassunto a blocchi completo. LFM2.5 ragiona sempre, anche con il ragionamento spento: LocalAI gli lascia almeno 16.384 token di risposta (`config.ollama.minPredict`), altrimenti il ragionamento si mangia la risposta. Si cambia con `DOC_LONG_MODEL` (vuoto lo spegne) e `DOC_LONG_MIN_CHARS`. A ogni domanda vengono recuperati la sintesi, i riassunti delle sezioni pertinenti e le pagine originali più rilevanti (ricerca BM25). Se il documento è in un'altra lingua, Gemma genera prima le parole chiave in quella lingua, così le domande in italiano funzionano anche su libri in inglese.
